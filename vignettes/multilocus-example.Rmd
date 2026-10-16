@@ -1,0 +1,154 @@
+---
+title: "A multi-locus example"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{A multi-locus example}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+This example follows one exposure, X1, and one outcome, Y, in 400 synthetic
+mice. Forty selected loci each have probabilities for eight founders.
+We fit both traits at those same loci, then combine their founder effects
+using MR. Kinship accounts for relatedness in the LMMs; shared sample IDs
+let the package account for exposure/outcome sample overlap.
+
+Everything needed is installed with `qtl2mr`. No download or `qtl2`
+installation is needed. The example demonstrates the workflow, not method
+calibration or a realistic mouse-genome simulation.
+
+## 1. Load and prepare
+
+```{r prepare}
+library(qtl2mr)
+data("qtl2mr_multilocus_example", package = "qtl2mr")
+d <- qtl2mr_multilocus_example
+
+input <- as_qtl2mr_prepared_input(
+  allele_probs = d$allele_probs,
+  pheno = d$pheno,
+  covar = d$covar,
+  kinship = d$kinship,
+  marker_map = d$marker_map,
+  selected_loci = d$selected_loci,
+  exposure = d$exposure,
+  outcome = d$outcome
+)
+validate_qtl2mr_input(input, require_selected_loci = TRUE)
+```
+
+`allele_probs` is a chromosome-named list of **sample × founder × marker**
+arrays. `pheno`, `covar` and `kinship` share the same sample IDs.
+The covariates are batch and age. The kinship matrix is synthetic, not
+LOCO; for real analyses use an appropriate, harmonized kinship source.
+The package estimates hsq rather than receiving a fixed value here.
+
+The 40 loci are prespecified teaching instruments, not QTL-scan hits.
+`selected_loci` tells the package exactly where to fit X1 and Y;
+it does not need a separate set of Y hits.
+
+## 2. Run the analysis
+
+```{r analysis, results='hide'}
+result_dir <- tempfile("qtl2mr-multilocus-")
+result <- run_qtl2mr_analysis(
+  input,
+  output_dir = result_dir,
+  standardize_phenotypes = FALSE,
+  make_figures = TRUE,
+  make_html = TRUE,
+  run_loo_mr = TRUE,
+  run_instrument_sensitivity = TRUE,
+  diagnostic_bootstrap_B = 500L,
+  diagnostic_bootstrap_seed = 1L,
+  heterogeneity_method = "chisq",
+  verbose = FALSE,
+  progress = FALSE
+)
+```
+
+`standardize_phenotypes = FALSE` keeps the original units: units of Y per
+unit of X1. The package default is instead SD of Y per SD of X.
+Weighted median/mode use approximate 95% intervals: the original estimate
+plus or minus 1.96 times the SD from 500 parametric-bootstrap draws.
+Loci and weights stay fixed; each per-locus effect is sampled independently
+using its estimate and SE. These diagnostic intervals are not profile CIs
+or a coverage guarantee. The primary result retains its profile interval;
+the other two methods use Wald intervals. Heterogeneity uses an approximate
+chi-square reference.
+
+## 3. Read the estimate
+
+```{r primary}
+primary <- qtl2mr_primary_result(result)
+primary[, c("theta_reported", "reported_ci_lower", "reported_ci_upper",
+            "effect_units", "confidence_set_type")]
+```
+
+Expect an estimate around **−0.275**, with a nominal 95% profile interval
+around **[−0.525, −0.030]**. The original structural coefficient was −0.25.
+That agreement in one constructed example is not a coverage test.
+
+For comparison, the covariate-adjusted observational slope is:
+
+```{r observational}
+observational <- lm(y ~ x1 + batch + age, data = cbind(d$pheno, d$covar))
+coef(observational)["x1"]
+confint(observational, "x1")
+```
+
+Its +0.05 point estimate was deliberately targeted during data construction.
+The descriptive interval includes zero and does not account for kinship or
+that targeting. The point-estimate contrast illustrates why observational
+association and an MR estimate need not agree; it is not a significant
+opposite association or proof of valid instruments.
+
+## 4. Inspect the diagnostics
+
+```{r warnings}
+warnings <- qtl2mr_warnings(result)
+warnings[, c("warning_id", "severity")]
+```
+
+Keep warnings visible. Here the founder-block F statistics range from about
+2.07 to 5.50. They are seven-contrast statistics; neither the construction's
+F > 2 rule nor a generic warning threshold establishes reliable inference.
+`primary_reliable` describes a numerically acceptable bounded fit, not causal
+validity or calibrated coverage.
+
+The report includes all 40 leave-one-locus-out refits. Its plot shows the
+25 largest changes: each point omits one locus while retaining the other 39.
+Large changes identify influential loci, not automatically invalid ones.
+
+```{r loo-figure, echo=FALSE, out.width='100%'}
+knitr::include_graphics(file.path(result_dir, "figures", "loo_mr_top25.png"))
+```
+
+Founder residuals describe how each founder's effects depart from the fitted
+common relationship. The report's heatmap shows the first 30 selected loci;
+the CSV contains all 40. These are descriptive diagnostics, not a list of
+proven causal or pleiotropic founders.
+
+```{r founder-figure, echo=FALSE, out.width='100%'}
+knitr::include_graphics(file.path(result_dir, "figures", "founder_residual_heatmap.png"))
+```
+
+## 5. Open the full report
+
+```{r open-report, eval=FALSE}
+browseURL(file.path(result$output_dir, "report.html"))
+```
+
+The report also contains method comparisons, per-locus estimates,
+instrument-set sensitivity, overlap counts and PSD checks. Tables are in
+`data/` and figures in `figures/` under `result$output_dir`.
+To keep the report after the R session, use a new permanent `output_dir`
+when running the analysis. Keep the whole result folder, not just its HTML.
+
+For the data fields and construction notes, see
+`?qtl2mr_multilocus_example`. For your own qtl2 data, continue with
+`vignette("from-qtl2", package = "qtl2mr")`.

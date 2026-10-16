@@ -1,0 +1,31 @@
+Package: qtl2mr
+Type: Package
+Title: Founder-Aware Mendelian Randomization in Multiparent Mice
+Version: 0.3.0.9000
+Authors@R: person(given = "Xiaoyang", family = "Dai",
+    role = c("aut", "cre"), email = "xd14188@bristol.ac.uk")
+Description: Direct selected-locus founder-aware linear mixed models and
+    overlap-aware second-order Mendelian randomization for qtl2-style
+    multiparent mouse data. The primary workflow estimates founder-contrast
+    exposure and outcome effects, constructs star-space overlap covariance,
+    validates joint positive semidefiniteness, and writes audit-ready result
+    folders with diagnostics.
+License: GPL-3
+Copyright: 2026 Xiaoyang Dai
+URL: https://github.com/XDai-bris/qtl2mr-uvmr
+BugReports: https://github.com/XDai-bris/qtl2mr-uvmr/issues
+Depends:
+    R (>= 4.1.0)
+Imports:
+    stats,
+    utils,
+    tools,
+    fs
+Suggests:
+    testthat (>= 3.0.0),
+    knitr,
+    rmarkdown,
+    qtl2
+VignetteBuilder: knitr
+Config/testthat/edition: 3
+Encoding: UTF-8

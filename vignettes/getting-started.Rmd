@@ -1,0 +1,165 @@
+---
+title: "Getting started with qtl2mr"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Getting started with qtl2mr}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+`qtl2mr` estimates selected-locus, founder-aware Mendelian-randomization
+effects for qtl2-style multiparent data. In about five minutes, this walkthrough
+loads a bundled fixture, prepares two loci, runs an analysis, reads its primary
+estimate and warnings, and locates the shareable report.
+
+The fixture is synthetic teaching and integration material only: it is not
+independent method calibration, biological evidence, or application validation.
+
+## Load the example
+
+```{r load-example}
+library(qtl2mr)
+data("qtl2mr_example", package = "qtl2mr")
+```
+
+The fixture has 96 samples, eight founders, one chromosome, four markers, and
+two selected teaching loci (`m1`, `m2`). Locus choice remains upstream in a
+real analysis; `exposure_lod` is an illustrative label, not qtl2 calibration.
+
+## Prepare the input
+
+```{r prepare-input}
+prepared <- as_qtl2mr_prepared_input(
+  allele_probs = qtl2mr_example$allele_probs,
+  pheno = qtl2mr_example$pheno,
+  covar = qtl2mr_example$covar,
+  kinship = qtl2mr_example$kinship,
+  marker_map = qtl2mr_example$marker_map,
+  selected_loci = qtl2mr_example$selected_loci,
+  exposure = qtl2mr_example$exposure,
+  outcome = qtl2mr_example$outcome,
+  metadata = qtl2mr_example$metadata
+)
+stopifnot(validate_qtl2mr_input(prepared, require_selected_loci = TRUE))
+```
+
+## Run the two-locus quick start
+
+```{r quick-analysis, results='hide'}
+result_dir <- tempfile("qtl2mr-getting-started-")
+result <- run_qtl2mr_analysis(
+  prepared,
+  adapter = "prepared",
+  loci = 2,
+  output_dir = result_dir,
+  overwrite = TRUE,
+  make_figures = FALSE,
+  make_html = TRUE,
+  verbose = FALSE,
+  run_qtl2_validation = FALSE,
+  run_heteroskedasticity = FALSE,
+  diagnostic_bootstrap_B = 0L,
+  heterogeneity_method = "chisq",
+  run_loo_mr = FALSE,
+  run_instrument_sensitivity = FALSE,
+  progress = FALSE
+)
+```
+
+Those switches keep this walkthrough fast by skipping optional diagnostics;
+they are not universal analysis defaults. In particular, qtl2 parity validation
+is deliberately not requested here. The primary LMM uses qtl2mr's internal
+backend; the `qtl2` package is optional and is needed only for an explicitly
+requested parity comparison.
+
+## Read the result and warnings
+
+```{r read-accessors, results='hide'}
+primary <- qtl2mr_primary_result(result)
+warnings <- qtl2mr_warnings(result)
+```
+
+```{r prepare-result-tables, include=FALSE}
+primary_view <- data.frame(
+  estimator = primary$reported_estimator,
+  estimate = primary$theta_reported,
+  `95% CI` = sprintf("[%.3f, %.3f]", primary$reported_ci_lower, primary$reported_ci_upper),
+  numerically_bounded = primary$primary_reliable,
+  row.names = NULL,
+  check.names = FALSE
+)
+
+actionable_warnings <- warnings[warnings$shown_in_main_report %in% TRUE,
+  c("warning_id", "severity"), drop = FALSE]
+rownames(actionable_warnings) <- NULL
+```
+
+```{r read-result, echo=FALSE}
+knitr::kable(primary_view, digits = 3)
+knitr::kable(actionable_warnings)
+```
+
+The default `reported_estimator_policy = "diagnostic_only"` reports the
+Star-space second-order estimate only for a numerically acceptable, bounded
+fit. An unresolved or unbounded fit is left unreported; raw second-order and Two-step
+diagnostics remain inspectable. This fixture commonly shows
+`weak_block_first_stage`, a multi-founder heuristic rather than a
+Stock-Yogo-calibrated failure rule.
+
+The default estimate is in **SD of outcome per SD of exposure**. A bounded
+fit does not guarantee 95% coverage: weak instruments, correlated loci and
+same-sample selection remain limitations. `primary_reliable` is a legacy
+name for this numerical check, not a claim of causal validity.
+
+## Fit with a kinship matrix
+
+The bundled fixture has no kinship. This second fit creates a nonzero
+kinship from independent, synthetic background features. It demonstrates
+the LMM input path, not a reconstruction of a real mouse pedigree or a
+calibration experiment. Nothing is downloaded.
+
+```{r kinship-example, results='hide'}
+set.seed(401)
+ids <- rownames(qtl2mr_example$pheno)
+background <- matrix(rnorm(length(ids) * 24L), nrow = length(ids))
+K <- tcrossprod(background) / ncol(background)
+K <- (K / mean(diag(K)) + diag(length(ids))) / 2
+dimnames(K) <- list(ids, ids)
+prepared_lmm <- prepared
+prepared_lmm$kinship <- list("1" = K)
+prepared_lmm$hsq <- NULL  # estimate trait-specific hsq internally
+lmm_dir <- tempfile("qtl2mr-lmm-")
+lmm_result <- run_qtl2mr_analysis(
+  prepared_lmm, output_dir = lmm_dir, make_figures = FALSE,
+  verbose = FALSE, diagnostic_bootstrap_B = 0L,
+  heterogeneity_method = "none", run_loo_mr = FALSE,
+  run_instrument_sensitivity = FALSE, progress = FALSE
+)
+qtl2mr_primary_result(lmm_result)
+```
+
+## Open the useful files
+
+Open the report interactively with
+`browseURL(file.path(result_dir, "report.html"))`. The same folder contains
+`summary.md` and `data/output_manifest.csv`. The knitted vignette cleans its
+temporary directory; supply a named `output_dir` in your own analysis to keep
+the results.
+
+## Move to your own data
+
+Use founder **allele** probabilities (sample x eight founders x marker),
+numeric traits and covariates with sample IDs, an explicit selected-locus
+list, and harmonized chromosome-specific LOCO kinship. The companion
+`vignette("from-qtl2", package = "qtl2mr")` shows the upstream steps and
+explains which choices are yours. A missing selected-locus list no longer
+means "use every marker".
+
+```{r cleanup, include=FALSE}
+unlink(result_dir, recursive = TRUE, force = TRUE)
+unlink(lmm_dir, recursive = TRUE, force = TRUE)
+```

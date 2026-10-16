@@ -1,0 +1,116 @@
+---
+title: "From qtl2 inputs to founder-based MR"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{From qtl2 inputs to founder-based MR}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+This recipe is for an eight-founder, autosomal, additive analysis with
+continuous traits. It needs your own validated qtl2 `cross2` object; it does
+not download or include a study dataset. For a runnable synthetic example,
+start with `vignette("getting-started", package = "qtl2mr")`.
+
+## What each object contains
+
+| Object | Shape and meaning |
+|---|---|
+| `allele_probs` | Chromosome-named list; each array is samples x eight founders x markers. Each sample/marker sums to one across founders. |
+| `pheno` | Numeric phenotype table, sample IDs in row names, traits in columns. Missing traits may define different X and Y cohorts. |
+| `covar` | Numeric/logical additive covariates with sample IDs, or `NULL`. Encode categorical covariates deliberately. |
+| `kinship` | Sample-named symmetric matrix or chromosome-named LOCO matrix list. Supply the qtl2 kinship scale; qtl2mr internally uses `2K`. |
+| `marker_map` | qtl2 named map list, or a table with `marker`, `chr`, `pos`. Marker IDs must match the probability arrays. |
+| `selected_loci` | Marker IDs or a marker table explicitly defining the instruments. |
+| `hsq` | Optional heritabilities. With kinship and `hsq=NULL`, qtl2mr estimates them internally. They are not prerequisites from a QTL scan. |
+
+The probability array is raw input to qtl2mr's selected-locus LMM, but it
+is already an upstream estimate of founder ancestry. It is not raw sequence
+data, a scalar SNP dosage matrix, or the 36 diplotype probabilities of an
+eight-founder diploid cross.
+
+## Prepare probabilities, kinship and a scan
+
+The following template is not executed by this vignette. Replace `cross`,
+`pheno`, `covar`, and the two trait names with your objects. Use a map and
+HMM error rate appropriate to your study; the values shown are examples.
+
+```{r qtl2-upstream, eval=FALSE}
+library(qtl2)
+library(qtl2mr)
+map <- insert_pseudomarkers(cross$gmap, step = 1)
+genoprobs <- calc_genoprob(cross, map, error_prob = 0.002)
+allele_probs <- genoprob_to_alleleprob(genoprobs)
+kinship <- calc_kinship(genoprobs, type = "loco", omit_x = TRUE)
+
+# Restrict the analysis to supported autosomes before scanning/fitting.
+autosomes <- intersect(as.character(1:19), names(allele_probs))
+stopifnot(length(autosomes) > 0L)
+allele_probs <- allele_probs[autosomes]
+map <- map[autosomes]
+kinship <- kinship[autosomes]
+
+# pheno has named numeric x/y columns; covar is a named numeric matrix or NULL.
+scan <- scan1(allele_probs, pheno[, c("x", "y"), drop = FALSE],
+              kinship = kinship, addcovar = covar)
+```
+
+See the [qtl2 user guide](https://kbroman.org/qtl2/assets/vignettes/user_guide.html)
+for the upstream file format, HMM, kinship and scan options. `qtl2` is used
+for these upstream steps, not required by qtl2mr once inputs are prepared.
+
+## Decide the instruments, then fit both traits at those loci
+
+For X-to-Y MR, choose exposure instruments using an analysis plan justified
+independently of the MR result. If scanning the same samples, selection bias
+remains a limitation; a successful fit does not correct it.
+
+```{r select-and-fit, eval=FALSE}
+# Example only: choose a justified threshold for your study.
+selected_loci <- qtl2mr_select_loci_from_scan(
+  qtl_scan = scan, marker_map = map, instrument_trait = "x",
+  lod_thresh = 4, exclude_chr = "X"
+)
+stopifnot(nrow(selected_loci) > 0L)
+prepared <- as_qtl2mr_prepared_input(
+  allele_probs = allele_probs, pheno = pheno, covar = covar,
+  kinship = kinship, marker_map = map, selected_loci = selected_loci,
+  exposure = "x", outcome = "y"
+)
+validate_qtl2mr_input(prepared, require_selected_loci = TRUE)
+result <- run_qtl2mr_analysis(prepared, output_dir = "x-to-y")
+qtl2mr_primary_result(result)
+qtl2mr_warnings(result)
+```
+
+Already have a selected-locus table? Supply it directly and omit `scan1()`.
+qtl2mr estimates founder effects for **both** X and Y at every selected locus;
+Y need not have a significant QTL at an X-selected locus. It does need enough
+usable information for the Y LMM to be estimable. A union of X and Y peaks
+is a different instrument-selection rule, not something the package silently
+adds. Reverse-direction MR needs its own prespecified instrument choice.
+
+The selector picks one maximum per contiguous above-threshold region on
+each chromosome. This is not LD pruning, a permutation-derived significance
+threshold, or evidence that different selected loci are independent.
+
+## Before interpreting a result
+
+- Inspect sample alignment and per-locus scaling. Sample drops are recorded;
+  accidental mismatches should be corrected rather than accepted blindly.
+- Default effects are SD of Y per SD of X. Use
+  `standardize_phenotypes = FALSE` for original units. For a single consistent
+  scaling, raw effect = standardized effect x SD(Y)/SD(X).
+- `primary_reliable` checks a numerical property, not calibrated coverage or
+  causal validity. `confidence_set.csv` retains components that cannot be
+  represented by a finite interval. Missing reported estimates are not zero.
+- Star-space denotes the LMM-whitened residual space used for overlap
+  covariance. Second-order means uncertainty in both exposure and outcome
+  effects enters the objective, including their covariance.
+- The profile cutoff is nominal. Weak instruments, cross-locus dependence,
+  pleiotropy and same-sample selection need scientific assessment beyond
+  numerical checks. The package does not guarantee their absence.
+
+For a failed fit, retain the warning table, sample/marker counts, complete
+error text and `sessionInfo()`. Do not include restricted sample-level data
+in an issue or support request.
