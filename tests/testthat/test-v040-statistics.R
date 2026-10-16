@@ -1,6 +1,6 @@
 # All fixtures below are generated from random numbers. They contain no study
-# data. Seed 1 reproduces the former unit-scaling failure; seed 2024, draw 23
-# reproduces a missed minimum and a three-component confidence set.
+# data. Seed 1 reproduces the former unit-scaling failure. The frozen seed-2024,
+# draw-23 input reproduces a missed minimum and a three-component confidence set.
 v040_scale_block <- function() {
   qtl2mr:::qtl2mr_with_seed(1, {
     k <- 7L
@@ -25,7 +25,9 @@ v040_rescale_block <- function(b, x, y) {
   b
 }
 
-v040_multiminimum_blocks <- function() {
+# Provenance recipe only: eigenvector signs may change the realized draws across
+# BLAS/LAPACK builds. The regression uses the frozen numeric input below.
+v040_generate_multiminimum_blocks <- function() {
   qtl2mr:::qtl2mr_with_seed(2024, {
     for (draw in seq_len(23L)) {
       L <- sample(1:3, 1)
@@ -49,6 +51,10 @@ v040_multiminimum_blocks <- function() {
     }
     blocks
   })
+}
+
+v040_multiminimum_blocks <- function() {
+  dget(test_path("fixtures", "multiminimum-blocks.R"))
 }
 
 test_that("second-order estimates and confidence sets respect trait units", {
