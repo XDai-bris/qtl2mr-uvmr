@@ -108,7 +108,7 @@ test_that("prepared input validates one union kinship source", {
   input$kinship <- list("2" = K)
   expect_error(validate_qtl2mr_input(input), "missing selected chromosome")
   input$kinship <- list(exposure = K, outcome = K)
-  expect_error(validate_qtl2mr_input(input), "one union-sample kinship")
+  expect_error(validate_qtl2mr_input(input), "one kinship source")
 })
 
 test_that("prepared overlap engine matches one-sample block fit under full overlap", {

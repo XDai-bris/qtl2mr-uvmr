@@ -1053,7 +1053,8 @@ qtl2mr_empty_batch_table <- function(name) {
     first_stage_summary = c(
       "pair_id", "marker", "chr", "F_X_block", "F_Y_block",
       "partial_R2_X_block", "partial_R2_Y_block",
-      "n_x", "n_y", "df_x", "df_y", "theta", "se", "Q_min", "weight"
+      "n_x", "n_y", "df_x", "df_y", "theta", "se", "Q_min", "weight",
+      "hsq_x", "hsq_y", "hsq_status_x", "hsq_status_y"
     ),
     first_stage_filter_results = c(
       "pair_id", "exposure", "outcome", "instrument_trait", "filter_id",
@@ -1197,6 +1198,8 @@ qtl2mr_strip_locus_block <- function(block,
     founder_H = block$founder_H %||% NULL,
     hsq_x = block$hsq_x %||% block$fit_x$hsq %||% NA_real_,
     hsq_y = block$hsq_y %||% block$fit_y$hsq %||% NA_real_,
+    hsq_status_x = block$fit_x$hsq_status %||% NA_character_,
+    hsq_status_y = block$fit_y$hsq_status %||% NA_character_,
     fit_x = list(
       n = block$fit_x$n %||% block$O_xy_summary$n_x %||% NA_integer_,
       df = df_x,
@@ -1290,6 +1293,10 @@ qtl2mr_mr_block_cache_first_stage_table <- function(cache_or_blocks) {
       se = b$local_se %||% NA_real_,
       Q_min = b$local_Q_min %||% NA_real_,
       weight = b$local_weight %||% NA_real_,
+      hsq_x = as.numeric(b$hsq_x %||% NA_real_),
+      hsq_y = as.numeric(b$hsq_y %||% NA_real_),
+      hsq_status_x = b$hsq_status_x %||% NA_character_,
+      hsq_status_y = b$hsq_status_y %||% NA_character_,
       stringsAsFactors = FALSE
     )
   })
@@ -1882,7 +1889,7 @@ run_qtl2mr_batch_exact_grouped <- function(resources,
               cache_file = cache_file
             )
           }
-          warn <- qtl2mr_warning_table(pilot, adapter = "prepared")
+          warn <- qtl2mr_warning_table(pilot, sample_policy = "pair_common_complete")
           warn <- if (nrow(warn)) cbind(pair_id = pair$pair_id, warn) else warn
           list(
             main = main, methods = methods, selected = selected_out,
@@ -2161,7 +2168,7 @@ run_qtl2mr_batch <- function(resources,
           cache_file = cache_file
         )
       }
-      warn <- qtl2mr_warning_table(pilot, adapter = "prepared")
+      warn <- qtl2mr_warning_table(pilot, sample_policy = qtl2mr_batch_sample_policy(sample_rule))
       warn <- if (nrow(warn)) cbind(pair_id = pair$pair_id, warn) else warn
       list(
         main = main, methods = methods, selected = selected_out,

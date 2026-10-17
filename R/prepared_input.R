@@ -147,8 +147,10 @@ qtl2mr_allele_prob_markers <- function(allele_probs, markers_to_validate = NULL,
     for (first in seq.int(1L, max(length(checked), 1L), by = 128L)) {
       if (!length(checked)) break
       chunk <- arr[, , checked[seq.int(first, min(first + 127L, length(checked)))], drop = FALSE]
-      if (any(!is.finite(chunk)) || any(chunk < 0 | chunk > 1)) {
-        stop("allele_probs must contain finite founder allele probabilities between 0 and 1", call. = FALSE)
+      if (any(!is.finite(chunk))) stop("allele_probs must contain finite founder allele probabilities", call. = FALSE)
+      if (any(chunk < -1e-8 | chunk > 1 + 1e-8)) {
+        stop(sprintf("allele_probs must lie in [0, 1] up to floating-point error (1e-8); observed range [%.10g, %.10g]",
+          min(chunk), max(chunk)), call. = FALSE)
       }
       deviations <- abs(apply(chunk, c(1L, 3L), sum) - 1)
       sum_tolerance <- if (probability_policy == "strict") 1e-6 else dim(arr)[2L] * 5e-5
@@ -192,7 +194,9 @@ qtl2mr_record_probability_policy <- function(input, markers = NULL, warn = FALSE
   policy <- input$probability_policy %||% "strict"
   if (is.null(markers)) markers <- if (is.data.frame(input$selected_loci)) input$selected_loci$marker else input$selected_loci
   marker_info <- qtl2mr_allele_prob_markers(input$allele_probs, markers, probability_policy = policy)
-  adjustment <- attr(marker_info, "probability_normalization")
+  adjustment <- attr(marker_info, "probability_normalization") %||% data.frame(
+    chr = character(), marker = character(), n_normalized = integer(),
+    max_abs_sum_deviation = numeric(), stringsAsFactors = FALSE)
   adjustment <- adjustment[adjustment$n_normalized > 0L, , drop = FALSE]
   input$metadata$probability_normalization <- list(policy = policy,
     strict_sum_tolerance = 1e-6, rounding_sum_tolerance = dim(input$allele_probs[[1L]])[2L] * 5e-5,
@@ -249,6 +253,15 @@ validate_qtl2mr_input <- function(input,
   }
   exposure <- exposure %||% input$exposure
   outcome <- outcome %||% input$outcome
+  for (role in c("exposure", "outcome")) {
+    trait <- if (role == "exposure") exposure else outcome
+    if (!is.null(trait) && (!is.character(trait) || length(trait) != 1L || is.na(trait) || !nzchar(trait))) {
+      stop(role, " must be one non-empty trait name", call. = FALSE)
+    }
+  }
+  if (!is.null(exposure) && !is.null(outcome) && identical(exposure, outcome)) {
+    stop("exposure and outcome must be different traits; both are '", exposure, "'", call. = FALSE)
+  }
   needed <- c("allele_probs", "pheno", "marker_map")
   miss <- setdiff(needed, names(input))
   if (length(miss)) stop("prepared input is missing: ", paste(miss, collapse = ", "), call. = FALSE)
@@ -305,6 +318,9 @@ validate_qtl2mr_input <- function(input,
   } else {
     if (is.data.frame(selected) && !"marker" %in% names(selected)) stop("selected_loci must contain a marker column", call. = FALSE)
     selected_markers <- if (is.data.frame(selected)) as.character(selected$marker) else as.character(selected)
+    if (!length(selected_markers)) {
+      stop("selected_loci contains no loci; supply at least one marker, or use selected_loci = NULL with use_all_loci = TRUE", call. = FALSE)
+    }
     if (anyNA(selected_markers) || any(!nzchar(selected_markers))) stop("selected_loci contains missing or blank markers", call. = FALSE)
     dup_m <- unique(selected_markers[duplicated(selected_markers)])
     if (length(dup_m)) stop("selected_loci contains duplicate markers: ", paste(dup_m, collapse = ", "), call. = FALSE)
@@ -426,10 +442,10 @@ qtl2mr_prepared_kinship_list <- function(kinship) {
   if (is.matrix(kinship) || is.data.frame(kinship)) return(list(`1` = as.matrix(kinship)))
   if (!is.list(kinship)) stop("kinship must be a matrix or chromosome-named list of matrices", call. = FALSE)
   if (any(names(kinship) %in% c("exposure", "outcome"))) {
-    stop("v0.1 prepared inputs require one union-sample kinship source, not separate exposure/outcome kinships", call. = FALSE)
+    stop("prepared inputs use one kinship source for exposure and outcome; separate exposure/outcome kinships are not supported", call. = FALSE)
   }
   if (is.null(names(kinship)) || any(!nzchar(names(kinship)))) {
-    stop("kinship lists must be named by chromosome for v0.1 prepared inputs", call. = FALSE)
+    stop("kinship lists must be named by chromosome (for example, qtl2::calc_kinship(type = \"loco\"))", call. = FALSE)
   }
   if (!all(vapply(kinship, function(x) is.matrix(x) || is.data.frame(x), logical(1)))) {
     stop("each kinship list element must be a matrix", call. = FALSE)
@@ -611,6 +627,40 @@ qtl2mr_reported_estimate <- function(fit,
     source = "none",
     policy = policy
   )
+}
+
+qtl2mr_hsq_table <- function(blocks, exposure, outcome) {
+  rows <- lapply(blocks, function(block) {
+    do.call(rbind, lapply(c("exposure", "outcome"), function(role) {
+      fit <- if (role == "exposure") block$fit_x else block$fit_y
+      status <- fit$hsq_status %||% NA_character_
+      data.frame(
+        role = role,
+        trait = if (role == "exposure") exposure else outcome,
+        chr = as.character(block$chr %||% NA_character_),
+        hsq = as.numeric(fit$hsq %||% NA_real_),
+        hsq_status = if (identical(status, "fixed")) "user_supplied" else status,
+        hsq_source = if (identical(status, "not_applicable")) "no_kinship_ols" else
+          if (identical(status, "fixed")) "user_supplied" else "reml_null_model",
+        n_samples = as.integer(fit$n %||% NA_integer_),
+        marker = block$marker %||% NA_character_,
+        stringsAsFactors = FALSE
+      )
+    }))
+  })
+  d <- do.call(rbind, rows)
+  if (is.null(d) || !nrow(d)) {
+    return(data.frame(role = character(), trait = character(), chr = character(), hsq = numeric(),
+      hsq_status = character(), hsq_source = character(), n_samples = integer(),
+      n_loci = integer(), markers = character(), stringsAsFactors = FALSE))
+  }
+  key <- paste(d$role, d$chr, format(d$hsq, digits = 15), d$hsq_status, d$n_samples, sep = "\r")
+  out <- d[!duplicated(key), setdiff(names(d), "marker"), drop = FALSE]
+  out_key <- key[!duplicated(key)]
+  out$n_loci <- as.integer(vapply(out_key, function(k) sum(key == k), numeric(1)))
+  out$markers <- vapply(out_key, function(k) paste(d$marker[key == k], collapse = ";"), character(1))
+  rownames(out) <- NULL
+  out
 }
 
 run_prepared_qtl2mr <- function(input,
@@ -818,11 +868,12 @@ run_prepared_qtl2mr <- function(input,
                  stringsAsFactors = FALSE)
     }))
   }))
-  if (any(sample_alignment$n_incomplete_covar > 0L)) {
-    counts <- tapply(sample_alignment$n_incomplete_covar, sample_alignment$role, max)
-    warning("Non-finite or missing covariates excluded samples from fitting (maximum per locus: ",
+  covar_excluded <- sample_alignment$n_incomplete_covar + sample_alignment$n_missing_covar_id
+  if (any(covar_excluded > 0L)) {
+    counts <- tapply(covar_excluded, sample_alignment$role, max)
+    warning("Missing covariate rows or non-finite covariate values excluded samples from fitting (maximum per locus: ",
       paste(paste0(names(counts), "=", counts), collapse = ", "),
-      "); inspect sample_alignment$n_incomplete_covar and the fitted sample sets.", call. = FALSE)
+      "); inspect sample_alignment (n_missing_covar_id, n_incomplete_covar) and the fitted sample sets.", call. = FALSE)
   }
   sd_x <- phenotype_scaling$sd[phenotype_scaling$role == "exposure"]
   sd_y <- phenotype_scaling$sd[phenotype_scaling$role == "outcome"]
@@ -830,7 +881,6 @@ run_prepared_qtl2mr <- function(input,
   raw_conversion_available <- !isTRUE(standardize_phenotypes) || (common_sd(sd_x) && common_sd(sd_y))
   raw_multiplier <- if (!isTRUE(standardize_phenotypes)) 1 else if (raw_conversion_available) sd_y[[1L]] / sd_x[[1L]] else NA_real_
   summary <- data.frame(
-    sample_policy = "role_specific_complete",
     exposure = exposure,
     outcome = outcome,
     lmm_backend = backend_provenance$backend,
@@ -935,6 +985,8 @@ run_prepared_qtl2mr <- function(input,
     summary$n_loci_independent_samples <- sum(overlap_summary$independent_samples, na.rm = TRUE)
     summary$n_loci_complete_overlap <- sum(overlap_summary$complete_overlap, na.rm = TRUE)
   }
+  summary$sample_policy <- "role_specific_complete"
+  hsq_table <- qtl2mr_hsq_table(blocks, exposure = exposure, outcome = outcome)
   founder_residuals <- do.call(rbind, lapply(blocks, founder_residual_scores, theta = fit$theta))
   founder_ratios <- do.call(rbind, lapply(blocks, founder_coordinate_ratios, theta_ref = fit$theta))
   out <- list(
@@ -952,7 +1004,7 @@ run_prepared_qtl2mr <- function(input,
     phenotype_scaling = phenotype_scaling,
     founder_residual_scores_global = founder_residuals,
     founder_coordinate_ratios = founder_ratios,
-    hsq_cache = list(),
+    hsq = hsq_table,
     backend_provenance = backend_provenance,
     sample_ids = unique(c(
       unlist(lapply(blocks, function(b) b$fit_x$sample_ids), use.names = FALSE),

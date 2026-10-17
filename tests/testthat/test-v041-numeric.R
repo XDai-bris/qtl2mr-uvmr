@@ -131,10 +131,21 @@ test_that("a disclosed resource rounding policy is retained without per-pair war
 })
 
 test_that("rounding allowance never repairs invalid probabilities or dimensions", {
-  for (bad in c(-1e-12, NaN, Inf, 1 + 1e-12)) {
+  for (bad in c(NaN, Inf)) {
     raw <- v041_numeric_input()
     raw$allele_probs[[1]][1, 1, 1] <- bad
     expect_error(do.call(as_qtl2mr_prepared_input, raw), "finite founder allele probabilities")
+  }
+  for (bad in c(-1e-6, 1 + 1e-6)) {
+    raw <- v041_numeric_input()
+    raw$allele_probs[[1]][1, 1, 1] <- bad
+    expect_error(do.call(as_qtl2mr_prepared_input, raw), "lie in \\[0, 1\\].*observed range")
+  }
+  # Floating-point overshoot within 1e-8 of the bounds is accepted, as in v0.4.0.
+  for (row in list(c(1 + 1e-12, rep(0, 7L)), c(-1e-12, 1 + 1e-12, rep(0, 6L)))) {
+    raw <- v041_numeric_input()
+    raw$allele_probs[[1]][1, , 1] <- row
+    expect_s3_class(do.call(as_qtl2mr_prepared_input, raw), "qtl2mr_prepared_input")
   }
   raw <- v041_numeric_input()
   raw$allele_probs[[1]][1, , 1] <- raw$allele_probs[[1]][1, , 1] * 1.001
@@ -180,7 +191,7 @@ test_that("single prepared covariate exclusions are warned without changing samp
   raw$covar$age[2] <- Inf
   input <- do.call(as_qtl2mr_prepared_input, raw)
   expect_warning(fit <- qtl2mr:::run_prepared_qtl2mr(input, "x", "y", verbose = FALSE,
-    diagnostic_bootstrap_B = 0L, heterogeneity_method = "none"), "Non-finite or missing covariates")
+    diagnostic_bootstrap_B = 0L, heterogeneity_method = "none"), "Missing covariate rows or non-finite covariate values")
   expect_identical(fit$summary$sample_policy, "role_specific_complete")
   expect_true(all(fit$sample_alignment$n_incomplete_covar == 1L))
   expect_false(rownames(raw$covar)[2] %in% fit$locus_blocks[[1]]$fit_x$sample_ids)

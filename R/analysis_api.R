@@ -777,27 +777,26 @@ qtl2mr_build_output_manifest <- function(output_dir,
 qtl2mr_warning_catalog <- function() {
   catalog <- data.frame(
     warning_id = c(
-      "joint_complete_cases", "prepared_overlap_engine", "raw_space_psd_invalid",
+      "prepared_overlap_engine", "raw_space_psd_invalid",
       "star_space_psd_invalid", "weak_block_first_stage", "primary_so_unbounded",
       "xprs_heteroskedasticity",
       "qtl2_validation_fail", "qtl2_validation_unavailable", "xprs_diagnostic_error",
       "loo_mr_error", "instrument_sensitivity_error", "dropped_nonestimable_loci"
     ),
     default_severity = c(
-      "method_limit", "info", "technical_qc",
+      "info", "technical_qc",
       "warning", "warning", "warning", "warning",
       "error", "info", "warning",
       "warning", "warning", "warning"
     ),
     shown_in_main_report = c(
-      TRUE, FALSE, FALSE,
+      FALSE, FALSE,
       TRUE, TRUE, TRUE, TRUE,
       TRUE, FALSE, TRUE,
       TRUE, TRUE, TRUE
     ),
     consequence = c(
-      "The estimate is based on samples complete for both exposure and outcome.",
-      "The prepared adapter uses role-specific exposure/outcome samples and derives overlap from harmonized sample IDs.",
+      "Exposure and outcome use their own complete samples; overlap is derived from harmonized sample IDs.",
       "Technical QC: raw-space candidate covariance is not used by the public estimator.",
       "The selected star-space covariance block may be numerically invalid and should be investigated before interpretation.",
       "Founder-block denominator strength may be limited; this is a heuristic warning for multi-founder blocks.",
@@ -811,7 +810,6 @@ qtl2mr_warning_catalog <- function() {
       "Some selected loci were not estimable in the current sample set because a founder contrast was rank-deficient."
     ),
     recommended_action = c(
-      "Use adapter = 'prepared' for the generalized overlap-aware public workflow.",
       "Check data/overlap_qc.csv and logs/run.log to confirm overlap rates.",
       "Technical QC: raw-space candidate invalid; not used by primary estimator.",
       "Inspect PSD diagnostics and do not use invalid star-space blocks silently.",
@@ -828,17 +826,24 @@ qtl2mr_warning_catalog <- function() {
     stringsAsFactors = FALSE
   )
   rbind(catalog, data.frame(
-    warning_id = c("incomplete_covariates", "probability_rounding_normalized", "diagnostic_unavailable"),
-    default_severity = rep("warning", 3L),
-    shown_in_main_report = rep(TRUE, 3L),
+    warning_id = c("incomplete_covariates", "probability_rounding_normalized", "diagnostic_unavailable",
+      "hsq_boundary", "no_kinship_ols", "batch_shared_samples"),
+    default_severity = c(rep("warning", 3L), rep("info", 3L)),
+    shown_in_main_report = c(rep(TRUE, 5L), FALSE),
     consequence = c(
-      "Samples with non-finite additive covariates were excluded before fitting.",
+      "Samples without a covariate row or with non-finite additive covariates were excluded before fitting.",
       "Small founder-probability sum errors were normalized in an analysis-local copy.",
-      "One or more per-locus diagnostic estimates could not be computed."),
+      "One or more per-locus diagnostic estimates could not be computed.",
+      "A null-model heritability estimate lies on the boundary of [0, 1]; at hsq = 0 the kinship term has no effect for that trait and chromosome.",
+      "No kinship was supplied, so founder effects were fitted by ordinary least squares without a polygenic random effect.",
+      "Exposure and outcome were fitted on the same batch sample set, so sample overlap is complete by construction."),
     recommended_action = c(
       "Inspect data/sample_alignment.csv (single analysis) or batch_sample_exclusions.csv (batch); exclusion causes can overlap.",
       "Inspect data/probability_normalization.csv and input precision; use probability_policy='strict' to reject rounding adjustments.",
-      "Inspect diagnostic_status and diagnostic_note in per_locus_results.csv; unavailable diagnostics are not zero estimates."),
+      "Inspect diagnostic_status and diagnostic_note in per_locus_results.csv; unavailable diagnostics are not zero estimates.",
+      "Inspect data/hsq.csv. A boundary estimate is not an error; check the kinship input and sample size, and supply hsq only with external justification.",
+      "For related multiparent samples, supply a chromosome-named LOCO kinship list such as qtl2::calc_kinship(probs, type = 'loco').",
+      "Review the batch sample policy and batch_sample_exclusions.csv."),
     stringsAsFactors = FALSE
   ))
 }
@@ -1104,7 +1109,7 @@ qtl2mr_warning_table <- function(result,
                                  xprs = NULL,
                                  qtl2_validation = NULL,
                                  qtl2_validation_status = NULL,
-                                 adapter = NULL) {
+                                 sample_policy = NULL) {
   s <- result$summary
   rows <- list()
   add <- function(id, severity, message) {
@@ -1115,16 +1120,25 @@ qtl2mr_warning_table <- function(result,
       stringsAsFactors = FALSE
     )
   }
-  if (identical(adapter, "prepared")) {
-    add("prepared_overlap_engine", "info", "The prepared adapter uses role-specific exposure/outcome samples and derives overlap from harmonized sample IDs.")
+  if (is.null(sample_policy) || identical(sample_policy, "role_specific_complete")) {
+    add("prepared_overlap_engine", "info", "Exposure and outcome use their own complete samples; overlap is derived from harmonized sample IDs.")
   } else {
-    add("joint_complete_cases", "method_limit", "The analysis uses joint complete cases for exposure and outcome.")
+    add("batch_shared_samples", "info", sprintf("Exposure and outcome were fitted on the same %s sample set.", sample_policy))
   }
   alignment <- result$sample_alignment %||% data.frame()
-  if (nrow(alignment) && "n_incomplete_covar" %in% names(alignment) &&
-      any(alignment$n_incomplete_covar > 0L, na.rm = TRUE)) {
+  covar_counts <- c(alignment$n_incomplete_covar %||% integer(), alignment$n_missing_covar_id %||% integer())
+  if (nrow(alignment) && any(covar_counts > 0L, na.rm = TRUE)) {
     add("incomplete_covariates", "warning",
-      "Non-finite covariate rows were excluded. Per-locus, per-role counts and sample IDs are recorded in data/sample_alignment.csv; counts across loci are not additive.")
+      "Samples without a covariate row or with non-finite covariate values were excluded. Per-locus, per-role counts and sample IDs are recorded in data/sample_alignment.csv; counts across loci are not additive.")
+  }
+  hsq <- result[["hsq"]]
+  if (is.data.frame(hsq) && nrow(hsq) && all(c("hsq_status", "hsq_source") %in% names(hsq))) {
+    boundary <- hsq[hsq$hsq_status %in% c("boundary_zero", "boundary_one"), , drop = FALSE]
+    if (nrow(boundary)) add("hsq_boundary", "info", sprintf(
+      "Null-model hsq is on the boundary for %s.",
+      paste(sprintf("%s chr %s (hsq = %g)", boundary$role, boundary$chr, boundary$hsq), collapse = "; ")))
+    if (any(hsq$hsq_source == "no_kinship_ols")) add("no_kinship_ols", "info",
+      "No kinship was supplied; founder effects were fitted by ordinary least squares.")
   }
   normalization <- result$prepared_metadata$probability_normalization$adjustments %||% data.frame()
   if (is.data.frame(normalization) && nrow(normalization)) {
@@ -1363,6 +1377,7 @@ summarise_qtl2mr_result <- function(result) {
     paste0("Numerically bounded SO fit: ", as.character(reliable), " (not a coverage or causal-validity guarantee)"),
     paste0("Effect units: ", qtl2mr_summary_scalar(s, "effect_units", "not recorded")),
     paste0("Sample policy: ", qtl2mr_summary_scalar(s, "sample_policy", "not recorded")),
+    paste0("Null-model hsq: ", qtl2mr_hsq_line(result$pilot[["hsq"]])),
     paste0("Q statistic: ", qtl2mr_fmt_num(qtl2mr_summary_scalar(s, "Q"), 6),
       "; Q p-value: ", qtl2mr_q_reported_label(s, digits = 6),
       "; Q reference: ", qtl2mr_q_reference_label(s)),
@@ -1375,6 +1390,22 @@ summarise_qtl2mr_result <- function(result) {
     lines <- append(lines, paste0("Raw star-space diagnostic theta: ", qtl2mr_fmt_num(so_theta, 6), " (diagnostic only)"), after = 10L)
   }
   lines
+}
+
+qtl2mr_hsq_line <- function(hsq) {
+  if (!is.data.frame(hsq) || !nrow(hsq) || !"hsq_source" %in% names(hsq)) return("not recorded")
+  if (all(hsq$hsq_source == "no_kinship_ols")) return("not used (no kinship; ordinary least squares)")
+  parts <- vapply(c("exposure", "outcome"), function(role) {
+    d <- hsq[hsq$role == role, , drop = FALSE]
+    if (!nrow(d)) return(NA_character_)
+    r <- range(d$hsq, na.rm = TRUE)
+    value <- if (isTRUE(all.equal(r[[1L]], r[[2L]]))) qtl2mr_fmt_num(r[[1L]], 3) else
+      paste0(qtl2mr_fmt_num(r[[1L]], 3), "-", qtl2mr_fmt_num(r[[2L]], 3))
+    n_boundary <- sum(d$hsq_status %in% c("boundary_zero", "boundary_one"))
+    paste0(role, " ", value, if (n_boundary) paste0(" (", n_boundary, " on boundary)") else "")
+  }, character(1))
+  sources <- unique(hsq$hsq_source)
+  paste0(paste(parts[!is.na(parts)], collapse = "; "), " [", paste(sources, collapse = ", "), "; data/hsq.csv]")
 }
 
 print.qtl2mr_analysis_result <- function(x, ...) {
@@ -1524,6 +1555,11 @@ write_qtl2mr_html_report <- function(result, file) {
         qtl2mr_html_escape(path), qtl2mr_html_escape(pngs$label[[i]]), qtl2mr_html_escape(pngs$notes[[i]])))
     }
   }
+  hsq_all <- result$pilot[["hsq"]]
+  hsq_view <- if (is.data.frame(hsq_all) && nrow(hsq_all) && "hsq_source" %in% names(hsq_all)) do.call(rbind, lapply(split(hsq_all, paste(hsq_all$role, hsq_all$hsq_source)), function(d) data.frame(
+    role = d$role[[1L]], trait = d$trait[[1L]], source = d$hsq_source[[1L]], n_chr = length(unique(d$chr)),
+    hsq_min = min(d$hsq), hsq_median = stats::median(d$hsq), hsq_max = max(d$hsq),
+    n_boundary = sum(d$hsq_status %in% c("boundary_zero", "boundary_one")), stringsAsFactors = FALSE))) else data.frame()
   ci_type <- as.character(reported$ci_type %||% "")
   if (is.na(ci_type)) ci_type <- ""
   reliable <- qtl2mr_summary_scalar(s, "primary_reliable", NA)
@@ -1562,6 +1598,9 @@ write_qtl2mr_html_report <- function(result, file) {
     "<h2>QC and actionable warnings</h2>",
     sprintf("<p class=\"section-note\"><strong>qtl2 validation:</strong> %s%s. This checks direct founder-LMM beta/SE against <code>qtl2::scan1coef</code> only when qtl2 context is available.</p>", qtl2mr_html_escape(qtl_status), if (nzchar(qtl_reason)) paste0(": ", qtl2mr_html_escape(qtl_reason)) else ""),
     if (nrow(actionable)) c("<p class=\"section-note\">F&lt;10 is a heuristic for multi-founder block strength, not a calibrated Stock-Yogo cutoff.</p>", qtl2mr_html_table(actionable)) else "<p>No actionable warnings were recorded.</p>",
+    if (nrow(hsq_view)) c("<h3>Polygenic background (null-model heritability)</h3>",
+      "<p class=\"section-note\">hsq sets the kinship-based working covariance of each founder LMM. It is estimated by REML under a null model with the intercept and covariates (no locus), using the kinship for that chromosome, and is then treated as fixed. Per-chromosome values are in <code>data/hsq.csv</code>.</p>",
+      qtl2mr_html_table(hsq_view, digits = 4)) else "",
     if (nrow(method_table) || nrow(loo) || nrow(sensitivity)) c(
       "<h2>Methods and available sensitivities</h2>",
       if (nrow(method_table)) qtl2mr_html_table(method_table, digits = 5) else "",
@@ -1682,8 +1721,7 @@ write_qtl2mr_results <- function(result,
     result$pilot,
     xprs = result$xprs,
     qtl2_validation = result$qtl2_validation,
-    qtl2_validation_status = qtl2_validation_status,
-    adapter = result$adapter
+    qtl2_validation_status = qtl2_validation_status
   )
   append_warning <- function(id, severity, message) {
     qtl2mr_enrich_warnings(rbind(
@@ -1729,7 +1767,8 @@ write_qtl2mr_results <- function(result,
     input_alignment = file.path(data_dir, "input_alignment.csv"),
     sample_alignment = file.path(data_dir, "sample_alignment.csv"),
     phenotype_scaling = file.path(data_dir, "phenotype_scaling.csv"),
-    probability_normalization = file.path(data_dir, "probability_normalization.csv"))
+    probability_normalization = file.path(data_dir, "probability_normalization.csv"),
+    hsq = file.path(data_dir, "hsq.csv"))
   confidence_set <- result$pilot$fit$confidence_set %||% data.frame(lower = numeric(), upper = numeric())
   confidence_set$confidence_set_type <- rep(result$pilot$fit$confidence_set_type %||% "not_recorded", nrow(confidence_set))
   confidence_set$numerical_ok <- rep(isTRUE(result$pilot$fit$numerical_ok), nrow(confidence_set))
@@ -1738,6 +1777,8 @@ write_qtl2mr_results <- function(result,
   utils::write.csv(result$pilot$input_alignment %||% data.frame(), data_paths[["input_alignment"]], row.names = FALSE)
   utils::write.csv(result$pilot$sample_alignment %||% data.frame(), data_paths[["sample_alignment"]], row.names = FALSE)
   utils::write.csv(result$pilot$phenotype_scaling %||% data.frame(), data_paths[["phenotype_scaling"]], row.names = FALSE)
+  utils::write.csv(if (is.data.frame(result$pilot[["hsq"]])) result$pilot[["hsq"]] else data.frame(),
+    data_paths[["hsq"]], row.names = FALSE)
   utils::write.csv(result$pilot$prepared_metadata$probability_normalization$adjustments %||% data.frame(),
     data_paths[["probability_normalization"]], row.names = FALSE)
   utils::write.csv(result$pilot$summary, data_paths[["main_result"]], row.names = FALSE)

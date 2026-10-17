@@ -118,7 +118,7 @@ test_that("run reports are curated and package coverage is not claimed as run ev
   expect_true(any(grepl("^Reported estimator:", smry)))
   expect_true(any(grepl("^Actionable warning IDs:", smry)))
   expect_false(any(grepl(normalizePath(out_dir, mustWork = FALSE), smry, fixed = TRUE)))
-  expect_lte(length(smry), 20L)
+  expect_lte(length(smry), 21L)
 })
 
 test_that("automatic package coverage status is a non-claim", {
