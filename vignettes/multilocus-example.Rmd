@@ -21,6 +21,17 @@ Everything needed is installed with `qtl2mr`. No download or `qtl2`
 installation is needed. The example demonstrates the workflow, not method
 calibration or a realistic mouse-genome simulation.
 
+### Provenance boundary
+
+The installed fixture is sufficient to rerun this analysis, not to regenerate
+the upstream simulation. The public `data-raw/make_qtl2mr_multilocus_example.R`
+is an extractor: it needs a separately frozen synthetic input, identified by
+hash, that is not distributed here. Its recorded master seed alone is not a
+generator. Omitted traits and background loci contributed to the stored
+outcome and cannot be recovered from this subset. Full from-seed regeneration
+would require a separately reviewed, self-contained public generator and its
+complete construction parameters; none is claimed or substituted here.
+
 ## 1. Load and prepare
 
 ```{r prepare}
@@ -92,6 +103,9 @@ primary[, c("theta_reported", "reported_ci_lower", "reported_ci_upper",
 Expect an estimate around **−0.275**, with a nominal 95% profile interval
 around **[−0.525, −0.030]**. The original structural coefficient was −0.25.
 That agreement in one constructed example is not a coverage test.
+Both numbers are in original units because this run explicitly disables
+standardization. They should not be compared directly with a default SD-unit
+run; for one common scaling, standardized truth = raw truth x SD(X1)/SD(Y).
 
 For comparison, the covariate-adjusted observational slope is:
 

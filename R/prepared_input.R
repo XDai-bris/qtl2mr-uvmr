@@ -11,7 +11,10 @@ as_qtl2mr_prepared_input <- function(allele_probs,
                                      hsq = NULL,
                                      sample_ids = NULL,
                                      metadata = list(),
-                                     use_all_loci = FALSE) {
+                                     use_all_loci = FALSE,
+                                     probability_policy = c("normalize_rounding", "strict")) {
+  probability_policy <- match.arg(probability_policy)
+  if (!is.null(metadata) && !is.list(metadata)) stop("metadata must be a list", call. = FALSE)
   if (!is.logical(use_all_loci) || length(use_all_loci) != 1L || is.na(use_all_loci)) {
     stop("use_all_loci must be TRUE or FALSE", call. = FALSE)
   }
@@ -30,10 +33,12 @@ as_qtl2mr_prepared_input <- function(allele_probs,
     hsq = hsq,
     sample_ids = sample_ids,
     metadata = metadata %||% list(),
+    probability_policy = probability_policy,
     adapter = "prepared"
   )
   class(input) <- c("qtl2mr_prepared_input", "list")
   validate_qtl2mr_input(input)
+  input <- qtl2mr_record_probability_policy(input, warn = TRUE)
   input$sample_alignment <- qtl2mr_input_alignment(input)
   qtl2mr_warn_alignment(input$sample_alignment)
   input
@@ -123,11 +128,14 @@ qtl2mr_marker_map_table <- function(marker_map) {
   stop("marker_map must be a data frame, qtl2-style list, or named vector", call. = FALSE)
 }
 
-qtl2mr_allele_prob_markers <- function(allele_probs, markers_to_validate = NULL) {
+qtl2mr_allele_prob_markers <- function(allele_probs, markers_to_validate = NULL,
+                                     probability_policy = c("strict", "normalize_rounding")) {
+  probability_policy <- match.arg(probability_policy)
   if (!is.list(allele_probs) || !length(allele_probs)) stop("allele_probs must be a non-empty qtl2-style list of 3D arrays", call. = FALSE)
   qtl2mr_validate_ids(names(allele_probs), "allele_probs chromosome names")
   chr_names <- names(allele_probs) %||% as.character(seq_along(allele_probs))
   rows <- list()
+  adjustments <- list()
   for (i in seq_along(allele_probs)) {
     arr <- allele_probs[[i]]
     if (length(dim(arr)) != 3L) stop("Each allele_probs element must be a sample x founder x marker array", call. = FALSE)
@@ -139,12 +147,19 @@ qtl2mr_allele_prob_markers <- function(allele_probs, markers_to_validate = NULL)
     for (first in seq.int(1L, max(length(checked), 1L), by = 128L)) {
       if (!length(checked)) break
       chunk <- arr[, , checked[seq.int(first, min(first + 127L, length(checked)))], drop = FALSE]
-      if (any(!is.finite(chunk)) || any(chunk < -1e-8 | chunk > 1 + 1e-8)) {
+      if (any(!is.finite(chunk)) || any(chunk < 0 | chunk > 1)) {
         stop("allele_probs must contain finite founder allele probabilities between 0 and 1", call. = FALSE)
       }
-      if (any(abs(apply(chunk, c(1L, 3L), sum) - 1) > 1e-6)) {
-        stop("allele_probs must sum to 1 over founders for every sample and marker; genotype probabilities or allele dosages require conversion", call. = FALSE)
+      deviations <- abs(apply(chunk, c(1L, 3L), sum) - 1)
+      sum_tolerance <- if (probability_policy == "strict") 1e-6 else dim(arr)[2L] * 5e-5
+      if (any(deviations > sum_tolerance + 16 * .Machine$double.eps)) {
+        stop(sprintf(paste0("allele_probs must sum to 1 over founders: maximum observed |sum - 1|=%.8g; ",
+          "allowed tolerance=%.8g under probability_policy='%s'. Check the probability export, rounding precision, and normalization; this exceeds the selected policy's rounding allowance."),
+          max(deviations), sum_tolerance, probability_policy), call. = FALSE)
       }
+      adjustments[[length(adjustments) + 1L]] <- data.frame(chr = chr_names[[i]],
+        marker = dimnames(chunk)[[3L]], n_normalized = colSums(deviations > 1e-6 + 16 * .Machine$double.eps),
+        max_abs_sum_deviation = apply(deviations, 2L, max), stringsAsFactors = FALSE)
     }
     if (i > 1L && !identical(dn[[2L]], dimnames(allele_probs[[1L]])[[2L]])) {
       stop("allele_probs founder names and order must match across chromosomes", call. = FALSE)
@@ -154,7 +169,60 @@ qtl2mr_allele_prob_markers <- function(allele_probs, markers_to_validate = NULL)
   }
   out <- do.call(rbind, rows)
   qtl2mr_validate_ids(out$marker, "allele_probs marker names")
+  attr(out, "probability_normalization") <- do.call(rbind, adjustments)
   out
+}
+
+qtl2mr_probability_policy_disclosed <- function(previous, current) {
+  if (!is.list(previous) || !identical(previous$policy, current$policy) ||
+      !identical(previous$strict_sum_tolerance, current$strict_sum_tolerance) ||
+      !identical(previous$rounding_sum_tolerance, current$rounding_sum_tolerance)) return(FALSE)
+  old <- previous$adjustments
+  now <- current$adjustments
+  if (!is.data.frame(old) || !all(names(now) %in% names(old))) return(FALSE)
+  selected <- match(now$marker, old$marker)
+  if (anyNA(selected)) return(FALSE)
+  old <- old[selected, names(now), drop = FALSE]
+  rownames(old) <- rownames(now) <- NULL
+  identical(old, now)
+}
+
+qtl2mr_record_probability_policy <- function(input, markers = NULL, warn = FALSE) {
+  previous <- input$metadata$probability_normalization
+  policy <- input$probability_policy %||% "strict"
+  if (is.null(markers)) markers <- if (is.data.frame(input$selected_loci)) input$selected_loci$marker else input$selected_loci
+  marker_info <- qtl2mr_allele_prob_markers(input$allele_probs, markers, probability_policy = policy)
+  adjustment <- attr(marker_info, "probability_normalization")
+  adjustment <- adjustment[adjustment$n_normalized > 0L, , drop = FALSE]
+  input$metadata$probability_normalization <- list(policy = policy,
+    strict_sum_tolerance = 1e-6, rounding_sum_tolerance = dim(input$allele_probs[[1L]])[2L] * 5e-5,
+    original_arrays_preserved = TRUE, adjustments = adjustment)
+  if (isTRUE(warn) && nrow(adjustment) &&
+      !qtl2mr_probability_policy_disclosed(previous, input$metadata$probability_normalization)) warning(
+    "Founder probability rounding: ", sum(adjustment$n_normalized),
+    " sample-marker vectors will be normalized for analysis under probability_policy='normalize_rounding'; original arrays are retained. Inspect metadata$probability_normalization.",
+    call. = FALSE)
+  input
+}
+
+qtl2mr_prepared_probability_copy <- function(input, markers) {
+  previous <- input$metadata$probability_normalization
+  input <- qtl2mr_record_probability_policy(input, markers)
+  record <- input$metadata$probability_normalization
+  if (nrow(record$adjustments) && !qtl2mr_probability_policy_disclosed(previous, record)) {
+    warning("Founder probability rounding normalized for analysis; inspect prepared_metadata$probability_normalization. Original input arrays are unchanged.", call. = FALSE)
+  }
+  for (chr in unique(record$adjustments$chr)) {
+    arr <- input$allele_probs[[chr]]
+    for (marker in record$adjustments$marker[record$adjustments$chr == chr]) {
+      values <- arr[, , marker, drop = FALSE]
+      sums <- apply(values, 1L, sum)
+      adjust <- abs(sums - 1) > record$strict_sum_tolerance + 16 * .Machine$double.eps
+      arr[adjust, , marker] <- sweep(matrix(values[adjust, , , drop = FALSE], nrow = sum(adjust)), 1L, sums[adjust], "/")
+    }
+    input$allele_probs[[chr]] <- arr
+  }
+  input
 }
 
 qtl2mr_prepared_sample_ids <- function(input) {
@@ -186,7 +254,8 @@ validate_qtl2mr_input <- function(input,
   if (length(miss)) stop("prepared input is missing: ", paste(miss, collapse = ", "), call. = FALSE)
   marker_tab <- qtl2mr_marker_map_table(input$marker_map)
   checked_markers <- if (is.data.frame(input$selected_loci)) input$selected_loci$marker else input$selected_loci
-  gp_markers <- qtl2mr_allele_prob_markers(input$allele_probs, markers_to_validate = checked_markers)
+  gp_markers <- qtl2mr_allele_prob_markers(input$allele_probs, markers_to_validate = checked_markers,
+    probability_policy = input$probability_policy %||% "strict")
   missing_map <- setdiff(gp_markers$marker, marker_tab$marker)
   if (length(missing_map)) stop("marker_map is missing allele probability markers: ", paste(utils::head(missing_map, 5L), collapse = ", "), call. = FALSE)
   founder_n <- unique(vapply(input$allele_probs, function(x) dim(x)[2L], integer(1)))
@@ -195,6 +264,7 @@ validate_qtl2mr_input <- function(input,
   }
   ids <- qtl2mr_prepared_sample_ids(input)
   pheno <- as.data.frame(input$pheno)
+  qtl2mr_validate_prepared_hsq(input, unique(marker_tab$chr), names(pheno))
   qtl2mr_validate_ids(rownames(input$pheno), "pheno row names")
   if (is.null(rownames(pheno)) || any(!nzchar(rownames(pheno)))) {
     stop("pheno must have row names matching sample IDs", call. = FALSE)
@@ -379,9 +449,10 @@ qtl2mr_prepared_kinship <- function(input, chr) {
 qtl2mr_prepared_hsq <- function(input, chr, trait_role, trait_name) {
   h <- input$hsq
   if (is.null(h)) return(NULL)
+  if (is.numeric(h) && is.null(names(h)) && length(h) == 1L) return(qtl2mr_validate_hsq(h))
   chr <- as.character(chr)
   get1 <- function(x, key) {
-    if (is.null(x) || is.null(key) || !is.list(x)) return(NULL)
+    if (is.null(x) || is.null(key) || is.null(names(x)) || !key %in% names(x)) return(NULL)
     x[[key]]
   }
   candidates <- list(
@@ -389,11 +460,53 @@ qtl2mr_prepared_hsq <- function(input, chr, trait_role, trait_name) {
     get1(get1(h, chr), trait_name),
     get1(get1(h, trait_role), chr),
     get1(get1(h, trait_name), chr),
+    get1(h, chr),
     get1(h, trait_role),
     get1(h, trait_name)
   )
-  for (z in candidates) if (!is.null(z) && length(z) == 1L && is.finite(as.numeric(z))) return(as.numeric(z))
-  NULL
+  candidates <- Filter(function(z) !is.null(z) && !is.list(z) && is.null(names(z)), candidates)
+  if (!length(candidates)) return(NULL)
+  values <- vapply(candidates, qtl2mr_validate_hsq, numeric(1))
+  if (length(unique(values)) > 1L) stop("Conflicting hsq values for chromosome ", chr, " and ", trait_role, "/", trait_name, call. = FALSE)
+  values[[1L]]
+}
+
+qtl2mr_validate_prepared_hsq <- function(input, chromosomes, traits) {
+  h <- input$hsq
+  if (is.null(h)) return(invisible(TRUE))
+  if (is.numeric(h) && is.null(names(h)) && length(h) == 1L) {
+    qtl2mr_validate_hsq(h)
+    if (is.null(input$kinship) && h != 0) stop("Nonzero hsq requires kinship", call. = FALSE)
+    return(invisible(TRUE))
+  }
+  roles <- unique(c("exposure", "outcome", traits))
+  keys <- function(x, allowed) {
+    if ((!is.list(x) && !is.numeric(x)) || is.object(x) || is.null(names(x)) ||
+        !length(x) || anyNA(names(x)) || any(!nzchar(names(x))) || anyDuplicated(names(x)) ||
+        any(!names(x) %in% allowed)) {
+      stop("hsq must be a scalar or a uniquely named numeric vector/list keyed by chromosome, trait, or exposure/outcome role", call. = FALSE)
+    }
+  }
+  leaf <- function(x) {
+    if (is.null(x)) return(invisible(NULL))
+    value <- qtl2mr_validate_hsq(x)
+    if (is.null(input$kinship) && value != 0) stop("Nonzero hsq requires kinship", call. = FALSE)
+  }
+  keys(h, unique(c(chromosomes, roles)))
+  for (key in names(h)) {
+    value <- h[[key]]
+    if (is.null(value)) next
+    if (is.list(value) || !is.null(names(value))) {
+      if (key %in% chromosomes && key %in% roles) stop("Ambiguous hsq key: ", key, call. = FALSE)
+      keys(value, if (key %in% chromosomes) roles else chromosomes)
+      for (entry in value) leaf(entry)
+    } else leaf(value)
+  }
+  for (chr in chromosomes) for (role in c("exposure", "outcome")) {
+    trait <- input[[role]]
+    if (!is.null(trait)) qtl2mr_prepared_hsq(input, chr, role, trait)
+  }
+  invisible(TRUE)
 }
 
 qtl2mr_locus_overlap_table <- function(blocks) {
@@ -537,6 +650,7 @@ run_prepared_qtl2mr <- function(input,
   sample_alignment <- qtl2mr_input_alignment(input)
   if (!identical(sample_alignment, input$sample_alignment)) qtl2mr_warn_alignment(sample_alignment)
   selected <- qtl2mr_prepared_selected_loci(input, loci = loci)
+  input <- qtl2mr_prepared_probability_copy(input, selected$marker)
   x <- qtl2mr_prepared_trait(input, exposure)
   y <- qtl2mr_prepared_trait(input, outcome)
   covar <- qtl2mr_prepared_covar(input)
@@ -647,7 +761,8 @@ run_prepared_qtl2mr <- function(input,
     ridge = ridge,
     heterogeneity_method = heterogeneity_method,
     q_sim_n = q_sim_n,
-    q_sim_seed = q_sim_seed
+    q_sim_seed = q_sim_seed,
+    progress_callback = progress_callback
   )
   diagnostic_layer <- fit_multilocus_diagnostic_layer(
     blocks,
@@ -703,12 +818,19 @@ run_prepared_qtl2mr <- function(input,
                  stringsAsFactors = FALSE)
     }))
   }))
+  if (any(sample_alignment$n_incomplete_covar > 0L)) {
+    counts <- tapply(sample_alignment$n_incomplete_covar, sample_alignment$role, max)
+    warning("Non-finite or missing covariates excluded samples from fitting (maximum per locus: ",
+      paste(paste0(names(counts), "=", counts), collapse = ", "),
+      "); inspect sample_alignment$n_incomplete_covar and the fitted sample sets.", call. = FALSE)
+  }
   sd_x <- phenotype_scaling$sd[phenotype_scaling$role == "exposure"]
   sd_y <- phenotype_scaling$sd[phenotype_scaling$role == "outcome"]
   common_sd <- function(z) length(z) && all(is.finite(z)) && all(abs(z - z[[1L]]) <= 1e-10 * max(abs(z)))
   raw_conversion_available <- !isTRUE(standardize_phenotypes) || (common_sd(sd_x) && common_sd(sd_y))
   raw_multiplier <- if (!isTRUE(standardize_phenotypes)) 1 else if (raw_conversion_available) sd_y[[1L]] / sd_x[[1L]] else NA_real_
   summary <- data.frame(
+    sample_policy = "role_specific_complete",
     exposure = exposure,
     outcome = outcome,
     lmm_backend = backend_provenance$backend,

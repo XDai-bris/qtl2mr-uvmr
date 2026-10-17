@@ -74,6 +74,12 @@ estimate_founder_lmm_hsq <- function(pheno, kinship, addcovar = NULL, reml = TRU
 
 qtl2mr_lmm_transform <- function(y, X, kinship = NULL, hsq = NULL, reml = TRUE, addcovar_for_hsq = NULL) {
   ids <- names(y)
+  if (!is.null(hsq)) {
+    validated_hsq <- qtl2mr_validate_hsq(hsq)
+    if (is.null(kinship) && validated_hsq != 0) {
+      stop("Nonzero hsq requires kinship; it cannot be used in an OLS fit", call. = FALSE)
+    }
+  }
   if (is.null(kinship)) {
     raw_transform <- diag(1, nrow = length(y), ncol = length(y))
     dimnames(raw_transform) <- list(ids, ids)

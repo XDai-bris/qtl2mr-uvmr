@@ -110,14 +110,33 @@ qtl2mr_make_progress_reporter <- function(progress = NULL,
       label,
       if (!is.null(detail) && nzchar(detail)) paste0(": ", detail) else ""
     )
-    if (isTRUE(settings$console)) cat(line, "\n", file = stderr())
+    if (isTRUE(settings$console)) {
+      condition <- simpleMessage(line)
+      class(condition) <- c("qtl2mr_progress_message", class(condition))
+      message(condition)
+    }
     if (isTRUE(settings$log)) cat(line, "\n", file = log_file, append = TRUE)
     invisible(line)
   }
 }
 
 qtl2mr_progress <- function(callback, stage, label, detail = NULL) {
-  if (is.function(callback)) callback(stage = stage, label = label, detail = detail)
+  if (is.function(callback)) {
+    # Preserve visible RNG state defensively. Callbacks must still be RNG-free:
+    # some generators (e.g. Box-Muller) keep a cache outside .Random.seed.
+    had_seed <- exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
+    saved_seed <- if (had_seed) get(".Random.seed", envir = .GlobalEnv, inherits = FALSE) else NULL
+    saved_kind <- RNGkind()
+    on.exit({
+      if (!identical(RNGkind(), saved_kind)) do.call(RNGkind, as.list(saved_kind))
+      if (had_seed) {
+        assign(".Random.seed", saved_seed, envir = .GlobalEnv)
+      } else if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) {
+        rm(".Random.seed", envir = .GlobalEnv)
+      }
+    }, add = TRUE)
+    callback(stage = stage, label = label, detail = detail)
+  }
   invisible(NULL)
 }
 
@@ -126,6 +145,7 @@ qtl2mr_capture_messages <- function(expr) {
   value <- withCallingHandlers(
     expr,
     message = function(m) {
+      if (inherits(m, "qtl2mr_progress_message")) return(invisible(NULL))
       messages <<- c(messages, conditionMessage(m))
       invokeRestart("muffleMessage")
     }
@@ -158,6 +178,19 @@ qtl2mr_q_reported_label <- function(summary_row, digits = 4) {
     ))
   }
   qtl2mr_fmt_num(summary_row$Q_p_reported[[1L]], digits = digits)
+}
+
+qtl2mr_q_reference_label <- function(summary_row) {
+  method <- qtl2mr_summary_scalar(summary_row, "Q_p_method", "not recorded")
+  if (identical(method, "chisq")) {
+    return(paste0("chi-square; df=", qtl2mr_summary_scalar(summary_row, "Q_chisq_df")))
+  }
+  if (identical(method, "simulation")) {
+    return(paste0("conditional residual simulation; ",
+      qtl2mr_summary_scalar(summary_row, "Q_sim_n"), "/",
+      qtl2mr_summary_scalar(summary_row, "Q_sim_n_requested"), " completed draws"))
+  }
+  if (identical(method, "none")) "not requested" else as.character(method)
 }
 
 qtl2mr_summary_scalar <- function(summary_row, name, default = NA_real_) {
@@ -742,7 +775,7 @@ qtl2mr_build_output_manifest <- function(output_dir,
 }
 
 qtl2mr_warning_catalog <- function() {
-  data.frame(
+  catalog <- data.frame(
     warning_id = c(
       "joint_complete_cases", "prepared_overlap_engine", "raw_space_psd_invalid",
       "star_space_psd_invalid", "weak_block_first_stage", "primary_so_unbounded",
@@ -794,6 +827,20 @@ qtl2mr_warning_catalog <- function() {
     ),
     stringsAsFactors = FALSE
   )
+  rbind(catalog, data.frame(
+    warning_id = c("incomplete_covariates", "probability_rounding_normalized", "diagnostic_unavailable"),
+    default_severity = rep("warning", 3L),
+    shown_in_main_report = rep(TRUE, 3L),
+    consequence = c(
+      "Samples with non-finite additive covariates were excluded before fitting.",
+      "Small founder-probability sum errors were normalized in an analysis-local copy.",
+      "One or more per-locus diagnostic estimates could not be computed."),
+    recommended_action = c(
+      "Inspect data/sample_alignment.csv (single analysis) or batch_sample_exclusions.csv (batch); exclusion causes can overlap.",
+      "Inspect data/probability_normalization.csv and input precision; use probability_policy='strict' to reject rounding adjustments.",
+      "Inspect diagnostic_status and diagnostic_note in per_locus_results.csv; unavailable diagnostics are not zero estimates."),
+    stringsAsFactors = FALSE
+  ))
 }
 
 qtl2mr_enrich_warnings <- function(warnings) {
@@ -1073,6 +1120,17 @@ qtl2mr_warning_table <- function(result,
   } else {
     add("joint_complete_cases", "method_limit", "The analysis uses joint complete cases for exposure and outcome.")
   }
+  alignment <- result$sample_alignment %||% data.frame()
+  if (nrow(alignment) && "n_incomplete_covar" %in% names(alignment) &&
+      any(alignment$n_incomplete_covar > 0L, na.rm = TRUE)) {
+    add("incomplete_covariates", "warning",
+      "Non-finite covariate rows were excluded. Per-locus, per-role counts and sample IDs are recorded in data/sample_alignment.csv; counts across loci are not additive.")
+  }
+  normalization <- result$prepared_metadata$probability_normalization$adjustments %||% data.frame()
+  if (is.data.frame(normalization) && nrow(normalization)) {
+    add("probability_rounding_normalized", "warning",
+      "Founder probabilities with small rounding errors were normalized for analysis; original input arrays were not changed. See data/probability_normalization.csv.")
+  }
   if ("n_loci_raw_space_psd_invalid" %in% names(s) && s$n_loci_raw_space_psd_invalid[[1L]] > 0) {
     add("raw_space_psd_invalid", "technical_qc", sprintf("Technical QC: raw-space diagnostic covariance invalid for %s loci; raw-space is not used by the primary estimator.", s$n_loci_raw_space_psd_invalid[[1L]]))
   }
@@ -1107,6 +1165,11 @@ qtl2mr_warning_table <- function(result,
     )
   }
   per_locus <- result$diagnostic_layer$per_locus
+  if (!is.null(per_locus) && "diagnostic_status" %in% names(per_locus) &&
+      any(!per_locus$diagnostic_status %in% c("ok", "available"), na.rm = TRUE)) {
+    add("diagnostic_unavailable", "warning",
+      "Some per-locus diagnostics are unavailable; inspect their status and note. Primary inference is not replaced by missing diagnostic estimates.")
+  }
   if (!is.null(per_locus) && "F_X_block" %in% names(per_locus)) {
     n_weak <- sum(per_locus$F_X_block < 10, na.rm = TRUE)
     if (n_weak) add("weak_block_first_stage", "warning", sprintf("%d loci have block F_X < 10 heuristic threshold.", n_weak))
@@ -1299,10 +1362,14 @@ summarise_qtl2mr_result <- function(result) {
     paste0("reported 95% CI: [", qtl2mr_fmt_num(reported$ci_lower, 6), ", ", qtl2mr_fmt_num(reported$ci_upper, 6), "]", if (nzchar(ci_type)) paste0(" (", ci_type, ")") else ""),
     paste0("Numerically bounded SO fit: ", as.character(reliable), " (not a coverage or causal-validity guarantee)"),
     paste0("Effect units: ", qtl2mr_summary_scalar(s, "effect_units", "not recorded")),
-    paste0("Reported Q: ", qtl2mr_q_reported_label(s, digits = 6), " (", s$Q_p_method[[1L]], ")"),
+    paste0("Sample policy: ", qtl2mr_summary_scalar(s, "sample_policy", "not recorded")),
+    paste0("Q statistic: ", qtl2mr_fmt_num(qtl2mr_summary_scalar(s, "Q"), 6),
+      "; Q p-value: ", qtl2mr_q_reported_label(s, digits = 6),
+      "; Q reference: ", qtl2mr_q_reference_label(s)),
     paste0("qtl2 validation: ", validation_line),
     paste0("Actionable warning IDs: ", warning_ids),
-    "Outputs: report.html; summary.md; data/main_result.csv; data/warnings.csv; data/output_manifest.csv"
+    paste0("Outputs: ", if (isTRUE(result$metadata$make_html %||% TRUE)) "report.html; " else "",
+      "summary.md; data/main_result.csv; data/warnings.csv; data/output_manifest.csv")
   )
   if (isTRUE(raw_differs)) {
     lines <- append(lines, paste0("Raw star-space diagnostic theta: ", qtl2mr_fmt_num(so_theta, 6), " (diagnostic only)"), after = 10L)
@@ -1357,6 +1424,9 @@ qtl2mr_output_paths <- function(result, detail = FALSE) {
     ),
     stringsAsFactors = FALSE
   )
+  if (identical(result$metadata$make_html, FALSE)) {
+    key_paths <- key_paths[key_paths$item != "report_html", , drop = FALSE]
+  }
   if (nrow(manifest) && all(c("path_relative", "size_kb") %in% names(manifest))) {
     key_paths$size_kb <- NA_real_
     idx <- match(key_paths$path, manifest$path_relative)
@@ -1380,7 +1450,8 @@ qtl2mr_add_stable_slots <- function(result) {
     adapter = result$adapter %||% "prepared",
     input = result$input %||% NA_character_,
     exposure = result$exposure %||% s$exposure[[1L]],
-    outcome = result$outcome %||% s$outcome[[1L]]
+    outcome = result$outcome %||% s$outcome[[1L]],
+    make_html = result$metadata$make_html %||% TRUE
   )
   result$primary <- s
   result$diagnostics <- list(
@@ -1464,13 +1535,15 @@ write_qtl2mr_html_report <- function(result, file) {
   qtl_status <- if (!is.null(validation) && nrow(validation)) validation$validation_status[[1L]] else "not_available"
   qtl_reason <- if (!is.null(validation) && nrow(validation) && "reason" %in% names(validation)) validation$reason[[1L]] else ""
   primary_table <- data.frame(
-    item = c("Reported estimator", "Estimate", "95% CI", "Numerically bounded SO fit", "Effect units", "Confidence set", "Inference calibration", "Reported Q"),
+    item = c("Reported estimator", "Estimate", "95% CI", "Numerically bounded SO fit", "Effect units", "Confidence set", "Inference calibration", "Sample policy", "Q statistic", "Q p-value", "Q reference"),
     value = c(reported$estimator, qtl2mr_fmt_num(reported$theta, 6),
       paste0("[", qtl2mr_fmt_num(reported$ci_lower, 6), ", ", qtl2mr_fmt_num(reported$ci_upper, 6), "]", if (nzchar(ci_type)) paste0(" (", ci_type, ")") else ""),
       as.character(reliable), qtl2mr_summary_scalar(s, "effect_units", "not recorded"),
       qtl2mr_summary_scalar(s, "confidence_set_type", "not recorded"),
       qtl2mr_summary_scalar(s, "inference_status", "not established"),
-      paste0(qtl2mr_q_reported_label(s, digits = 5), " (", s$Q_p_method[[1L]], ")")),
+      qtl2mr_summary_scalar(s, "sample_policy", "not recorded"),
+      qtl2mr_fmt_num(qtl2mr_summary_scalar(s, "Q"), 6),
+      qtl2mr_q_reported_label(s, digits = 5), qtl2mr_q_reference_label(s)),
     stringsAsFactors = FALSE
   )
   overview <- sprintf("<p><strong>Exposure:</strong> %s<br><strong>Outcome:</strong> %s<br><strong>Adapter:</strong> %s<br><strong>Samples:</strong> %s &nbsp; <strong>Selected loci:</strong> %s</p>",
@@ -1527,6 +1600,7 @@ write_qtl2mr_results <- function(result,
   final_output_dir <- transaction$destination
   output_dir <- transaction$stage_dir
   result$output_dir <- final_output_dir
+  result$metadata$make_html <- isTRUE(make_html)
   data_dir <- file.path(output_dir, "data")
   figure_dir <- file.path(output_dir, "figures")
   log_dir <- file.path(output_dir, "logs")
@@ -1565,7 +1639,8 @@ write_qtl2mr_results <- function(result,
       nsim = as.integer(q_sim_n),
       seed = q_sim_seed,
       allow_cross_cov = TRUE,
-      keep_simulated = FALSE
+      keep_simulated = FALSE,
+      progress_callback = progress_callback
     )
     for (nm in setdiff(names(q_cal), "Q_sim_values")) {
       result$pilot$fit[[nm]] <- q_cal[[nm]]
@@ -1653,7 +1728,8 @@ write_qtl2mr_results <- function(result,
     confidence_set = file.path(data_dir, "confidence_set.csv"),
     input_alignment = file.path(data_dir, "input_alignment.csv"),
     sample_alignment = file.path(data_dir, "sample_alignment.csv"),
-    phenotype_scaling = file.path(data_dir, "phenotype_scaling.csv"))
+    phenotype_scaling = file.path(data_dir, "phenotype_scaling.csv"),
+    probability_normalization = file.path(data_dir, "probability_normalization.csv"))
   confidence_set <- result$pilot$fit$confidence_set %||% data.frame(lower = numeric(), upper = numeric())
   confidence_set$confidence_set_type <- rep(result$pilot$fit$confidence_set_type %||% "not_recorded", nrow(confidence_set))
   confidence_set$numerical_ok <- rep(isTRUE(result$pilot$fit$numerical_ok), nrow(confidence_set))
@@ -1662,6 +1738,8 @@ write_qtl2mr_results <- function(result,
   utils::write.csv(result$pilot$input_alignment %||% data.frame(), data_paths[["input_alignment"]], row.names = FALSE)
   utils::write.csv(result$pilot$sample_alignment %||% data.frame(), data_paths[["sample_alignment"]], row.names = FALSE)
   utils::write.csv(result$pilot$phenotype_scaling %||% data.frame(), data_paths[["phenotype_scaling"]], row.names = FALSE)
+  utils::write.csv(result$pilot$prepared_metadata$probability_normalization$adjustments %||% data.frame(),
+    data_paths[["probability_normalization"]], row.names = FALSE)
   utils::write.csv(result$pilot$summary, data_paths[["main_result"]], row.names = FALSE)
   utils::write.csv(method_comparison, data_paths[["method_comparison"]], row.names = FALSE)
   utils::write.csv(result$pilot$diagnostic_layer$per_locus %||% data.frame(), data_paths[["per_locus_results"]], row.names = FALSE)

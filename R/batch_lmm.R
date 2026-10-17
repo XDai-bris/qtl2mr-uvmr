@@ -145,6 +145,12 @@ prepare_lmm_context <- function(pheno,
   C <- addcovar0
   colnames(C) <- make.names(colnames(C), unique = TRUE)
 
+  if (!is.null(hsq)) {
+    validated_hsq <- qtl2mr_validate_hsq(hsq)
+    if (is.null(kinship) && validated_hsq != 0) {
+      stop("Nonzero hsq requires kinship; it cannot be used in an OLS fit", call. = FALSE)
+    }
+  }
   if (is.null(kinship)) {
     raw_transform <- diag(1, nrow = length(ids), ncol = length(ids))
     dimnames(raw_transform) <- list(ids, ids)

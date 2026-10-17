@@ -69,7 +69,8 @@ summary. If \code{progress = NULL}, it also controls whether progress is shown.}
 \item{progress}{Progress display mode. \code{NULL} follows \code{verbose};
 \code{TRUE} prints progress and writes \code{logs/progress.log};
 \code{FALSE} disables progress output and progress logging; \code{"log"}
-writes only \code{logs/progress.log}.}
+writes only \code{logs/progress.log}. Console progress uses messages, so
+\code{suppressMessages()} hides it without disabling the log.}
 \item{run_qtl2_validation}{Whether to record that optional qtl2 parity
 validation should be performed separately. Defaults to \code{FALSE}. Primary
 prepared analysis never invokes qtl2. When \code{TRUE}, the result records an
@@ -153,8 +154,12 @@ When \code{progress} is enabled, the run reports seven coarse stages:
 input/output preparation, selected-locus LMM/MR fitting, qtl2 beta/SE
 validation, local founder exposure score residual-variance QC,
 leave-one-locus-out MR, instrument-set sensitivity, and output writing. The
-same progress lines are written to \code{logs/progress.log}. Progress is a
-user-feedback feature and does not affect estimates.
+same progress lines are written to \code{logs/progress.log}. During Q simulation,
+completed draw counts and elapsed time are reported at roughly ten intervals.
+Each draw refits the common-effect model; the 1,000-draw default can dominate
+runtime. Progress does not affect estimates or random-number draws. Choosing
+\code{heterogeneity_method = "chisq"} explicitly avoids this simulation but
+changes the Q p-value's reference distribution, not the primary MR fit.
 
 Use \code{adapter = "prepared"} with an object from
 \code{\link{as_qtl2mr_prepared_input}()}. The prepared adapter uses
@@ -177,6 +182,9 @@ exposure; \code{standardize_phenotypes = FALSE} uses original units.
 \code{data/phenotype_scaling.csv} and \code{data/sample_alignment.csv} record
 scaling and sample accounting. Weak instruments, cross-locus dependence and
 same-sample selection remain inferential limitations even for a bounded fit.
+The result records \code{sample_policy = "role_specific_complete"}; exact
+batch analyses instead use complete cases for each exposure-outcome pair.
+For numerical comparisons, supply the same sample masks and fitting options.
 Aggregate heterogeneity uses
 \code{heterogeneity_method = "auto"} by default: single-locus analyses report
 \code{Q_p_chisq}, multi-locus analyses report simulation-calibrated

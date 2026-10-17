@@ -23,7 +23,8 @@ compact batch CSV outputs.
 }
 \usage{
 qtl2mr_prepare_resources(allele_probs, kinship, pheno, covar,
-  qtl_scan = NULL, marker_map = NULL, metadata = list())
+  qtl_scan = NULL, marker_map = NULL, metadata = list(),
+  probability_policy = c("normalize_rounding", "strict"))
 
 qtl2mr_select_loci_from_scan(qtl_scan, marker_map, instrument_trait,
   lod_thresh = 4, exclude_chr = "X", max_loci = NULL)
@@ -89,6 +90,11 @@ names.}
 optionally \code{pos}, or a chromosome-named qtl2 map list. If omitted it is constructed from allele-probability
 dimnames.}
 \item{metadata}{Optional metadata stored with the resource object.}
+\item{probability_policy}{Founder-probability sum policy, propagated to each
+prepared pair. \code{"normalize_rounding"} permits small rounding deviations
+within the prepared-input tolerance and normalizes an analysis-local copy;
+\code{"strict"} rejects sums outside the strict tolerance. Original resource
+arrays are preserved. See \code{as_qtl2mr_prepared_input()}.}
 \item{instrument_trait}{Trait used to select instruments from \code{qtl_scan}.
 For a multi-column scan, this must exactly match one unique, non-blank column
 name; qtl2mr never silently uses another trait's column.}
@@ -117,7 +123,11 @@ LOCO kinship sample coverage.}
 \item{sample_rule}{Sample rule string or list. \code{"common_complete"} and
 \code{"pair_common_complete"} use the pair-specific complete exposure/outcome
 sample set. \code{"batch_common_complete"} uses one common sample set across
-all traits in the batch, which can improve cross-pair context-cache reuse.}
+all traits in the batch, which can improve cross-pair context-cache reuse.
+These batch policies are not the role-specific complete-case policy of an
+unrestricted single prepared analysis. For an exact cross-API comparison,
+use identical selected loci, options, and explicit exposure/outcome sample
+filters in the prepared analysis.}
 \item{sample_retention_min}{Minimum allowed ratio of batch-common complete
 samples to genotype/covariate/kinship eligible samples for
 \code{run_qtl2mr_batch_fast()}. Default is \code{0.85}.}
@@ -157,7 +167,12 @@ group. Default records failures and continues with successful work; parallel
 group failures are retained with their exposure-group key.}
 \item{resume}{Opt into reuse of completed pairs only when the saved full
 input/configuration/implementation fingerprint and output checksums agree.
-Defaults to false. Legacy or mismatched checkpoints are rejected, not reused.}
+Defaults to false. Legacy or mismatched checkpoints are rejected, not reused.
+The parallel-by-exposure runner checks its parent request and all existing
+worker checkpoints before any worker starts. Integrity failures are fatal
+even when \code{fail_fast = FALSE}; existing outputs are not replaced by an
+empty or partial merge. Older parallel outputs without a parent fingerprint
+must use a new output directory or an explicit \code{force = TRUE} rerun.}
 \item{force}{Explicitly authorize replacement of existing batch outputs.
 Without \code{force = TRUE} or a validated resume, an occupied output directory
 is refused. This does not authorize deleting unrelated files.}
@@ -231,6 +246,29 @@ many-pair screening because all outcomes for the same exposure share the same
 instrument selection and can reuse exposure-side LMM fits within a worker. In
 fast mode, the global batch-common sample set is computed once and passed to
 all exposure groups so group results remain comparable.
+
+Batch configs, main results, and manifests identify \code{sample_policy} as
+\code{"pair_common_complete"} or \code{"batch_common_complete"}. ``Exact''
+describes preservation of pair-complete batching, not equivalence to a single
+prepared analysis that uses all eligible exposure samples independently of
+outcome missingness.
+
+\code{batch_sample_exclusions.csv} records input-value eligibility by pair and
+reason, including absent covariate IDs and NA/NaN/Inf covariate values. Its
+denominator is the resource sample-ID set, before complete-case selection;
+reasons may overlap and must not be summed as distinct people. The ledger
+does not replace per-locus fitted/overlap counts or audit optional user sample
+filters and chromosome-specific kinship/probability coverage. Covariate losses
+also generate structured rows in \code{batch_warnings.csv}. The fast retention
+ratio continues to use covariate-eligible samples as its denominator.
+\code{batch_probability_normalization.csv} records per-pair selected-marker
+rounding adjustments; the config records the probability policy. Neither
+ledger changes sample selection or imputes missing values.
+
+An ordinary parallel worker failure creates an error status for each affected
+pair and retains the exposure-group root cause. Run-manifest error counts
+therefore agree with the main-result statuses. A resume-integrity failure is
+not an ordinary recoverable worker failure.
 
 Default batch settings are designed for many-pair analysis and omit HTML,
 figures, large RDS files, Q simulation calibration, and weighted median/mode

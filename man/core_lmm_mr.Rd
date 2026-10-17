@@ -29,7 +29,8 @@ fit_mr_locus_block(genoprobs, exposure, outcome, kinship = NULL,
 fit_multilocus_founder_mr(locus_blocks, allow_cross_cov = TRUE,
   ridge = 1e-10, theta_grid = NULL, compute_independence = TRUE,
   heterogeneity_method = c("auto", "simulation", "chisq", "none"),
-  q_sim_n = 0L, q_sim_seed = 1L, keep_q_sim = FALSE)
+  q_sim_n = 0L, q_sim_seed = 1L, keep_q_sim = FALSE,
+  progress_callback = NULL)
 
 second_order_gls_ivw(beta_x, beta_y, Sigma_x, Sigma_y,
   theta_grid = NULL, allow_cross_cov = FALSE, Sigma_xy = NULL,
@@ -85,6 +86,11 @@ NA}.}
 \item{q_sim_seed}{Random seed for Q simulation calibration.}
 \item{keep_q_sim}{Whether to retain the simulated Q values in the returned
 object.}
+\item{progress_callback}{Optional function accepting \code{stage},
+\code{label} and \code{detail}. Receives coarse Q-simulation counts and
+elapsed time. Callbacks must not generate random numbers or change
+\code{RNGkind()}; some generators retain state outside \code{.Random.seed}.
+The built-in analysis reporter is RNG-free and leaves simulated values unchanged.}
 \item{beta_x, beta_y}{Founder-contrast exposure and outcome effect vectors.}
 \item{Sigma_x, Sigma_y}{Within-trait covariance matrices.}
 \item{Sigma_xy}{Cross-trait covariance matrix. Required when

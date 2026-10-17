@@ -309,7 +309,8 @@ calibrate_multilocus_q <- function(locus_blocks,
                                    allow_cross_cov = TRUE,
                                    ridge = 1e-10,
                                    theta_grid = NULL,
-                                   keep_simulated = FALSE) {
+                                   keep_simulated = FALSE,
+                                   progress_callback = NULL) {
   nsim <- as.integer(nsim %||% 0L)
   if (!is.finite(nsim) || nsim < 1L) {
     return(list(
@@ -365,6 +366,10 @@ calibrate_multilocus_q <- function(locus_blocks,
       )
     })
     q_sim <- numeric(nsim)
+    started <- proc.time()[["elapsed"]]
+    report_every <- max(1L, ceiling(nsim / 10L))
+    qtl2mr_progress(progress_callback, 2L, "Simulate heterogeneity Q",
+      sprintf("0/%d draws; each draw refits the common-effect model", nsim))
     for (s in seq_len(nsim)) {
       sim_blocks <- lapply(sim_info, function(info) {
         b <- info$block
@@ -380,6 +385,11 @@ calibrate_multilocus_q <- function(locus_blocks,
         ridge = ridge,
         theta_grid = theta_grid
       )$Q
+      if (s %% report_every == 0L || s == nsim) {
+        qtl2mr_progress(progress_callback, 2L, "Simulate heterogeneity Q",
+          sprintf("%d/%d draws; %.1f s elapsed", s, nsim,
+            proc.time()[["elapsed"]] - started))
+      }
     }
     exceed <- sum(q_sim >= q_obs, na.rm = TRUE)
     list(
@@ -406,7 +416,8 @@ fit_multilocus_founder_mr <- function(locus_blocks,
                                       heterogeneity_method = c("auto", "simulation", "chisq", "none"),
                                       q_sim_n = 0L,
                                       q_sim_seed = 1L,
-                                      keep_q_sim = FALSE) {
+                                      keep_q_sim = FALSE,
+                                      progress_callback = NULL) {
   heterogeneity_method <- match.arg(heterogeneity_method)
   if (!is.list(locus_blocks) || !length(locus_blocks)) stop("locus_blocks must be a non-empty list", call. = FALSE)
   needed <- c("beta_x", "beta_y", "Sigma_x", "Sigma_y", "Sigma_xy")
@@ -492,7 +503,8 @@ fit_multilocus_founder_mr <- function(locus_blocks,
     allow_cross_cov = allow_cross_cov,
     ridge = ridge,
     theta_grid = theta_grid,
-    keep_simulated = keep_q_sim
+    keep_simulated = keep_q_sim,
+    progress_callback = progress_callback
   )
   fit$Q_p_sim <- q_cal$Q_p_sim
   fit$Q_sim_n <- q_cal$Q_sim_n

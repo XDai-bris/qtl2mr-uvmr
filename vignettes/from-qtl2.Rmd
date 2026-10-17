@@ -46,7 +46,7 @@ kinship <- calc_kinship(genoprobs, type = "loco", omit_x = TRUE)
 # Restrict the analysis to supported autosomes before scanning/fitting.
 autosomes <- intersect(as.character(1:19), names(allele_probs))
 stopifnot(length(autosomes) > 0L)
-allele_probs <- allele_probs[autosomes]
+allele_probs <- allele_probs[, autosomes]
 map <- map[autosomes]
 kinship <- kinship[autosomes]
 
@@ -58,6 +58,85 @@ scan <- scan1(allele_probs, pheno[, c("x", "y"), drop = FALSE],
 See the [qtl2 user guide](https://kbroman.org/qtl2/assets/vignettes/user_guide.html)
 for the upstream file format, HMM, kinship and scan options. `qtl2` is used
 for these upstream steps, not required by qtl2mr once inputs are prepared.
+Native `calc_genoprob` objects use `[individuals, chromosomes]`: the comma
+above matters. `allele_probs[autosomes]` selects individuals, not chromosomes.
+
+## A runnable native-qtl2 bridge
+
+This small, wholly synthetic `cross2` exercises the actual qtl2 HMM,
+allele-probability conversion, LOCO kinship, scan and qtl2mr preparation.
+It uses no downloaded data. Its invented founder patterns and fixed founder
+pairs are an API integration example, not a realistic DO simulation or
+instrument-validation experiment. The chunk runs when optional `qtl2` is
+installed; otherwise the rest of the package remains usable. The package's
+onboarding regression test executes this same chunk.
+
+```{r native-qtl2-bridge}
+if (requireNamespace("qtl2", quietly = TRUE)) {
+  set.seed(4101)
+  n <- 64L
+  ids <- sprintf("bridge_%02d", seq_len(n))
+  chromosomes <- c("1", "2", "X")
+  gmap <- setNames(lapply(chromosomes, function(chr) {
+    setNames(seq(0, 22, by = 2), paste0("c", chr, "m", 1:12))
+  }), chromosomes)
+  # Eight distinct biallelic founder patterns; observed genotypes are 1/2/3.
+  patterns <- 1L + 2L * outer(0:7, rep(0:2, 4), function(i, j) {
+    bitwAnd(bitwShiftR(i, j), 1L)
+  })
+  founder_geno <- lapply(gmap, function(m) {
+    f <- patterns
+    dimnames(f) <- list(LETTERS[1:8], names(m))
+    f
+  })
+  geno <- lapply(founder_geno, function(f) {
+    a <- sample(1:8, n, replace = TRUE)
+    b <- sample(1:8, n, replace = TRUE)
+    g <- (f[a, , drop = FALSE] + f[b, , drop = FALSE]) / 2
+    storage.mode(g) <- "integer"
+    rownames(g) <- ids
+    g
+  })
+  cross_demo <- structure(list(
+    crosstype = "do", geno = geno, founder_geno = founder_geno,
+    gmap = gmap, alleles = LETTERS[1:8],
+    is_x_chr = setNames(chromosomes == "X", chromosomes),
+    is_female = setNames(rep(TRUE, n), ids),
+    cross_info = matrix(8L, n, 1L, dimnames = list(ids, "generation"))
+  ), class = "cross2")
+  stopifnot(qtl2::check_cross2(cross_demo))
+  bridge_map <- qtl2::insert_pseudomarkers(cross_demo$gmap, step = 1)
+  bridge_genoprobs <- qtl2::calc_genoprob(
+    cross_demo, bridge_map, error_prob = 0.002, cores = 1
+  )
+  bridge_probs <- qtl2::genoprob_to_alleleprob(bridge_genoprobs)
+  bridge_kinship <- qtl2::calc_kinship(
+    bridge_genoprobs, type = "loco", omit_x = TRUE
+  )
+  autosomes <- intersect(as.character(1:19), names(bridge_probs))
+  bridge_probs <- bridge_probs[, autosomes]
+  bridge_map <- bridge_map[autosomes]
+  bridge_kinship <- bridge_kinship[autosomes]
+  x <- 3 * bridge_probs[["1"]][, "A", 1] -
+    2 * bridge_probs[["1"]][, "D", 1] + rnorm(n, sd = 0.2)
+  bridge_pheno <- cbind(x = x, y = 0.25 * x + rnorm(n))
+  rownames(bridge_pheno) <- ids
+  bridge_scan <- qtl2::scan1(bridge_probs, bridge_pheno,
+                           kinship = bridge_kinship, cores = 1)
+  bridge_selected <- qtl2mr::qtl2mr_select_loci_from_scan(
+    bridge_scan, bridge_map, instrument_trait = "x", lod_thresh = 4
+  )
+  stopifnot(nrow(bridge_selected) > 0L) # teaching threshold, not calibration
+  bridge_prepared <- qtl2mr::as_qtl2mr_prepared_input(
+    bridge_probs, bridge_pheno, kinship = bridge_kinship,
+    marker_map = bridge_map, selected_loci = bridge_selected,
+    exposure = "x", outcome = "y"
+  )
+  stopifnot(qtl2mr::validate_qtl2mr_input(
+    bridge_prepared, require_selected_loci = TRUE
+  ))
+}
+```
 
 ## Decide the instruments, then fit both traits at those loci
 
@@ -98,6 +177,12 @@ threshold, or evidence that different selected loci are independent.
 
 - Inspect sample alignment and per-locus scaling. Sample drops are recorded;
   accidental mismatches should be corrected rather than accepted blindly.
+- The single-pair prepared analysis fits X and Y on their role-specific usable
+  samples and models their overlap. Exact batch workflows instead use the
+  pair's common complete samples. Different masks can produce different
+  estimates; compare engines only after fixing identical sample masks, loci,
+  kinship, scaling and fit options. Fast batches use a common set across all
+  requested traits.
 - Default effects are SD of Y per SD of X. Use
   `standardize_phenotypes = FALSE` for original units. For a single consistent
   scaling, raw effect = standardized effect x SD(Y)/SD(X).

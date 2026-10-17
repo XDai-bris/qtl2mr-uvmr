@@ -12,7 +12,7 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 ```
 
 `qtl2mr` estimates selected-locus, founder-aware Mendelian-randomization
-effects for qtl2-style multiparent data. In about five minutes, this walkthrough
+effects for qtl2-style multiparent data. This short walkthrough
 loads a bundled fixture, prepares two loci, runs an analysis, reads its primary
 estimate and warnings, and locates the shareable report.
 
@@ -75,6 +75,12 @@ they are not universal analysis defaults. In particular, qtl2 parity validation
 is deliberately not requested here. The primary LMM uses qtl2mr's internal
 backend; the `qtl2` package is optional and is needed only for an explicitly
 requested parity comparison.
+The default `heterogeneity_method = "auto"` uses a chi-square Q reference
+for one locus and simulation for multiple loci, with 1,000 draws by default.
+Each draw refits MR; this can dominate runtime even for two loci. The explicit
+`"chisq"` above is an approximate fast-demo choice, not the default reference
+or a calibration guarantee. Use `progress = TRUE` for stage updates in your
+own run; diagnostic bootstraps and sensitivity refits also add time.
 
 ## Read the result and warnings
 
@@ -114,6 +120,11 @@ The default estimate is in **SD of outcome per SD of exposure**. A bounded
 fit does not guarantee 95% coverage: weak instruments, correlated loci and
 same-sample selection remain limitations. `primary_reliable` is a legacy
 name for this numerical check, not a claim of causal validity.
+The fixture's `true_theta = 0.75` is in **original units**, so it is not the
+target on the displayed SD scale without conversion. With a single common
+scaling, standardized truth = raw truth x SD(X)/SD(Y). A pooled estimate
+cannot generally be converted by one SD ratio when locus-specific samples
+and scaling differ.
 
 ## Fit with a kinship matrix
 
@@ -142,6 +153,10 @@ lmm_result <- run_qtl2mr_analysis(
 qtl2mr_primary_result(lmm_result)
 ```
 
+An estimated `hsq = 0` is a valid boundary fit in this small independent-
+background example. It does not show that kinship is unimportant in real DO
+data, nor establish agreement between kinship-adjusted and unadjusted models.
+
 ## Open the useful files
 
 Open the report interactively with
@@ -158,6 +173,10 @@ list, and harmonized chromosome-specific LOCO kinship. The companion
 `vignette("from-qtl2", package = "qtl2mr")` shows the upstream steps and
 explains which choices are yours. A missing selected-locus list no longer
 means "use every marker".
+The single-pair workflow uses separate usable samples for X and Y and models
+their overlap. Exact batch workflows use each pair's common complete samples;
+fast batches use a common complete set across all requested traits. Compare
+engines with identical sample masks and fit options before expecting parity.
 
 ```{r cleanup, include=FALSE}
 unlink(result_dir, recursive = TRUE, force = TRUE)

@@ -19,11 +19,22 @@ qtl2mr_weighted_mode <- function(x, w, bandwidth = NULL, grid_step = 1 / 8) {
   if (length(x) < 2L) stop("Need at least two valid weighted mode inputs", call. = FALSE)
   w <- w / max(w)
   w <- w / sum(w)
-  if (is.null(bandwidth)) bandwidth <- max(stats::bw.nrd0(x), 0.03)
-  if (length(bandwidth) != 1L || !is.finite(bandwidth) || bandwidth <= 0 ||
+  if ((!is.null(bandwidth) && (length(bandwidth) != 1L || !is.numeric(bandwidth) ||
+      !is.finite(bandwidth) || bandwidth <= 0)) ||
       length(grid_step) != 1L || !is.finite(grid_step) || grid_step <= 0 || grid_step > 1 / 8) {
     stop("bandwidth must be positive and grid_step in (0, 1/8]", call. = FALSE)
   }
+  if (all(x == x[[1L]])) return(x[[1L]])
+  # Search in dimensionless coordinates: bandwidth and optimizer tolerance must
+  # not introduce an absolute effect-unit floor. Scaling before centering also
+  # avoids overflow when valid effects have very large magnitudes.
+  unit <- max(abs(x))
+  scaled <- x / unit
+  origin <- scaled[[1L]]
+  spread <- max(abs(scaled - origin))
+  x <- (scaled - origin) / spread
+  bandwidth <- if (is.null(bandwidth)) stats::bw.nrd0(x) else (bandwidth / unit) / spread
+  if (!is.finite(bandwidth) || bandwidth <= 0) stop("Mode bandwidth is not representable at the input scale", call. = FALSE)
   # Search near every component, not on a fixed-size grid spanning the extremes.
   # Evaluate the full mixture, then refine every detected local maximum.
   grid <- sort(unique(as.numeric(outer(x, seq(-8, 8, by = grid_step) * bandwidth, `+`))))
@@ -38,11 +49,32 @@ qtl2mr_weighted_mode <- function(x, w, bandwidth = NULL, grid_step = 1 / 8) {
                      dens[interior] >= dens[interior + 1L] &
                      (dens[interior] > dens[interior - 1L] | dens[interior] > dens[interior + 1L])]
   if (!length(peaks)) stop("No finite mode peak found", call. = FALSE)
+  slope <- function(at) {
+    delta <- (x - at) / bandwidth
+    sum(delta * exp(-0.5 * delta^2) * w)
+  }
   candidates <- vapply(peaks, function(i) {
-    stats::optimize(function(at) -density(at), grid[c(i - 1L, i + 1L)],
-      tol = 1e-10 * max(1, bandwidth))$minimum
+    bracket <- grid[c(i - 1L, i + 1L)]
+    ends <- vapply(bracket, slope, numeric(1))
+    if (all(is.finite(ends)) && ends[[1L]] >= 0 && ends[[2L]] <= 0) {
+      # Root refinement avoids a flat density maximum limiting optimize() to
+      # square-root-machine-precision accuracy after a change of effect units.
+      stats::uniroot(slope, bracket, f.lower = ends[[1L]], f.upper = ends[[2L]],
+        tol = 1e-12 * bandwidth)$root
+    } else stats::optimize(function(at) -density(at), bracket,
+      tol = 1e-10 * bandwidth)$minimum
   }, numeric(1))
-  candidates[which.max(density(candidates))]
+  heights <- density(candidates)
+  tied <- which(heights >= max(heights) * (1 - 1e-10))
+  # Equal-height modes have no unique mathematical answer. Resolve numerical
+  # ties by proximity to input components in their supplied order, preserving
+  # reflection equivariance rather than always selecting the leftmost peak.
+  for (anchor in x) {
+    distance <- abs(candidates[tied] - anchor)
+    tied <- tied[distance <= min(distance) + 1e-10 * bandwidth]
+    if (length(tied) == 1L) break
+  }
+  (origin + candidates[tied[[1L]]] * spread) * unit
 }
 
 qtl2mr_bootstrap_scalar_sensitivities <- function(theta,
@@ -165,6 +197,8 @@ fit_per_locus_so <- function(locus_blocks,
       Q_p_chisq = d$Q_p_chisq,
       F_X_block = d$F_X_block,
       omega_min_eigenvalue = d$omega_min_eigenvalue,
+      diagnostic_status = d$diagnostic_status,
+      diagnostic_note = d$diagnostic_note,
       cross_cov_model = b$cross_cov_model %||% NA_character_,
       rho_xy = b$rho_xy %||% NA_real_,
       joint_psd_valid = b$joint_psd_valid %||% NA,
@@ -186,7 +220,17 @@ summarize_per_locus_so <- function(per_locus,
   miss <- setdiff(required, names(per_locus))
   if (length(miss)) stop("per_locus is missing: ", paste(miss, collapse = ", "), call. = FALSE)
   ok <- is.finite(per_locus$theta) & is.finite(per_locus$se) & per_locus$se > 0
-  if (!any(ok)) stop("No valid per-locus SO estimates", call. = FALSE)
+  if (!any(ok)) {
+    estimates <- data.frame(estimator = c("Two-step IVW", "Weighted median", "Weighted mode"),
+      theta = NA_real_, se = NA_real_, ci_lower = NA_real_, ci_upper = NA_real_,
+      ci_type = NA_character_, ci_level = level, bootstrap_B = 0L,
+      bootstrap_seed = bootstrap_seed %||% NA_integer_, bootstrap_complete_B = 0L,
+      bootstrap_failed_B = 0L, role = c("diagnostic", "sensitivity", "sensitivity"),
+      note = "Diagnostic unavailable: no finite per-locus SO estimate with positive SE.",
+      stringsAsFactors = FALSE)
+    return(list(estimates = estimates, heterogeneity = data.frame(Q_between = NA_real_,
+      df_between = NA_integer_, Q_between_p = NA_real_, n_loci = 0L), per_locus = per_locus))
+  }
   theta <- per_locus$theta[ok]
   se <- per_locus$se[ok]
   w <- 1 / se^2

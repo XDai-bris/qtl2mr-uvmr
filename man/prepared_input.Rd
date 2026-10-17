@@ -13,7 +13,8 @@ single locus when exposure and outcome sample sets differ.
 as_qtl2mr_prepared_input(allele_probs, pheno, covar = NULL,
   kinship = NULL, marker_map, selected_loci = NULL, exposure = NULL,
   outcome = NULL, exposure_samples = NULL, outcome_samples = NULL,
-  hsq = NULL, sample_ids = NULL, metadata = list(), use_all_loci = FALSE)
+  hsq = NULL, sample_ids = NULL, metadata = list(), use_all_loci = FALSE,
+  probability_policy = c("normalize_rounding", "strict"))
 
 validate_qtl2mr_input(input, founder_dim = 8L,
   require_selected_loci = FALSE, exposure = NULL, outcome = NULL)
@@ -30,7 +31,15 @@ fit_mr_locus_block_overlap(genoprobs, exposure, outcome,
 \arguments{
 \if{latex}{\out{\sloppy}}
 \item{allele_probs, genoprobs}{qtl2-style allele probability object: a named
-list of sample by founder by marker arrays.}
+list of sample by founder by marker arrays. All checked values must be finite
+and in [0,1]; genotype-state probabilities and allele dosages require conversion.}
+\item{probability_policy}{Prepared-input sum policy. The default
+\code{"normalize_rounding"} accepts a maximum absolute founder-sum deviation
+of \code{n_founders * 5e-5} (0.0004 for eight founders), the worst-case bound
+for rounding each probability to four decimal places. Sample-marker vectors
+whose deviation exceeds the legacy strict tolerance of \code{1e-6} are divided
+by their sum in an analysis-local copy. \code{"strict"} rejects deviations above
+\code{1e-6}. Neither policy clips values or repairs negative/nonfinite entries.}
 \item{pheno}{Phenotype data frame with sample IDs as row names.}
 \item{covar}{Optional covariate data frame or matrix with sample IDs as row
 names.}
@@ -56,9 +65,18 @@ vectors.}
 If omitted, finite exposure/outcome values, allele probabilities, covariates,
 and kinship availability define each LMM sample set. Overlap is inferred from
 shared sample IDs.}
-\item{hsq, hsq_x, hsq_y}{Optional heritability values. Prepared inputs may use a
-trait-keyed or chromosome-keyed list. When kinship is supplied and a value is
-omitted, qtl2mr estimates it with its internal profile ML/REML backend.}
+\item{hsq, hsq_x, hsq_y}{Optional finite numeric heritability values in [0,1];
+out-of-range values are errors, never clamped. Low-level \code{hsq_x} and
+\code{hsq_y} are scalars. Prepared \code{hsq} accepts an unnamed scalar (both
+traits, all chromosomes), a uniquely named numeric vector or list keyed by
+chromosome, phenotype name, or \code{exposure}/\code{outcome} role, or a two-level
+named structure in either chromosome-to-role/trait or role/trait-to-chromosome
+order. Examples are \code{0.3}, \code{c(exposure=0.2, outcome=0.3)},
+\code{list("1"=0.2)}, and \code{list(exposure=c("1"=0.2, "2"=0.3))}.
+Applicable entries must agree; conflicting entries, unknown keys, unnamed
+multi-value inputs, and unsupported structures are errors. Omitted or NULL
+entries request internal profile ML/REML estimation when kinship is supplied.
+A nonzero supplied value requires kinship.}
 \item{sample_ids, sample_ids_x, sample_ids_y}{Optional legacy/global sample
 filter or low-level sample order for fitting. New prepared workflows should
 prefer \code{exposure_samples} and \code{outcome_samples}.}
@@ -99,6 +117,15 @@ IDs, selected loci, and the eight-founder autosomal additive assumption.
 Unknown IDs and incomplete matching are not silently treated as intentional
 sample exclusions. Partial exposure/outcome overlap is supported and recorded.
 Chromosome X is unsupported and cannot be fitted as an autosome.
+
+The prepared object retains the original probability arrays unchanged. Its
+\code{metadata$probability_normalization} records the policy, tolerances, and
+per-marker adjustment counts and maximum original sum deviations. An adjustment
+emits a warning and is repeated only on an analysis-local copy; the prepared
+result retains this disclosure in \code{prepared_metadata}. The bound permits
+ordinary four-to-six-decimal exported probabilities, not arbitrary rescaling.
+As before, only selected markers are value-checked when a selection is supplied;
+the full array dimensions and marker/founder identifiers are always checked.
 
 High-level analysis standardizes phenotypes by default: the effect is SD of
 outcome per SD of exposure. Scaling and sample-accounting tables are retained

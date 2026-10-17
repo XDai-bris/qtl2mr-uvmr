@@ -1,3 +1,31 @@
+# qtl2mr 0.4.1 (unreleased)
+
+- Parallel batch resume validates the complete request and saved outputs before
+  writing. A provenance or integrity mismatch stops the run and preserves prior
+  results; ordinary group failures retain per-pair error rows and counts.
+- Corrected chromosome subsetting in the qtl2 onboarding recipe and added a
+  runnable synthetic cross2-to-prepared-input bridge with regression coverage.
+- Reports distinguish the Q statistic, Q p-value and reference distribution.
+  Q simulation reports completed draws and elapsed time. Its default method,
+  draw count and random-number calculation are unchanged.
+- Founder-probability rounding has an explicit strict/normalization policy and
+  an adjustment ledger. Invalid probabilities still fail. Heritability inputs
+  are checked rather than silently ignored or clamped.
+- Weighted-mode bandwidth and search use dimensionless coordinates. Diagnostic
+  point estimates may change where the former absolute bandwidth floor applied;
+  fixed-locus bootstrap-SE Wald intervals remain the diagnostic CI method.
+- Degenerate per-locus diagnostics return unavailable values with reasons,
+  without replacing or manufacturing a primary estimate.
+- Sample policies and covariate exclusions are reported more clearly. Single
+  analyses retain role-specific samples; exact batch retains pair-complete
+  samples. Neither default policy has changed.
+- Quick-start settings explicitly select a faster Q reference and omit optional
+  sensitivities; they do not change package defaults. Documentation clarifies
+  effect units, the small kinship demonstration and the frozen multi-locus
+  example's reproducibility limits. Bundled synthetic datasets are unchanged.
+- Added the full GPL-3 license text and declared graphics/parallel imports.
+  HTML-disabled runs no longer advertise an absent report file.
+
 # qtl2mr 0.4.0
 
 - Added a compact synthetic 400-sample, 40-locus dataset and a worked

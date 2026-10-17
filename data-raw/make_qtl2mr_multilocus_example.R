@@ -3,16 +3,27 @@
 # Usage: Rscript data-raw/make_qtl2mr_multilocus_example.R INPUT.rds OUTPUT.rda
 #
 # Source: CTC tutorial construction, 2026-10-15, v0.4 background-QTL Case A.
-# Generation used master-seed provenance 2026101501: synthetic probabilities
+# Upstream generation used master-seed provenance 2026101501: synthetic probabilities
 # and family-AR kinship, X-only first-stage construction, then one algebraic
 # observational-target solve before MR. The full workshop history is not a
-# runtime dependency. The supplied frozen input is needed only for re-extraction.
+# runtime dependency for the installed example. The frozen input is needed
+# for re-extraction, is NOT included in the public repository, and cannot be
+# reconstructed from the installed 40-locus subset or this seed alone.
+# This script is NOT a self-contained from-seed simulation generator.
+# In particular, omitted traits/background loci contribute to the stored Y.
+# A future public generator would need the complete, independently reviewed
+# construction code/parameters and equality checks against this frozen object.
+# Do not substitute a new DGP, retune it, or overwrite the teaching fixture.
 
 extract_qtl2mr_multilocus_example <- function(input_file, output_file) {
   expected_md5 <- "3737665d82440de2cc9fed5b2c64b5a9"
   source_sha256 <- "23cf8f6a2c38637bfea6a0c9855f234247c6345ed3d46e8ff21271cd79ffb309"
-  stopifnot(file.exists(input_file),
-            identical(unname(tools::md5sum(input_file)), expected_md5))
+  if (!file.exists(input_file)) {
+    stop("The external frozen synthetic input is required for extraction; ",
+         "it is not distributed in this repository. This script cannot ",
+         "regenerate the upstream simulation from its seed.", call. = FALSE)
+  }
+  stopifnot(identical(unname(tools::md5sum(input_file)), expected_md5))
   original <- readRDS(input_file)
   ids <- sprintf("synthetic_mouse_%03d", seq_len(400L))
   stopifnot(identical(rownames(original$pheno), ids),
@@ -85,6 +96,9 @@ extract_qtl2mr_multilocus_example <- function(input_file, output_file) {
 
 if (sys.nframe() == 0L) {
   args <- commandArgs(trailingOnly = TRUE)
-  if (length(args) != 2L) stop("Supply the frozen synthetic input and destination .rda paths.")
+  if (length(args) != 2L) {
+    stop("This is an extractor, not a generator. Supply the separately frozen ",
+         "synthetic input and destination .rda paths.", call. = FALSE)
+  }
   extract_qtl2mr_multilocus_example(args[[1L]], args[[2L]])
 }

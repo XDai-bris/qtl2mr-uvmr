@@ -125,8 +125,12 @@ recomputes the median/mode. No mice or loci are resampled. These are
 nominal coverage is not established. Covariance-estimation uncertainty and
 cross-locus dependence are not propagated. Failed draws are counted and
 suppress the affected interval rather than being silently discarded.
-The weighted mode uses the same Gaussian kernel and bandwidth rule, with
-local grids and peak refinement to avoid losing a peak to a distant outlier.
+The weighted mode uses a Gaussian kernel and \code{bw.nrd0} bandwidth in
+dimensionless coordinates, without an absolute effect-unit bandwidth floor.
+Local grids and peak refinement avoid losing a peak to a distant outlier.
+Equal-height peaks are not a uniquely defined mode; numerical ties are resolved
+by proximity to the supplied per-locus estimates in their input order. Unit
+rescaling, including a sign reversal, preserves that tie convention.
 
 The local founder exposure score is
 \eqn{S_X = Z_m \hat b_X} for a locus, or the sum of selected-locus founder
@@ -135,7 +139,9 @@ founder-block instruments and is not a genome-wide polygenic score.
 
 The residual-variance diagnostic checks whether residual scale changes across
 this local score after mean adjustment. It is a QC diagnostic, not an
-alternative causal estimator.
+alternative causal estimator. This exported xPRS diagnostic uses ordinary
+regression and does not adjust for kinship; its p-values are not kinship-aware
+LMM tests. The prepared-input analysis does not run it automatically.
 }
 \section{Lifecycle}{
 \if{latex}{\out{\sloppy}}
@@ -152,5 +158,8 @@ The diagnostic-layer \code{estimates} table includes \code{theta}, \code{se},
 \code{bootstrap_failed_B}. An unavailable interval has missing bounds and an
 explanation in \code{note}. \code{level} applies to the scalar diagnostics;
 the primary profile interval remains at its fitted 95\% level.
+The \code{per_locus} table includes \code{diagnostic_status} and
+\code{diagnostic_note}. Degenerate or non-finite per-locus fits retain rows
+with unavailable diagnostic values; they are not replaced by zero effects.
 }
 \keyword{methods}

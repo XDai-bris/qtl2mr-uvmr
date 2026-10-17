@@ -82,6 +82,9 @@ mr_block_residual_covariance <- function(block,
   Omega_work <- qtl2mr_add_invariant_ridge(Omega_raw, ridge)
   W <- qtl2mr_mat_inv(Omega_work, ridge = 0)
   denom <- as.numeric(t(bx) %*% W %*% bx)
+  if (!is.finite(denom) || denom <= 0) {
+    stop("Residual diagnostic unavailable: exposure direction has no positive finite information", call. = FALSE)
+  }
   P_perp <- diag(nrow(Omega_raw)) - bx %*% (t(bx) %*% W) / denom
   V_r <- qtl2mr_sym(P_perp %*% Omega_raw %*% t(P_perp))
   list(
@@ -116,11 +119,21 @@ mr_block_so_diagnostics <- function(block,
   )
   if (!is.null(theta)) {
     fit$theta <- theta
-    fit$Q <- mr_block_q(block, theta, allow_cross_cov = allow_cross_cov, ridge = ridge)
+    fit$Q <- if (length(theta) == 1L && is.finite(theta)) {
+      mr_block_q(block, theta, allow_cross_cov = allow_cross_cov, ridge = ridge)
+    } else NA_real_
   }
-  Om_raw <- mr_block_omega(block, fit$theta, allow_cross_cov = allow_cross_cov, ridge = 0)
-  ev <- eigen(Om_raw, symmetric = TRUE, only.values = TRUE)$values
-  residual <- mr_block_residual(block, fit$theta, H = H)
+  diagnostic_note <- ""
+  geometry <- tryCatch({
+    if (length(fit$theta) != 1L || !is.finite(fit$theta)) stop("SO theta is unavailable")
+    Om_raw <- mr_block_omega(block, fit$theta, allow_cross_cov = allow_cross_cov, ridge = 0)
+    list(ev = eigen(Om_raw, symmetric = TRUE, only.values = TRUE)$values,
+      residual = mr_block_residual(block, fit$theta, H = H))
+  }, error = function(e) {
+    diagnostic_note <<- paste("Diagnostic unavailable:", conditionMessage(e))
+    list(ev = NA_real_, residual = NULL)
+  })
+  ev <- geometry$ev
   list(
     marker = block$marker %||% NA_character_,
     chr = block$chr %||% NA_character_,
@@ -130,11 +143,13 @@ mr_block_so_diagnostics <- function(block,
     profile_ci_upper = fit$profile_ci_upper,
     Q_min = fit$Q,
     Q_df = length(bx) - 1L,
-    Q_p_chisq = stats::pchisq(fit$Q, df = length(bx) - 1L, lower.tail = FALSE),
+    Q_p_chisq = if (nzchar(diagnostic_note)) NA_real_ else stats::pchisq(fit$Q, df = length(bx) - 1L, lower.tail = FALSE),
     F_X_block = mr_block_first_stage_f(block, ridge = ridge),
     omega_min_eigenvalue = min(ev),
     omega_condition_number = max(ev) / min(ev),
-    residual = residual,
+    residual = geometry$residual,
+    diagnostic_status = if (nzchar(diagnostic_note)) "unavailable" else "available",
+    diagnostic_note = diagnostic_note,
     fit = fit
   )
 }
@@ -156,9 +171,18 @@ founder_residual_scores <- function(block,
     )$theta
   }
   H <- qtl2mr_resolve_founder_H(block, H)
+  unavailable <- function(note) data.frame(
+    marker = block$marker %||% NA_character_, chr = block$chr %||% NA_character_,
+    theta = if (length(theta) == 1L) theta else NA_real_, founder = rownames(H),
+    e = NA_real_, z_diag = NA_real_, t_one_founder_vs_rest = NA_real_,
+    abs_t_one_founder_vs_rest = NA_real_, strong_abs_t_gt_2 = NA,
+    diagnostic_status = "unavailable", diagnostic_note = paste("Diagnostic unavailable:", note),
+    stringsAsFactors = FALSE)
+  if (length(theta) != 1L || !is.finite(theta)) return(unavailable("SO theta is unavailable"))
   d <- matrix(mr_block_residual(block, theta)$d, ncol = 1L)
-  residual_cov <- mr_block_residual_covariance(block, theta,
-    allow_cross_cov = allow_cross_cov, ridge = ridge)
+  residual_cov <- tryCatch(mr_block_residual_covariance(block, theta,
+    allow_cross_cov = allow_cross_cov, ridge = ridge), error = identity)
+  if (inherits(residual_cov, "error")) return(unavailable(conditionMessage(residual_cov)))
   V_r <- residual_cov$V_r
   V_e <- qtl2mr_sym(H %*% V_r %*% t(H))
   e <- as.numeric(H %*% d)
@@ -181,6 +205,8 @@ founder_residual_scores <- function(block,
     t_one_founder_vs_rest = t_one,
     abs_t_one_founder_vs_rest = abs(t_one),
     strong_abs_t_gt_2 = abs(t_one) > 2,
+    diagnostic_status = "available",
+    diagnostic_note = "",
     stringsAsFactors = FALSE
   )
 }

@@ -2,7 +2,8 @@ qtl2mr_validate_hsq <- function(hsq) {
   if (length(hsq) != 1L || !is.numeric(hsq) || is.object(hsq) || !is.finite(hsq)) {
     stop("hsq must be one finite numeric value", call. = FALSE)
   }
-  min(max(as.numeric(hsq), 0), 1)
+  if (hsq < 0 || hsq > 1) stop("hsq must be between 0 and 1; values are not clamped", call. = FALSE)
+  as.numeric(hsq)
 }
 
 qtl2mr_lmm_backend_provenance <- function(blocks = NULL) {

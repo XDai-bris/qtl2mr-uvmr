@@ -9,6 +9,8 @@ represented by founder haplotype probabilities rather than scalar SNP
 dosages.
 
 Current release: **v0.4.0**.
+This development branch contains unreleased v0.4.1 fixes; v0.4.1 has not been
+published. The installation links below intentionally point to v0.4.0.
 
 ## Installation
 
@@ -88,9 +90,28 @@ result <- run_qtl2mr_analysis(
   adapter = "prepared",
   loci = 2,
   output_dir = result_dir,
-  overwrite = TRUE
+  overwrite = TRUE,
+  make_figures = FALSE,
+  make_html = TRUE,
+  verbose = FALSE,
+  run_qtl2_validation = FALSE,
+  run_heteroskedasticity = FALSE,
+  diagnostic_bootstrap_B = 0L,
+  heterogeneity_method = "chisq",
+  run_loo_mr = FALSE,
+  run_instrument_sensitivity = FALSE,
+  progress = FALSE
 )
 ```
+
+These explicit fast-demo settings match the getting-started vignette; they
+do not change package defaults. The default `heterogeneity_method = "auto"`
+uses a chi-square Q reference for one locus and simulation for multiple loci
+(`heterogeneity_nsim = 1000L`). Each simulated Q draw refits MR, so this can
+dominate runtime even for two loci. Diagnostic bootstraps, leave-one-locus-out
+fits and sensitivity analyses also add time. Use `progress = TRUE` to see
+stage updates; the demo's approximate chi-square reference is not equivalent
+to the default simulated reference or a calibration guarantee.
 
 Read the reported estimate and any warnings:
 
@@ -117,6 +138,10 @@ is a reason to investigate identification, not a calibrated pass/fail rule.
 `qtl2mr_example` is synthetic teaching data. It is useful for checking an
 installation and learning the API, but it is not calibration or biological
 evidence.
+Its `true_theta = 0.75` is in original outcome units per exposure unit;
+the default output is in SD units. Do not compare those numbers directly.
+With a single common scaling, standardized truth is raw truth times
+SD(X)/SD(Y); the conversion is not a claim that this one fit recovers truth.
 
 ## Multi-locus example
 
@@ -131,6 +156,11 @@ vignette("multilocus-example", package = "qtl2mr")
 It includes covariates and synthetic kinship, and walks through the MR
 estimate, leave-one-locus-out checks, founder residuals and HTML report.
 It is a constructed teaching example, not method-calibration evidence.
+The shipped data reproduce the analysis, but the public extraction script
+does not regenerate the upstream frozen simulation from its recorded seed.
+It requires a separate frozen synthetic input that is not distributed here.
+The omitted traits and background loci cannot be reconstructed from this
+40-locus subset. See the walkthrough's provenance boundary.
 
 ## Using your own data
 
@@ -160,8 +190,9 @@ The main inputs are:
 - `marker_map`: marker chromosome and position information;
 - `selected_loci`: the loci to use as instruments.
 
-Sample IDs must be harmonized across these objects. Exposure and outcome
-samples may differ; overlap is determined from the available sample IDs.
+Sample IDs must be harmonized across these objects. The single-pair prepared
+analysis fits exposure and outcome on their separate role-specific usable
+samples; overlap is determined from the fitted sample IDs.
 
 Locus selection takes place before the main MR analysis. The package does not
 treat the bundled example thresholds as general instrument-selection rules.
@@ -186,8 +217,16 @@ underlying locus fits used different sample sets and SDs.
 | Fast multi-pair screen | `run_qtl2mr_batch_fast()` | Discovery-stage screening |
 | Parallel exposure blocks | `run_qtl2mr_batch_parallel_by_exposure()` | Larger screening runs |
 
-Use the exact workflows when pair-specific sample handling is required. The fast workflow uses a
-common complete sample set and may drop non-estimable loci, with those changes
+The exact batch workflows use **pair-common-complete** samples: both traits
+and covariates must be usable for the pair. This is not the single-pair
+analysis's role-specific sample policy. To compare the engines, restrict the
+single analysis with `sample_ids` (and any explicit role-specific sample
+filters) and the batch with `sample_rule$sample_ids` to the **same** usable
+IDs, and match loci, kinship, hsq, scaling and fitting options. A different
+sample mask is a different analysis, not by itself an engine discrepancy.
+
+The fast workflow uses a common complete sample set across all requested
+traits and may drop non-estimable loci, with those changes
 recorded in its result tables and run manifest. Important findings from a fast
 screen should be rerun with an exact workflow. Exact sample handling does not
 by itself establish calibrated inference.
