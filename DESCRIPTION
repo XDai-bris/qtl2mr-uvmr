@@ -1,7 +1,7 @@
 Package: qtl2mr
 Type: Package
 Title: Founder-Aware Mendelian Randomization in Multiparent Mice
-Version: 0.3.0.9000
+Version: 0.4.0
 Authors@R: person(given = "Xiaoyang", family = "Dai",
     role = c("aut", "cre"), email = "xd14188@bristol.ac.uk")
 Description: Direct selected-locus founder-aware linear mixed models and

@@ -1,4 +1,4 @@
-# qtl2mr development version (target v0.4.0)
+# qtl2mr 0.4.0
 
 - Added a compact synthetic 400-sample, 40-locus dataset and a worked
   multi-locus vignette with kinship, diagnostics and HTML reporting.
@@ -19,12 +19,15 @@
   replace unit-dependent local bracketing. Confidence sets retain unbounded
   and disconnected components; numerical status is separate from calibration.
 - Instrument selection, sample alignment, unknown options and batch resume
-  are being hardened to fail explicitly instead of changing analyses silently.
+  now fail explicitly instead of changing analyses silently.
 - Result reports state phenotype units, numerical limitations and the full
   confidence-set representation. Synthetic-only onboarding includes a
   nonzero-kinship LMM and a qtl2-to-prepared-input recipe.
-- This is a local development snapshot, not a release. Multi-platform and
-  public-distribution gates have not been completed.
+- Fixed synthetic regression inputs make the whole-line optimizer tests
+  reproducible across BLAS/LAPACK builds without relaxing their assertions.
+- First public source release from a new repository history. Release assets
+  include the source package with all three prebuilt HTML vignettes and a
+  separate SHA-256 checksum file.
 
 # qtl2MR 0.3.0
 

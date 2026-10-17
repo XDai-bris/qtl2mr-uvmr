@@ -8,11 +8,16 @@ Outbred and related multiparent populations. Genetic instruments are
 represented by founder haplotype probabilities rather than scalar SNP
 dosages.
 
-This is a development version for v0.4.0, not a released version.
+Current release: **v0.4.0**.
 
 ## Installation
 
-For a supplied source package, create a clean environment in a terminal:
+Download `qtl2mr_0.4.0.tar.gz` and `SHA256SUMS` from the
+[v0.4.0 release](https://github.com/XDai-bris/qtl2mr-uvmr/releases/tag/v0.4.0).
+Use the package file listed under Assets, not GitHub's automatically generated
+source-code archive. Keep the downloaded files in your working directory.
+
+Create a clean environment in a terminal:
 
 ```bash
 conda create -n qtl2mr-demo -c conda-forge r-base=4.4 r-fs -y
@@ -20,22 +25,20 @@ conda activate qtl2mr-demo
 R
 ```
 
-In R, use the exact file supplied with the reviewed build:
+In R:
 
 ```r
-pkg_file <- "qtl2mr_0.3.0.9000.tar.gz"
+pkg_file <- "qtl2mr_0.4.0.tar.gz"
 stopifnot(file.exists(pkg_file))
 install.packages(pkg_file, repos = NULL, type = "source")
 library(qtl2mr)
-packageVersion("qtl2mr")
+stopifnot(as.character(packageVersion("qtl2mr")) == "0.4.0")
 vignette("getting-started", package = "qtl2mr")
 ```
 
-This development filename is not a published download. A reviewed source
-tarball should include prebuilt vignettes, so students do not need to knit
-them during installation. Compare its SHA-256 with the supplied checksum
-before installing. GitHub installation instructions will be updated only
-after a release is authorized.
+The package includes three prebuilt HTML vignettes; you do not need to knit
+them during installation. Compare the package file's SHA-256 with `SHA256SUMS`
+before installing.
 
 `qtl2` is not required for fitting prepared inputs. It is useful for upstream
 genotype processing, QTL scans, or the optional comparison with `qtl2::scan1coef()`:
