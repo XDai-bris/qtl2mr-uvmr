@@ -56,7 +56,7 @@ test_that("onboarding documents sample, units and provenance boundaries", {
   expect_false(grepl("allele_probs <- allele_probs[autosomes]", upstream, fixed = TRUE))
   expect_match(upstream, "role-specific", fixed = TRUE)
   expect_match(upstream, "common complete", fixed = TRUE)
-  expect_match(upstream, "identical sample masks", fixed = TRUE)
+  expect_match(upstream, "identical samples", fixed = TRUE)
   getting <- paste(onboarding_vignette_source("getting-started"), collapse = "\n")
   expect_match(getting, "true_theta = 0.75", fixed = TRUE)
   expect_match(getting, "hsq = 0", fixed = TRUE)
@@ -75,8 +75,7 @@ test_that("README quick start keeps the documented explicit fast-demo settings",
   end <- which(seq_along(source) > start & source == ")")[[1L]]
   call <- parse(text = source[seq.int(start, end)])[[1L]][[3L]]
   fast <- as.list(call)[-1L]
-  settings <- c("adapter", "loci", "overwrite", "make_figures", "make_html",
-                "verbose", "run_qtl2_validation", "run_heteroskedasticity",
+  settings <- c("loci", "overwrite", "make_figures", "make_html", "verbose",
                 "diagnostic_bootstrap_B", "heterogeneity_method", "run_loo_mr",
                 "run_instrument_sensitivity", "progress")
   getting <- onboarding_vignette_source("getting-started")
@@ -85,9 +84,10 @@ test_that("README quick start keeps the documented explicit fast-demo settings",
   call <- parse(text = getting[seq.int(start, end)])[[1L]][[3L]]
   expect_identical(fast[settings], as.list(call)[-1L][settings])
   text <- paste(source, collapse = "\n")
-  expect_match(text, "unreleased v0.4.1", fixed = TRUE)
+  expect_match(text, "qtl2mr **0.5.0**, which has not been released yet", fixed = TRUE)
   expect_match(text, "releases/tag/v0.4.0", fixed = TRUE)
-  expect_match(text, "pair-common-complete", fixed = TRUE)
+  expect_match(text, "samples complete for both of its traits", fixed = TRUE)
+  expect_false(grepl("run_qtl2mr_batch_fast(r, p)`", sub("## Upgrading from 0.4.x.*", "", text), fixed = TRUE))
 })
 
 test_that("the historical extractor fails clearly without its undistributed input", {

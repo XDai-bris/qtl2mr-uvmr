@@ -33,8 +33,7 @@ as_qtl2mr_prepared_input <- function(allele_probs,
     hsq = hsq,
     sample_ids = sample_ids,
     metadata = metadata %||% list(),
-    probability_policy = probability_policy,
-    adapter = "prepared"
+    probability_policy = probability_policy
   )
   class(input) <- c("qtl2mr_prepared_input", "list")
   validate_qtl2mr_input(input)

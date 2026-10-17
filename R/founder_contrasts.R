@@ -1,4 +1,4 @@
-make_orthonormal_founder_contrasts <- function(founders = LETTERS[1:8]) {
+make_founder_contrasts <- function(founders = LETTERS[1:8]) {
   founders <- as.character(founders)
   if (length(founders) != 8L) stop("Expected exactly 8 founders", call. = FALSE)
   H <- stats::contr.helmert(length(founders))
@@ -9,8 +9,6 @@ make_orthonormal_founder_contrasts <- function(founders = LETTERS[1:8]) {
   validate_founder_contrasts(A, founders)
   A
 }
-
-make_founder_contrasts <- make_orthonormal_founder_contrasts
 
 validate_founder_contrasts <- function(A, founders = rownames(A), tol = 1e-10) {
   if (!is.matrix(A)) A <- as.matrix(A)

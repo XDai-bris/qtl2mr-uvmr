@@ -5,11 +5,15 @@
 \alias{fit_mr_locus_block}
 \alias{fit_multilocus_founder_mr}
 \alias{second_order_gls_ivw}
-\title{Core founder-aware LMM and second-order MR functions}
+\title{Advanced interface: founder LMM blocks and second-order MR}
 \description{
 \if{latex}{\out{\sloppy}}
-Fit selected-marker founder-aware LMM/GLS blocks and combine them with the
-overlap-aware second-order Founder GLS-IVW estimator.
+Low-level functions behind \code{run_qtl2mr_analysis()} and
+\code{run_qtl2mr_batch()}: fit founder-aware LMM blocks at single markers and
+combine them with the overlap-aware second-order estimator. They are intended
+for method development and checks; most analyses should use the two
+high-level workflows, which add input validation, sample accounting,
+diagnostics and reporting.
 }
 \usage{
 make_founder_contrasts(founders = LETTERS[1:8])

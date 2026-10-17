@@ -60,11 +60,6 @@ qtl2mr_require_qtl2 <- function() {
   invisible(TRUE)
 }
 
-qtl2mr_first_finite <- function(x, default = NA_real_) {
-  x <- x[is.finite(x)]
-  if (length(x)) x[[1]] else default
-}
-
 qtl2mr_as_named_numeric <- function(x, label = "phenotype") {
   if (is.data.frame(x) || is.matrix(x)) {
     if (ncol(x) != 1L) stop(label, " must have exactly one column", call. = FALSE)
@@ -441,45 +436,6 @@ qtl2mr_enforce_joint_psd <- function(Sigma_x,
     smax_after = after$smax,
     psd_valid_after = after$psd_valid
   )
-}
-
-qtl2mr_expand_scalar_bracket <- function(objective, center, spread, max_expand = 12L) {
-  if (!is.finite(center) || !is.finite(spread) || spread <= 0) {
-    stop("center and spread must be finite, with spread > 0", call. = FALSE)
-  }
-  lower <- center - spread
-  upper <- center + spread
-  f_center <- objective(center)
-  f_lower <- NA_real_
-  f_upper <- NA_real_
-  n_expand <- 0L
-  status <- "not_bracketed"
-  bracketed <- FALSE
-  for (i in seq.int(0L, max_expand)) {
-    f_lower <- objective(lower)
-    f_upper <- objective(upper)
-    if (is.finite(f_center) && is.finite(f_lower) && is.finite(f_upper) &&
-        f_lower > f_center && f_upper > f_center) {
-      status <- if (n_expand == 0L) "initial" else "expanded"
-      bracketed <- TRUE
-      break
-    }
-    if (i == max_expand) break
-    spread <- spread * 2
-    n_expand <- n_expand + 1L
-    lower <- center - spread
-    upper <- center + spread
-  }
-  if (!isTRUE(bracketed) && n_expand >= max_expand) status <- "max_expand_reached"
-  out <- c(lower = lower, upper = upper)
-  attr(out, "status") <- status
-  attr(out, "n_expand") <- n_expand
-  attr(out, "center") <- center
-  attr(out, "spread") <- spread
-  attr(out, "f_center") <- f_center
-  attr(out, "f_lower") <- f_lower
-  attr(out, "f_upper") <- f_upper
-  out
 }
 
 qtl2mr_profile_set <- function(evaluate, anchors, values, q_min, scale, level = 0.95) {

@@ -1,16 +1,3 @@
-qtl2mr_kinship_id <- function(kinship) {
-  if (is.null(kinship)) return("none")
-  d <- dim(kinship)
-  rn <- rownames(kinship)
-  cn <- colnames(kinship)
-  paste(
-    paste(d, collapse = "x"),
-    length(rn), if (length(rn)) rn[[1L]] else "", if (length(rn)) rn[[length(rn)]] else "",
-    length(cn), if (length(cn)) cn[[1L]] else "", if (length(cn)) cn[[length(cn)]] else "",
-    sep = "|"
-  )
-}
-
 qtl2mr_chr_option <- function(x, chr) {
   if (is.null(x)) return(NULL)
   if (is.list(x) && !is.data.frame(x)) return(x[[as.character(chr)]] %||% x[[1L]])

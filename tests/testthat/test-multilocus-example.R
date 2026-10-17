@@ -77,7 +77,6 @@ test_that("multi-locus example runs the public raw-unit workflow", {
   expect_equal(p$reported_ci_upper, -0.02953669, tolerance = 1e-3)
   expect_equal(unname(coef(lm(y ~ x1 + batch + age, data = cbind(d$pheno, d$covar)))["x1"]),
     0.05, tolerance = 1e-10)
-  expect_identical(result$qtl2_validation_status$validation_status, "not_requested")
   methods <- qtl2mr_method_comparison(result)
   expect_identical(methods$method, c("Star-space qtl2MR", "Sigma_xy=0 qtl2MR",
     "Two-step IVW", "Weighted median", "Weighted mode"))

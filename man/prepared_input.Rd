@@ -3,7 +3,7 @@
 \alias{as_qtl2mr_prepared_input}
 \alias{validate_qtl2mr_input}
 \alias{fit_mr_locus_block_overlap}
-\title{Prepared qtl2MR inputs and explicit overlap locus blocks}
+\title{Prepare and validate the input for one analysis}
 \description{
 \if{latex}{\out{\sloppy}}
 Create and validate an explicit qtl2MR prepared-input object, and fit a
@@ -31,8 +31,10 @@ fit_mr_locus_block_overlap(genoprobs, exposure, outcome,
 \arguments{
 \if{latex}{\out{\sloppy}}
 \item{allele_probs, genoprobs}{qtl2-style allele probability object: a named
-list of sample by founder by marker arrays. All checked values must be finite
-and in [0,1]; genotype-state probabilities and allele dosages require conversion.}
+list of sample by founder by marker arrays, for example
+\code{qtl2::genoprob_to_alleleprob()} output. Checked values must be finite and
+within [0, 1] up to floating-point error of 1e-8; genotype-state probabilities
+(36 states) and allele dosages must be converted first.}
 \item{probability_policy}{Prepared-input sum policy. The default
 \code{"normalize_rounding"} accepts a maximum absolute founder-sum deviation
 of \code{n_founders * 5e-5} (0.0004 for eight founders), the worst-case bound
@@ -58,7 +60,8 @@ selected-locus list is supplied. Defaults to false. This is not a recommended
 instrument-selection rule.}
 \item{exposure, outcome}{For prepared-input construction and validation,
 optional exposure and outcome trait names stored with the prepared object or
-supplied to \code{run_qtl2mr_analysis()}. For
+supplied to \code{run_qtl2mr_analysis()}; they must be two different traits.
+An empty \code{selected_loci} is an error. For
 \code{fit_mr_locus_block_overlap()}, named exposure and outcome phenotype
 vectors.}
 \item{exposure_samples, outcome_samples}{Optional role-specific sample filters.
@@ -148,12 +151,13 @@ validate_qtl2mr_input(input, require_selected_loci = TRUE)
 }
 \section{Lifecycle}{
 \if{latex}{\out{\sloppy}}
-\code{as_qtl2mr_prepared_input()} and \code{validate_qtl2mr_input()} are
-release-candidate public input functions. They expect analysis-ready qtl2MR
-components and do not implement a full automatic qtl2 cross parser. The current
-scope is 8-founder DO/qtl2, autosomal additive loci, normal traits, additive
-covariates, selected markers, and one union-sample kinship source.
-\code{fit_mr_locus_block_overlap()} remains a low-level helper.
+\code{as_qtl2mr_prepared_input()} and \code{validate_qtl2mr_input()} expect
+analysis-ready components; \code{vignette("from-qtl2", package = "qtl2mr")}
+shows how to produce them from a qtl2 cross. The current scope is eight-founder
+populations, autosomal additive loci, continuous traits, additive covariates,
+selected markers and one kinship source.
+\code{fit_mr_locus_block_overlap()} is part of the advanced low-level
+interface.
 }
 \value{
 \if{latex}{\out{\sloppy}}

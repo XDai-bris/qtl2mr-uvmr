@@ -201,7 +201,6 @@ test_that("high-level and exact workflows fail closed on non-estimable loci", {
   expect_error(
     run_qtl2mr_analysis(
       fixture$input,
-      adapter = "prepared",
       output_dir = tempfile("qtl2mr-confirmatory-fail-"),
       overwrite = TRUE,
       make_html = FALSE,
@@ -225,22 +224,23 @@ test_that("high-level and exact workflows fail closed on non-estimable loci", {
   expect_match(exact$main_results$error_message, "Founder contrast coefficients are not estimable")
   expect_equal(exact$run_manifest$nonestimable_locus_policy, "fail_closed")
 
-  grouped <- run_qtl2mr_batch_exact_grouped(
+  batch_common <- run_qtl2mr_batch(
     fixture$resources,
     fixture$pairs,
+    sample_policy = "batch_common_complete",
     fit_options = list(diagnostic_bootstrap_B = 0L),
     progress = FALSE
   )
-  expect_equal(grouped$main_results$status, "error")
-  expect_match(grouped$main_results$error_message, "Founder contrast coefficients are not estimable")
-  expect_equal(grouped$run_manifest$nonestimable_locus_policy, "fail_closed")
+  expect_equal(batch_common$main_results$status, "error")
+  expect_match(batch_common$main_results$error_message, "Founder contrast coefficients are not estimable")
 })
 
-test_that("fast screening drops non-estimable loci with a complete audit", {
+test_that("on_nonestimable_locus = 'drop' drops non-estimable loci with a complete audit", {
   fixture <- make_nonestimable_batch_fixture(seed = 911L)
-  fast <- run_qtl2mr_batch_fast(
+  fast <- run_qtl2mr_batch(
     fixture$resources,
     fixture$pairs,
+    on_nonestimable_locus = "drop",
     fit_options = list(diagnostic_bootstrap_B = 0L),
     progress = FALSE
   )
@@ -258,7 +258,7 @@ test_that("fast screening drops non-estimable loci with a complete audit", {
   expect_match(dropped$drop_reason, "nonestimable_founder_contrast")
   expect_true(nzchar(dropped$error_message))
   expect_true("dropped_nonestimable_loci" %in% fast$warnings$warning_id)
-  expect_equal(fast$run_manifest$nonestimable_locus_policy, "drop_audited_screening")
+  expect_equal(fast$run_manifest$nonestimable_locus_policy, "drop_audited")
   expect_equal(fast$run_manifest$n_loci_dropped_nonestimable, 1L)
 })
 
@@ -315,7 +315,7 @@ test_that("scan locus selector reproduces contiguous LOD island maxima", {
   expect_equal(selected$locus_rank, 1:3)
 })
 
-test_that("multi-trait selected loci subset allele probabilities to union markers", {
+test_that("multi-trait locus selection returns one table across instrument traits", {
   gp1 <- make_sim_genoprobs(n = 30, marker = "m1", seed = 816)
   ids <- dimnames(gp1[[1]])[[1]]
   founders <- dimnames(gp1[[1]])[[2]]
@@ -341,12 +341,8 @@ test_that("multi-trait selected loci subset allele probabilities to union marker
   selected <- qtl2mr_select_loci_for_traits(qtl_scan, marker_map, c("x", "y"), lod_thresh = 4)
   expect_true(all(c("instrument_trait", "marker", "chr", "exposure_lod") %in% names(selected)))
   expect_equal(sort(unique(selected$instrument_trait)), c("x", "y"))
-  subset_gp <- qtl2mr_subset_allele_probs_to_loci(gp, selected)
-  expect_s3_class(subset_gp, "calc_genoprob")
-  expect_equal(dimnames(subset_gp[["1"]])[[3]], c("m1", "m2"))
-  expect_equal(dimnames(subset_gp[["2"]])[[3]], "m4")
-  expect_equal(dim(subset_gp[["1"]])[1:2], c(30, 8))
-  expect_equal(attr(subset_gp, "qtl2mr_subset")$n_retained_loci, 3L)
+  expect_equal(selected$marker[selected$instrument_trait == "x"], c("m4", "m1"))
+  expect_equal(selected$marker[selected$instrument_trait == "y"], c("m4", "m2"))
 })
 
 test_that("LOD selection validates the requested instrument trait before peak picking", {
@@ -438,22 +434,15 @@ test_that("marker drop provenance distinguishes nonestimable and general fitting
   expect_equal(qtl2mr:::qtl2mr_marker_drop_reason(list()), "marker_fit_error")
 })
 
-test_that("parallel group failures retain their group key without aggregation errors", {
-  groups <- list(
-    list(key = "traitA", pairs = data.frame(exposure = "traitA", outcome = "outcomeA")),
-    list(key = "traitB", pairs = data.frame(exposure = "traitB", outcome = "outcomeB"))
-  )
-  failure <- qtl2mr:::qtl2mr_parallel_group_failure(groups[[1L]], simpleError("worker root cause"))
-  successful <- list(run_manifest = data.frame(context_cache_hits = 0L))
-  collected <- qtl2mr:::qtl2mr_collect_parallel_group_results(list(failure, successful), groups, fail_fast = FALSE)
-  expect_equal(nrow(collected$failures), 1L)
-  expect_equal(collected$failures$exposure_group, "traitA")
-  expect_match(collected$failures$error_message, "worker root cause")
-  expect_length(collected$successes, 1L)
-  expect_error(
-    qtl2mr:::qtl2mr_collect_parallel_group_results(list(failure), groups[1L], fail_fast = TRUE),
-    "traitA.*worker root cause"
-  )
+test_that("failed parallel workers become one error row per affected pair", {
+  pairs <- data.frame(pair_id = c("a", "b"), exposure = "traitA", outcome = c("y1", "y2"),
+    instrument_trait = "traitA", stringsAsFactors = FALSE)
+  rows <- qtl2mr:::qtl2mr_batch_worker_failure_rows(pairs, "parallel worker failed: root cause",
+    "pair_common_complete")
+  expect_identical(rows$main$pair_id, c("a", "b"))
+  expect_true(all(rows$main$status == "error"))
+  expect_true(all(rows$error$stage == "parallel_worker"))
+  expect_match(rows$error$error_message, "root cause")
 })
 
 test_that("stripped MR block cache refits first-stage and Steiger filters", {
@@ -574,7 +563,7 @@ test_that("compact batch runner is fail-soft and writes compact outputs", {
     "batch_config.json"
   )
   expect_true(all(file.exists(file.path(out_dir, expected))))
-  expect_false(batch$run_manifest$sample_approximation)
+  expect_true(dir.exists(file.path(out_dir, "batch_pair_records")))
   expect_false(file.exists(file.path(out_dir, "report.html")))
   expect_false(dir.exists(file.path(out_dir, "figures")))
 })
@@ -605,17 +594,17 @@ test_that("batch_common_complete sample rule uses one sample set across pairs", 
                       stringsAsFactors = FALSE)
   batch <- run_qtl2mr_batch(
     resources, pairs,
-    sample_rule = list(mode = "batch_common_complete"),
+    sample_policy = "batch_common_complete",
     fit_options = list(cache_contexts = TRUE, diagnostic_bootstrap_B = 0L, min_samples = 20L),
     progress = FALSE
   )
   expect_equal(batch$main_results$n_overlap_median, c(46, 46))
-  expect_equal(batch$run_manifest$sample_mode, "batch_common_complete")
+  expect_equal(batch$run_manifest$sample_policy, "batch_common_complete")
   expect_equal(batch$run_manifest$batch_common_n, 46L)
   expect_gt(batch$run_manifest$context_cache_hits, 0)
 })
 
-test_that("fast batch wrapper uses batch-common samples and caches", {
+test_that("batch-common samples share cached fits and match pair-common without missing data", {
   gp <- make_sim_genoprobs(n = 60, marker = "m1", seed = 851)
   ids <- dimnames(gp[[1]])[[1]]
   A <- make_founder_contrasts(LETTERS[1:8])
@@ -634,20 +623,20 @@ test_that("fast batch wrapper uses batch-common samples and caches", {
                                         marker_map = marker_map)
   pairs <- data.frame(exposure = c("x", "x"), outcome = c("y", "z"),
                       stringsAsFactors = FALSE)
-  out_dir <- tempfile("qtl2mr-fast-")
-  fast <- run_qtl2mr_batch_fast(resources, pairs, output_dir = out_dir, progress = FALSE)
+  out_dir <- tempfile("qtl2mr-batch-common-")
+  shared <- run_qtl2mr_batch(resources, pairs, sample_policy = "batch_common_complete",
+    output_dir = out_dir, progress = FALSE)
   exact <- run_qtl2mr_batch(resources, pairs, progress = FALSE)
 
-  expect_equal(fast$run_manifest$sample_mode, "batch_common_complete")
-  expect_true(fast$run_manifest$sample_approximation)
-  expect_equal(fast$sample_qc$sample_retention_ratio, 1)
-  expect_equal(fast$run_manifest$sample_retention_gate_status, "pass")
-  expect_gt(fast$run_manifest$lmm_fit_cache_hits, 0)
+  expect_equal(shared$run_manifest$sample_policy, "batch_common_complete")
+  expect_equal(shared$sample_qc$sample_retention_ratio, 1)
+  expect_equal(shared$run_manifest$sample_retention_gate_status, "pass")
+  expect_gt(shared$run_manifest$lmm_fit_cache_hits, 0)
   expect_true(file.exists(file.path(out_dir, "batch_sample_qc.csv")))
-  expect_equal(fast$main_results$theta, exact$main_results$theta, tolerance = 1e-10)
+  expect_equal(shared$main_results$theta, exact$main_results$theta, tolerance = 1e-10)
 })
 
-test_that("fast batch wrapper enforces and can override sample-retention gate", {
+test_that("batch-common retention gate stops early and can be relaxed explicitly", {
   gp <- make_sim_genoprobs(n = 60, marker = "m1", seed = 861)
   ids <- dimnames(gp[[1]])[[1]]
   A <- make_founder_contrasts(LETTERS[1:8])
@@ -668,27 +657,22 @@ test_that("fast batch wrapper enforces and can override sample-retention gate", 
                                         marker_map = marker_map)
   pairs <- data.frame(exposure = c("x", "x"), outcome = c("y", "z"),
                       stringsAsFactors = FALSE)
-  out_dir <- tempfile("qtl2mr-fast-stop-")
+  out_dir <- tempfile("qtl2mr-gate-stop-")
   expect_error(
-    run_qtl2mr_batch_fast(resources, pairs, fit_options = list(min_samples = 9L),
-                        output_dir = out_dir, progress = FALSE),
-    "sample retention"
+    run_qtl2mr_batch(resources, pairs, sample_policy = "batch_common_complete",
+      fit_options = list(min_samples = 5L), output_dir = out_dir, progress = FALSE),
+    "below min_sample_retention"
   )
-  expect_true(file.exists(file.path(out_dir, "batch_sample_qc.csv")))
-  stopped_qc <- utils::read.csv(file.path(out_dir, "batch_sample_qc.csv"))
-  expect_equal(stopped_qc$sample_retention_gate_status, "fail")
+  expect_false(dir.exists(out_dir))
 
-  fast <- run_qtl2mr_batch_fast(
-    resources, pairs,
-    allow_sample_loss = TRUE,
-    fit_options = list(min_samples = 9L),
-    progress = FALSE
-  )
-  expect_equal(fast$sample_qc$sample_retention_gate_status, "override")
-  expect_true("batch_common_sample_retention_low" %in% fast$warnings$warning_id)
+  relaxed <- run_qtl2mr_batch(resources, pairs, sample_policy = "batch_common_complete",
+    min_sample_retention = 0, fit_options = list(min_samples = 5L), progress = FALSE)
+  expect_equal(relaxed$sample_qc$sample_retention_gate_status, "pass")
+  expect_lt(relaxed$sample_qc$sample_retention_ratio, 0.85)
+  expect_equal(relaxed$run_manifest$sample_retention_min, 0)
 })
 
-test_that("parallel-by-exposure batch wrapper merges group results", {
+test_that("n_workers splits work by exposure without changing results", {
   gp <- make_sim_genoprobs(n = 62, marker = "m1", seed = 871)
   ids <- dimnames(gp[[1]])[[1]]
   A <- make_founder_contrasts(LETTERS[1:8])
@@ -715,115 +699,13 @@ test_that("parallel-by-exposure batch wrapper merges group results", {
     stringsAsFactors = FALSE
   )
   out_dir <- tempfile("qtl2mr-parallel-")
-  parallel_batch <- run_qtl2mr_batch_parallel_by_exposure(
-    resources, pairs,
-    n_workers = 1L,
-    output_dir = out_dir,
-    progress = FALSE
-  )
-  fast_batch <- run_qtl2mr_batch_fast(resources, pairs, progress = FALSE)
+  parallel_batch <- run_qtl2mr_batch(resources, pairs, n_workers = 2L, output_dir = out_dir, progress = FALSE)
+  serial_batch <- run_qtl2mr_batch(resources, pairs, progress = FALSE)
 
-  expect_equal(parallel_batch$main_results$pair_id, fast_batch$main_results$pair_id)
-  expect_equal(parallel_batch$main_results$theta, fast_batch$main_results$theta, tolerance = 1e-10)
-  expect_equal(parallel_batch$run_manifest$parallel_strategy, "by_exposure")
-  expect_equal(parallel_batch$run_manifest$parallel_backend, "sequential")
-  expect_equal(parallel_batch$run_manifest$n_groups, 2L)
-  expect_equal(parallel_batch$run_manifest$n_workers, 1L)
-  expect_true(parallel_batch$run_manifest$sample_approximation)
-  expect_true(dir.exists(file.path(out_dir, "by_exposure", "x")))
+  expect_equal(parallel_batch$main_results$pair_id, serial_batch$main_results$pair_id)
+  expect_identical(parallel_batch$main_results$theta, serial_batch$main_results$theta)
+  expect_equal(parallel_batch$run_manifest$n_workers, 2L)
+  expect_equal(serial_batch$run_manifest$parallel_backend, "sequential")
+  expect_length(list.files(file.path(out_dir, "batch_pair_records")), 3L)
   expect_true(file.exists(file.path(out_dir, "batch_main_results.csv")))
-
-  exact_parallel <- run_qtl2mr_batch_parallel_by_exposure(
-    resources, pairs,
-    fast = FALSE,
-    n_workers = 1L,
-    progress = FALSE
-  )
-  expect_false(exact_parallel$run_manifest$sample_approximation)
-  expect_equal(exact_parallel$run_manifest$sample_mode, "common_complete")
-})
-
-test_that("exact grouped batch plan groups identical pair sample sets", {
-  gp <- make_sim_genoprobs(n = 64, marker = "m1", seed = 881)
-  ids <- dimnames(gp[[1]])[[1]]
-  A <- make_founder_contrasts(LETTERS[1:8])
-  Z <- gp[[1]][, , "m1"] %*% A
-  pheno <- data.frame(
-    x = as.numeric(0.7 * Z[, "FC1"] + stats::rnorm(length(ids), sd = 0.45)),
-    w = as.numeric(0.5 * Z[, "FC2"] + stats::rnorm(length(ids), sd = 0.45)),
-    y = as.numeric(0.4 * Z[, "FC1"] + stats::rnorm(length(ids), sd = 0.45)),
-    z = as.numeric(0.3 * Z[, "FC2"] + stats::rnorm(length(ids), sd = 0.45)),
-    row.names = ids
-  )
-  pheno[ids[1:4], c("y", "z")] <- NA
-  covar <- data.frame(c1 = stats::rnorm(length(ids)), row.names = ids)
-  marker_map <- data.frame(marker = "m1", chr = "1", pos = 1, stringsAsFactors = FALSE)
-  scan <- list(
-    x = matrix(5.5, nrow = 1, dimnames = list("m1", "lod")),
-    w = matrix(5.2, nrow = 1, dimnames = list("m1", "lod"))
-  )
-  resources <- qtl2mr_prepare_resources(gp, kinship = NULL, pheno = pheno,
-                                        covar = covar, qtl_scan = scan,
-                                        marker_map = marker_map)
-  pairs <- data.frame(
-    exposure = c("x", "x", "w"),
-    outcome = c("y", "z", "z"),
-    stringsAsFactors = FALSE
-  )
-
-  plan <- plan_qtl2mr_batch_exact_groups(resources, pairs)
-  expect_s3_class(plan, "qtl2mr_exact_group_plan")
-  expect_equal(plan$workload_summary$n_instrument_requests, 2L)
-  expect_equal(plan$workload_summary$n_exact_sample_groups, 2L)
-  expect_equal(
-    plan$sample_groups$n_pairs[plan$sample_groups$exposure == "x"],
-    2L
-  )
-  expect_false(plan$workload_summary$sample_approximation)
-  expect_equal(
-    unique(plan$pair_plan$sample_group_id[plan$pair_plan$exposure == "x"]),
-    plan$pair_plan$sample_group_id[plan$pair_plan$pair_id == "x__to__y"]
-  )
-})
-
-test_that("exact grouped batch runner matches exact lazy batch", {
-  gp <- make_sim_genoprobs(n = 66, marker = "m1", seed = 891)
-  ids <- dimnames(gp[[1]])[[1]]
-  A <- make_founder_contrasts(LETTERS[1:8])
-  Z <- gp[[1]][, , "m1"] %*% A
-  pheno <- data.frame(
-    x = as.numeric(0.7 * Z[, "FC1"] + stats::rnorm(length(ids), sd = 0.45)),
-    w = as.numeric(0.5 * Z[, "FC2"] + stats::rnorm(length(ids), sd = 0.45)),
-    y = as.numeric(0.4 * Z[, "FC1"] + stats::rnorm(length(ids), sd = 0.45)),
-    z = as.numeric(0.3 * Z[, "FC2"] + stats::rnorm(length(ids), sd = 0.45)),
-    row.names = ids
-  )
-  pheno[ids[1:3], c("y", "z")] <- NA
-  covar <- data.frame(c1 = stats::rnorm(length(ids)), row.names = ids)
-  marker_map <- data.frame(marker = "m1", chr = "1", pos = 1, stringsAsFactors = FALSE)
-  scan <- list(
-    x = matrix(5.5, nrow = 1, dimnames = list("m1", "lod")),
-    w = matrix(5.2, nrow = 1, dimnames = list("m1", "lod"))
-  )
-  resources <- qtl2mr_prepare_resources(gp, kinship = NULL, pheno = pheno,
-                                        covar = covar, qtl_scan = scan,
-                                        marker_map = marker_map)
-  pairs <- data.frame(
-    exposure = c("x", "x", "w"),
-    outcome = c("y", "z", "z"),
-    stringsAsFactors = FALSE
-  )
-  out_dir <- tempfile("qtl2mr-exact-grouped-")
-  grouped <- run_qtl2mr_batch_exact_grouped(resources, pairs, output_dir = out_dir, progress = FALSE)
-  exact <- run_qtl2mr_batch(resources, pairs, progress = FALSE)
-
-  expect_equal(grouped$main_results$pair_id, exact$main_results$pair_id)
-  expect_equal(grouped$main_results$theta, exact$main_results$theta, tolerance = 1e-10)
-  expect_equal(grouped$main_results$se, exact$main_results$se, tolerance = 1e-10)
-  expect_equal(grouped$main_results$n_overlap_median, exact$main_results$n_overlap_median)
-  expect_equal(grouped$run_manifest$execution_strategy, "exact_sample_grouped")
-  expect_false(grouped$run_manifest$sample_approximation)
-  expect_true(file.exists(file.path(out_dir, "batch_exact_group_plan.csv")))
-  expect_true(file.exists(file.path(out_dir, "batch_sample_groups.csv")))
-  expect_true(file.exists(file.path(out_dir, "batch_workload_summary.csv")))
 })

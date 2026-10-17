@@ -7,33 +7,23 @@
 \alias{qtl2mr_output_paths}
 \alias{qtl2mr_method_comparison}
 \alias{export_qtl2mr_lite_result}
-\alias{plot_method_comparison}
-\title{High-level qtl2MR analysis and reporting API}
+\title{Run and report one exposure-outcome analysis}
 \description{
 \if{latex}{\out{\sloppy}}
-Run the packaged qtl2MR workflow, write a standardized result directory, and
-create whole-analysis or single-locus reports.
+Fit the founder-aware MR analysis for one exposure-outcome pair, write a
+result folder with tables, figures and an HTML report, and read the main
+parts of the result.
 }
 \usage{
 run_qtl2mr_analysis(input, exposure = NULL, outcome = NULL,
-  adapter = c("auto", "prepared"), output_dir = NULL, loci = NULL,
-  overwrite = FALSE, make_html = TRUE, make_figures = TRUE,
-  verbose = TRUE, run_qtl2_validation = FALSE,
-  run_heteroskedasticity = TRUE, heteroskedasticity_B = 300L,
-  diagnostic_bootstrap_B = 500L, diagnostic_bootstrap_seed = 1L,
+  output_dir = NULL, loci = NULL, overwrite = FALSE, make_html = TRUE,
+  make_figures = TRUE, verbose = TRUE, diagnostic_bootstrap_B = 500L,
+  diagnostic_bootstrap_seed = 1L,
   reported_estimator_policy = c("diagnostic_only", "strict_so", "auto_fallback"),
   heterogeneity_method = c("auto", "simulation", "chisq", "none"),
   heterogeneity_nsim = 1000L, heterogeneity_seed = 1L,
   run_loo_mr = TRUE, run_instrument_sensitivity = TRUE,
   progress = NULL, ...)
-
-report_qtl2mr_locus(result, locus_id, output_dir = NULL,
-  make_html = TRUE, make_figures = TRUE)
-
-validate_qtl2_scan1coef(genoprobs, pheno, kinship = NULL,
-  addcovar = NULL, contrasts = NULL, hsq = NULL, marker = NULL,
-  sample_ids = NULL, standardize_pheno = FALSE, reml = TRUE,
-  tolerance = 1e-6)
 
 qtl2mr_primary_result(result)
 
@@ -43,181 +33,164 @@ qtl2mr_output_paths(result, detail = FALSE)
 
 qtl2mr_method_comparison(result)
 
+report_qtl2mr_locus(result, locus_id, output_dir = NULL,
+  make_html = TRUE, make_figures = TRUE)
+
 export_qtl2mr_lite_result(result_dir, dest_zip = NULL,
   max_file_mb = 10, include_rds = FALSE)
 
-plot_method_comparison(methods, main = "qtl2MR method comparison",
-  xlab = "MR effect", show_value_labels = TRUE, primary_method = NULL, ...)
+validate_qtl2_scan1coef(genoprobs, pheno, kinship = NULL,
+  addcovar = NULL, contrasts = NULL, hsq = NULL, marker = NULL,
+  sample_ids = NULL, standardize_pheno = FALSE, reml = TRUE,
+  tolerance = 1e-6)
 }
 \arguments{
 \if{latex}{\out{\sloppy}}
-\item{input}{A \code{qtl2mr_prepared_input} object.}
-\item{adapter}{High-level input adapter. \code{"auto"} accepts a
-\code{qtl2mr_prepared_input}; \code{"prepared"} requests it explicitly.}
-\item{exposure, outcome}{Trait names. Prepared inputs may store these names in
-the prepared object or receive them here.}
-\item{output_dir}{Optional destination directory. If omitted,
-\code{run_qtl2mr_analysis()} creates a unique result directory under
-\code{tempdir()/results}. Set option \code{qtl2mr.output_root} or environment
-variable \code{QTL2MR_OUTPUT_ROOT} to opt into another root.}
-\item{loci}{Optional selected loci. A single numeric value is interpreted as a
-top-\eqn{n} smoke-test cap; a character vector is interpreted as marker IDs.}
-\item{overwrite}{Whether a non-empty \code{output_dir} may be reused.}
-\item{make_html, make_figures}{Whether to create report HTML and figure files.}
-\item{verbose}{Whether to print routine run messages and the standard result
-summary. If \code{progress = NULL}, it also controls whether progress is shown.}
-\item{progress}{Progress display mode. \code{NULL} follows \code{verbose};
-\code{TRUE} prints progress and writes \code{logs/progress.log};
-\code{FALSE} disables progress output and progress logging; \code{"log"}
-writes only \code{logs/progress.log}. Console progress uses messages, so
-\code{suppressMessages()} hides it without disabling the log.}
-\item{run_qtl2_validation}{Whether to record that optional qtl2 parity
-validation should be performed separately. Defaults to \code{FALSE}. Primary
-prepared analysis never invokes qtl2. When \code{TRUE}, the result records an
-informational not-available status with directions to
-\code{validate_qtl2_scan1coef()} and explicit generic inputs.}
-\item{run_heteroskedasticity, heteroskedasticity_B}{Retained for compatibility;
-adapter-specific heteroskedasticity diagnostics are not run automatically by
-the prepared-input workflow.}
-\item{diagnostic_bootstrap_B}{Parametric-bootstrap draws for weighted
-median/mode diagnostics. Intervals are the original estimate plus or minus
-1.96 times bootstrap SD, using independent normal draws of per-locus effects
-and fixed loci/weights. They are approximate 95\% \code{bootstrap-SE Wald}
-intervals, not profile CIs. Set to \code{0L} for point estimates only or an
-integer of at least two; the default is \code{500L}.}
-\item{diagnostic_bootstrap_seed}{Random seed for weighted median/mode
-parametric-bootstrap confidence intervals.}
-\item{reported_estimator_policy}{How to choose the user-facing reported
-estimate when the star-space second-order optimizer is not well bracketed or
-has a non-finite profile interval. The default, \code{"diagnostic_only"},
-reports the star-space SO estimate for a numerically acceptable, bounded fit
-and otherwise returns no reported estimate (estimate, SE, and CI are \code{NA}) while retaining
-the raw SO and diagnostic comparator fields. \code{"strict_so"} always
-reports the star-space SO estimate with reliability warnings.
-\code{"auto_fallback"} is an explicit compatibility opt-in that reports the
-Two-step IVW diagnostic estimate when SO is unreliable and a finite diagnostic
-estimate is available.}
-\item{heterogeneity_method}{How to report the aggregate Q heterogeneity
-p-value. \code{"auto"} uses a chi-square reference for single-locus analyses
-and conditional residual simulation for multi-locus analyses.}
-\item{heterogeneity_nsim}{Number of conditional residual simulations used to
-calibrate the aggregate multi-locus Q heterogeneity p-value. Set to \code{0L}
-to skip calibration in timing-only runs.}
-\item{heterogeneity_seed}{Random seed for heterogeneity simulation
-calibration.}
-\item{run_loo_mr}{Whether to run leave-one-locus-out global MR sensitivity.}
-\item{run_instrument_sensitivity}{Whether to run selected-locus instrument-set
-sensitivity refits.}
-\item{show_value_labels}{Whether \code{plot_method_comparison()} should draw
-estimate/interval text labels beside plotted points.}
-\item{result}{A \code{qtl2mr_analysis_result} object, a pilot result where
-documented, or a path to \code{result_object.rds} for locus reports.}
-\item{detail}{For \code{qtl2mr_output_paths()}, whether to return the full
-file-by-file output manifest. The default \code{FALSE} returns a compact index
-of the main report, summary, result table, manifest, and RDS object.}
-\item{result_dir}{A qtl2MR result directory or \code{qtl2mr_analysis_result}
-object for lite export.}
-\item{dest_zip}{Optional destination zip path for lite export.}
-\item{max_file_mb}{Maximum file size included in the lite export.}
-\item{include_rds}{Whether complete RDS objects are included in the lite
-export. Defaults to \code{FALSE}.}
+\item{input}{An object created by \code{\link{as_qtl2mr_prepared_input}()}.}
+\item{exposure, outcome}{Trait names; default to the names stored in
+\code{input}. They must differ.}
+\item{output_dir}{Destination directory. If omitted, a new directory is created
+under \code{tempdir()}; set option \code{qtl2mr.output_root} or environment
+variable \code{QTL2MR_OUTPUT_ROOT} to use another root.}
+\item{loci}{Optional restriction of the selected loci: a positive integer keeps
+the first \eqn{n} rows of \code{selected_loci}; a character vector keeps the
+named markers.}
+\item{overwrite}{Allow replacing an existing qtl2mr result directory. Only a
+directory previously written by qtl2mr can be replaced; other non-empty
+directories are refused.}
+\item{make_html, make_figures}{Write \code{report.html} and the figure files.}
+\item{verbose}{Print the result summary at the end; also controls progress
+when \code{progress = NULL}.}
+\item{diagnostic_bootstrap_B}{Parametric-bootstrap draws for the weighted
+median and weighted mode comparators (\code{0} for point estimates only).
+These comparators are diagnostics, not the reported estimate.}
+\item{diagnostic_bootstrap_seed}{Seed for those draws; the global random-number
+state is restored afterwards.}
+\item{reported_estimator_policy}{\code{"diagnostic_only"} (default) reports the
+second-order estimate only when it has a single bounded profile confidence
+interval, and otherwise reports \code{NA}. \code{"strict_so"} always reports the
+second-order estimate. \code{"auto_fallback"} reports the Two-step IVW
+comparator when the second-order fit is not reportable.}
+\item{heterogeneity_method}{Reference distribution for the Q heterogeneity
+p-value. \code{"auto"} uses chi-square for one locus and conditional residual
+simulation for several loci. \code{"chisq"} avoids the simulation.}
+\item{heterogeneity_nsim, heterogeneity_seed}{Number of Q simulation draws and
+their seed. Each draw refits the model; see Details for runtime.}
+\item{run_loo_mr}{Run leave-one-locus-out refits.}
+\item{run_instrument_sensitivity}{Run refits on standard locus subsets: the
+strongest loci by block F, loci with block F of at least 10, one chromosome
+left out at a time, and without the most influential leave-one-out loci.}
+\item{progress}{\code{NULL} follows \code{verbose}; \code{TRUE} prints progress
+messages and writes \code{logs/progress.log}; \code{"log"} only writes the log;
+\code{FALSE} disables both.}
+\item{...}{Advanced fit settings: \code{standardize_phenotypes} (default
+\code{TRUE}), \code{cross_cov_model} (default \code{"star"}) and \code{ridge}.
+The retired arguments \code{adapter}, \code{run_qtl2_validation},
+\code{run_heteroskedasticity} and \code{heteroskedasticity_B} are ignored with a
+warning until 0.6.0. Other names are an error.}
+\item{result}{A \code{qtl2mr_analysis_result}; for \code{report_qtl2mr_locus()}
+also a path to its \code{result_object.rds}.}
+\item{detail}{For \code{qtl2mr_output_paths()}, return the full file manifest
+instead of the main files.}
 \item{locus_id}{Marker ID for a single-locus report.}
-\item{genoprobs, pheno, kinship, addcovar, contrasts, hsq, marker,
-sample_ids, standardize_pheno, reml}{Explicit generic inputs passed to the
-internal founder-LMM fit and optional \code{qtl2::scan1coef()} comparator.}
-\item{tolerance}{Maximum accepted absolute beta and SE difference for the
-optional qtl2 parity comparison.}
-\item{methods}{Method comparison table with \code{method}, \code{estimate},
-\code{ci_lower}, and \code{ci_upper} columns.}
-\item{primary_method}{Optional named list used by
-\code{plot_method_comparison()} to annotate the reported estimate. This is
-normally filled from \code{theta_reported} and related summary fields by the
-high-level report writer.}
-\item{main}{Plot title.}
-\item{xlab}{X-axis label.}
-\item{...}{For analysis, only named \code{standardize_phenotypes},
-\code{cross_cov_model}, \code{ridge}, \code{engine}, \code{context_cache}, and
-\code{fit_cache} arguments are forwarded. Unknown names are errors.
-For plotting, additional graphical arguments.}
+\item{result_dir}{A result directory or \code{qtl2mr_analysis_result} to export.}
+\item{dest_zip}{Destination zip path for the lite export.}
+\item{max_file_mb}{Largest file included in the lite export.}
+\item{include_rds}{Include RDS objects in the lite export.}
+\item{genoprobs, pheno, kinship, addcovar, contrasts, hsq, marker, sample_ids, standardize_pheno, reml}{Inputs
+for a one-marker founder LMM fitted by qtl2mr and by
+\code{qtl2::scan1coef()} for comparison.}
+\item{tolerance}{Largest accepted absolute difference in coefficients and
+standard errors.}
 }
 \details{
 \if{latex}{\out{\sloppy}}
-\code{run_qtl2mr_analysis()} is the user-facing destination workflow for the
-package. It fits the selected-locus founder-aware LMMs,
-computes the overlap-aware second-order Founder GLS-IVW estimate using
-star-space \code{Sigma_xy}, runs available diagnostics, and writes a fixed
-folder structure:
-\code{data/}, \code{figures/}, \code{logs/}, \code{report.html},
-\code{summary.md}, and \code{result_object.rds}.
+At each selected locus the exposure and the outcome are regressed on the
+founder probabilities (as seven founder contrasts) with a linear mixed model.
+The polygenic background is the kinship for that locus's chromosome, weighted
+by the null-model heritability (hsq) estimated by REML with the intercept and
+covariates but no locus, and then treated as fixed. The locus effects are
+combined by minimising a second-order objective that accounts for the
+uncertainty of the exposure effects and for the covariance between exposure
+and outcome effects that arises when the two traits share samples
+(star-space \code{Sigma_xy}). The confidence interval is the profile-likelihood
+set of the objective.
 
-When \code{progress} is enabled, the run reports seven coarse stages:
-input/output preparation, selected-locus LMM/MR fitting, qtl2 beta/SE
-validation, local founder exposure score residual-variance QC,
-leave-one-locus-out MR, instrument-set sensitivity, and output writing. The
-same progress lines are written to \code{logs/progress.log}. During Q simulation,
-completed draw counts and elapsed time are reported at roughly ten intervals.
-Each draw refits the common-effect model; the 1,000-draw default can dominate
-runtime. Progress does not affect estimates or random-number draws. Choosing
-\code{heterogeneity_method = "chisq"} explicitly avoids this simulation but
-changes the Q p-value's reference distribution, not the primary MR fit.
+The exposure and the outcome each use their own complete samples
+(\code{sample_policy = "role_specific_complete"}); overlap is derived from the
+sample IDs. With default standardisation the effect is in SD of outcome per SD
+of exposure (\code{effect_units}); \code{theta_raw_units} converts it to
+original units when both traits have one fitted SD.
 
-Use \code{adapter = "prepared"} with an object from
-\code{\link{as_qtl2mr_prepared_input}()}. The prepared adapter uses
-role-specific exposure/outcome complete samples and derives overlap from
-harmonized sample IDs. Primary analysis never requires qtl2; the exported
-validator is a standalone optional parity check.
+\code{primary_reliable = TRUE} means the numerical fit found a single bounded
+confidence interval. It does not guarantee coverage: with weak instruments
+(block F below about 10) profile intervals can be too narrow, and
+cross-locus dependence or selecting instruments in the same samples can also
+invalidate nominal uncertainty. When the confidence set is unbounded or has
+several pieces, the reported estimate is \code{NA} and the full set is in
+\code{data/confidence_set.csv}; see the warnings for what to inspect.
 
-Profile confidence intervals are the primary uncertainty summary. The printed
-SE is a curvature/Wald summary. The summary contains both the raw star-space SO
-estimate (\code{theta_so}, and the backward-compatible \code{theta}) and the
-policy-selected reported estimate (\code{theta_reported}). By default,
-numerically acceptable bounded SO fits remain the reported estimate; unresolved,
-unbounded or disconnected SO fits have \code{NA} reported estimate, SE, and CI. Two-step IVW
-remains diagnostic unless \code{reported_estimator_policy = "auto_fallback"}
-is explicitly requested.
-The legacy reliable flag is a numerical bounded-fit check, not a guarantee of
-coverage or causal validity. The full confidence-set components are written to
-\code{data/confidence_set.csv}. Default effects are SD of outcome per SD of
-exposure; \code{standardize_phenotypes = FALSE} uses original units.
-\code{data/phenotype_scaling.csv} and \code{data/sample_alignment.csv} record
-scaling and sample accounting. Weak instruments, cross-locus dependence and
-same-sample selection remain inferential limitations even for a bounded fit.
-The result records \code{sample_policy = "role_specific_complete"}; exact
-batch analyses instead use complete cases for each exposure-outcome pair.
-For numerical comparisons, supply the same sample masks and fitting options.
-Aggregate heterogeneity uses
-\code{heterogeneity_method = "auto"} by default: single-locus analyses report
-\code{Q_p_chisq}, multi-locus analyses report simulation-calibrated
-\code{Q_p_sim}, and the value selected for reporting is stored as
-\code{Q_p_reported} with label \code{Q_p_method}.
+Runtime is dominated by the Q heterogeneity simulation when there are several
+loci: each of the 1,000 default draws refits the model. On a laptop, the
+bundled 400-mouse, 40-locus example takes roughly 10 to 15 minutes with the
+default and under 2 minutes with \code{heterogeneity_method = "chisq"}. Progress messages report completed
+draws. Progress has five stages: input preparation, locus fitting (including
+the Q simulation), leave-one-locus-out refits, instrument-set refits and output
+writing.
 
-\code{qtl2mr_primary_result()}, \code{qtl2mr_warnings()},
-\code{qtl2mr_output_paths()}, and \code{qtl2mr_method_comparison()} are stable
-accessors for user-facing parts of the result object.
-The method-comparison table records the interval method/level and requested,
-completed and failed bootstrap counts. Its plots and HTML reports label the
-median/mode bootstrap-SE Wald intervals separately from the primary profile CI.
-
-\code{export_qtl2mr_lite_result()} creates a compact portable zip for external
-discussion by excluding large RDS objects and large sample-level tables by
-default. Inclusion and exclusion decisions are recorded in
-\code{SMOKE_RESULT_SIZE_AUDIT.csv}.
-This is a size/portability helper, not anonymization or permission to disclose
-study results. Review every included file before sharing restricted studies.
-
-}
-\section{Lifecycle}{
-\if{latex}{\out{\sloppy}}
-\code{run_qtl2mr_analysis()}, the result accessors, lite export, locus report,
-and qtl2 validation are user-facing APIs. The \code{prepared} adapter is the
-portable explicit input scaffold.
+\code{validate_qtl2_scan1coef()} is an optional check that the qtl2mr LMM
+reproduces \code{qtl2::scan1coef()} coefficients and standard errors for one
+marker; it requires the qtl2 package. \code{export_qtl2mr_lite_result()} writes a
+small zip without RDS objects or large tables for sharing; it does not
+anonymise results.
 }
 \value{
 \if{latex}{\out{\sloppy}}
-\code{run_qtl2mr_analysis()} returns an object of class
-\code{qtl2mr_analysis_result}. \code{write_qtl2mr_results()} returns the same
-object after adding manifest paths. \code{report_qtl2mr_locus()} invisibly
-returns the locus report directory. Plot helpers invisibly return their plotted
-data.
+\code{run_qtl2mr_analysis()} invisibly returns a \code{qtl2mr_analysis_result}
+and writes \code{report.html}, \code{summary.md}, \code{result_object.rds},
+\code{figures/}, \code{logs/} and \code{data/}. The main data files are
+\code{main_result.csv} (one row; see below), \code{warnings.csv} (warning ID,
+severity, message, consequence and recommended action),
+\code{method_comparison.csv}, \code{per_locus_results.csv},
+\code{confidence_set.csv}, \code{hsq.csv} (null-model heritability per role and
+chromosome with its status and source), \code{sample_alignment.csv},
+\code{phenotype_scaling.csv}, \code{overlap_qc.csv}, \code{loo_mr.csv},
+\code{instrument_sensitivity.csv} and \code{output_manifest.csv}, which lists
+every file.
+
+\code{qtl2mr_primary_result()} returns the one-row summary. Key columns:
+\code{theta_reported}, \code{se_reported}, \code{reported_ci_lower},
+\code{reported_ci_upper}, \code{reported_estimator} and
+\code{reported_estimator_reason} (the reported result);
+\code{theta_so}, \code{se_so} and \code{profile_ci_lower}/\code{upper} (the raw
+second-order fit); \code{primary_reliable}, \code{confidence_set_type} and
+\code{inference_status}; \code{effect_units} and \code{theta_raw_units};
+\code{n_loci}, \code{n_x_median}, \code{n_y_median} and
+\code{n_overlap_median}; \code{Q}, \code{Q_p_reported} and \code{Q_p_method};
+comparator estimates (\code{theta_two_step_ivw},
+\code{theta_weighted_median}, \code{theta_weighted_mode},
+\code{theta_independence}); and \code{sample_policy}.
+
+\code{qtl2mr_warnings()}, \code{qtl2mr_method_comparison()} and
+\code{qtl2mr_output_paths()} return data frames. \code{report_qtl2mr_locus()}
+invisibly returns the locus report directory, \code{export_qtl2mr_lite_result()}
+the zip path, and \code{validate_qtl2_scan1coef()} a one-row pass/fail summary.
+}
+\seealso{
+\code{\link{as_qtl2mr_prepared_input}} to build the input;
+\code{\link{run_qtl2mr_batch}} for many pairs;
+\code{\link{refit_qtl2mr_subset}} for follow-up refits.
+}
+\examples{
+data("qtl2mr_example", package = "qtl2mr")
+ex <- qtl2mr_example
+prepared <- as_qtl2mr_prepared_input(ex$allele_probs, ex$pheno, ex$covar,
+  ex$kinship, ex$marker_map, ex$selected_loci, ex$exposure, ex$outcome)
+result <- run_qtl2mr_analysis(prepared, output_dir = tempfile("qtl2mr-"),
+  make_figures = FALSE, verbose = FALSE, progress = FALSE,
+  heterogeneity_method = "chisq", diagnostic_bootstrap_B = 0L)
+qtl2mr_primary_result(result)[, c("theta_reported", "reported_ci_lower",
+  "reported_ci_upper", "effect_units", "primary_reliable")]
+qtl2mr_warnings(result)[, c("warning_id", "severity")]
 }
 \keyword{methods}

@@ -170,12 +170,3 @@ test_that("heterogeneity auto policy chooses chisq for one locus and simulation 
   expect_equal(no_sim$Q_sim_n_requested, 0L)
   expect_true(is.finite(no_sim$Q_p_chisq))
 })
-
-test_that("scalar bracket helper records expansion status", {
-  objective <- function(theta) (theta - 10)^2
-  bracket <- qtl2mr:::qtl2mr_expand_scalar_bracket(objective, center = 0, spread = 0.1)
-  expect_equal(attr(bracket, "status"), "expanded")
-  expect_gt(attr(bracket, "n_expand"), 0)
-  expect_lte(bracket[["lower"]], 10)
-  expect_gte(bracket[["upper"]], 10)
-})

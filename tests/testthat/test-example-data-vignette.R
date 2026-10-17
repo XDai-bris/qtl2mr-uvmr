@@ -44,15 +44,12 @@ test_that("qtl2mr_example supports the public quick workflow and lite export", {
   output_dir <- tempfile("qtl2mr-example-data-")
   result <- run_qtl2mr_analysis(
     prepared,
-    adapter = "prepared",
     loci = 2L,
     output_dir = output_dir,
     overwrite = TRUE,
     make_figures = FALSE,
     make_html = TRUE,
     verbose = FALSE,
-    run_qtl2_validation = FALSE,
-    run_heteroskedasticity = FALSE,
     diagnostic_bootstrap_B = 0L,
     heterogeneity_method = "chisq",
     run_loo_mr = FALSE,
@@ -61,7 +58,6 @@ test_that("qtl2mr_example supports the public quick workflow and lite export", {
   )
   primary <- qtl2mr_primary_result(result)
   expect_s3_class(result, "qtl2mr_analysis_result")
-  expect_equal(result$adapter, "prepared")
   expect_equal(primary$n_loci[[1L]], 2L)
   expect_equal(primary$reported_estimator_policy[[1L]], "diagnostic_only")
   expect_true(primary$primary_reliable[[1L]])
@@ -79,8 +75,6 @@ test_that("qtl2mr_example supports the public quick workflow and lite export", {
   expect_true("weak_block_first_stage" %in% warning_table$warning_id)
   weak <- warning_table[warning_table$warning_id == "weak_block_first_stage", , drop = FALSE]
   expect_false(any(grepl("Stock-Yogo", weak$message, fixed = TRUE)))
-  expect_identical(result$qtl2_validation_status$validation_status, "not_requested")
-  expect_false("qtl2_validation_unavailable" %in% warning_table$warning_id)
 
   lite_zip <- tempfile("qtl2mr-example-lite-", fileext = ".zip")
   lite <- export_qtl2mr_lite_result(result, dest_zip = lite_zip, max_file_mb = 10, include_rds = FALSE)

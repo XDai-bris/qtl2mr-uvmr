@@ -1,6 +1,6 @@
 \name{validate_joint_psd}
 \alias{validate_joint_psd}
-\title{Validate joint positive semidefiniteness of MR covariance blocks}
+\title{Advanced interface: validate joint positive semidefiniteness of MR covariance blocks}
 \description{
 \if{latex}{\out{\sloppy}}
 Check whether \code{Sigma_x}, \code{Sigma_y}, and \code{Sigma_xy} form a valid

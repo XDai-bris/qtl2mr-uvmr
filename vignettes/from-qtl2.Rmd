@@ -173,16 +173,41 @@ The selector picks one maximum per contiguous above-threshold region on
 each chromosome. This is not LD pruning, a permutation-derived significance
 threshold, or evidence that different selected loci are independent.
 
+## Many exposure-outcome pairs
+
+For many pairs, prepare the shared inputs once and let `run_qtl2mr_batch()`
+select instruments for each exposure from the scan. Each pair uses the samples
+complete for both of its traits. Results are compact tables; rerun individual
+pairs of interest with `run_qtl2mr_analysis()` for a full report.
+
+```{r batch-template, eval=FALSE}
+resources <- qtl2mr_prepare_resources(
+  allele_probs, kinship, pheno, covar, qtl_scan = scan, marker_map = map
+)
+pairs <- data.frame(exposure = c("x", "x"), outcome = c("y", "z"))
+batch <- run_qtl2mr_batch(
+  resources, pairs, instrument_rule = list(lod_thresh = 4),
+  output_dir = "batch-results", n_workers = 4
+)
+batch$main_results[, c("pair_id", "status", "theta_reported",
+                       "reported_ci_lower", "reported_ci_upper")]
+# After an interruption, the same call with resume = TRUE continues the run.
+```
+
 ## Before interpreting a result
 
 - Inspect sample alignment and per-locus scaling. Sample drops are recorded;
   accidental mismatches should be corrected rather than accepted blindly.
 - The single-pair prepared analysis fits X and Y on their role-specific usable
-  samples and models their overlap. Exact batch workflows instead use the
-  pair's common complete samples. Different masks can produce different
-  estimates; compare engines only after fixing identical sample masks, loci,
-  kinship, scaling and fit options. Fast batches use a common set across all
-  requested traits.
+  samples and models their overlap. `run_qtl2mr_batch()` instead uses each
+  pair's common complete samples by default, or one set complete for every
+  batch trait with `sample_policy = "batch_common_complete"`. Different sample
+  sets can give different estimates; compare only with identical samples,
+  loci, kinship, scaling and fit options.
+- Check `data/hsq.csv` (or `hsq_x`/`hsq_y` in the batch first-stage table).
+  An hsq of 0 means the kinship term had no effect for that trait and
+  chromosome; hsq is estimated under a null model without the locus and then
+  treated as fixed.
 - Default effects are SD of Y per SD of X. Use
   `standardize_phenotypes = FALSE` for original units. For a single consistent
   scaling, raw effect = standardized effect x SD(Y)/SD(X).

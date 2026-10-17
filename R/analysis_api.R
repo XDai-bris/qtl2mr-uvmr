@@ -104,7 +104,7 @@ qtl2mr_make_progress_reporter <- function(progress = NULL,
   }
   function(stage, label, detail = NULL) {
     line <- sprintf(
-      "[qtl2MR %s] [%s/7] %s%s",
+      "[qtl2MR %s] [%s/5] %s%s",
       format(Sys.time(), "%H:%M:%S"),
       as.integer(stage),
       label,
@@ -272,7 +272,7 @@ qtl2mr_validation_tests_table <- function(check_status = "not_run_in_analysis", 
       "Prepared input validation, one union kinship source, full overlap, no overlap, and partial-overlap kinship sample matching.",
       "Second-order optimizer bracketing/convergence metadata, profile CI reporting, and auto Q p-value policy labelling.",
       "Leave-one-locus-out MR, explicit parallel guardrail, named instrument-set refits, and sensitivity plots.",
-      "Founder residual diagnostics, founder-coordinate ratios, local score heteroskedasticity helpers, and explicit-device plot rendering.",
+      "Founder residual diagnostics, founder-coordinate ratios, and explicit-device plot rendering.",
       "Standard destination folder, manifest schema, warning taxonomy, public accessors, method-comparison labels, locus report, and lite export."
     ),
     evidence = c(
@@ -282,43 +282,13 @@ qtl2mr_validation_tests_table <- function(check_status = "not_run_in_analysis", 
       "test-prepared-input.R; test-partial-overlap-workflow.R",
       "test-optimizer-bracketing.R; main_result Q_p_reported and Q_p_method",
       "test-loo-instrument-sensitivity.R",
-      "test-diagnostics.R; test-heteroskedasticity-intercept.R",
+      "test-diagnostics.R",
       "test-analysis-api.R; test-reporting-usability.R; test-report-locus.R"
     ),
     status = rep(check_status, 8L),
     check_log = rep(check_log %||% NA_character_, 8L),
     stringsAsFactors = FALSE
   )
-}
-
-qtl2mr_manifest_summary_table <- function(manifest) {
-  if (is.null(manifest) || !nrow(manifest)) return(data.frame())
-  role <- manifest$role
-  role_group <- ifelse(role %in% c("figure"), "figures",
-                       ifelse(role %in% c("data", "manifest", "session_info"), "data",
-                              ifelse(role %in% c("log"), "logs",
-                                     ifelse(role %in% c("model_object"), "model objects",
-                                            ifelse(role %in% c("summary", "html_report"), "reports", "other")))))
-  rows <- split(manifest, role_group)
-  out <- do.call(rbind, lapply(names(rows), function(nm) {
-    x <- rows[[nm]]
-    data.frame(
-      output_group = nm,
-      n_files = nrow(x),
-      total_size_kb = sum(x$size_kb, na.rm = TRUE),
-      included_in_lite = sum(x$included_in_lite %in% TRUE, na.rm = TRUE),
-      notes = switch(nm,
-                     data = "CSV tables and session/manifest metadata.",
-                     figures = "PNG/PDF report figures.",
-                     logs = "Progress, run, and diagnostic logs.",
-                     `model objects` = "Full local RDS object for deep audit; excluded from lite export by default.",
-                     reports = "Human-readable summary and static HTML report.",
-                     "Auxiliary output files."),
-      stringsAsFactors = FALSE
-    )
-  }))
-  rownames(out) <- NULL
-  out[order(match(out$output_group, c("reports", "figures", "data", "logs", "model objects", "other"))), , drop = FALSE]
 }
 
 qtl2mr_write_output_manifest_html <- function(manifest, file) {
@@ -334,24 +304,6 @@ qtl2mr_write_output_manifest_html <- function(manifest, file) {
   )
   writeLines(html, file)
   invisible(file)
-}
-
-qtl2mr_adapter_from_input <- function(input, adapter = c("auto", "prepared")) {
-  adapter <- match.arg(adapter)
-  if (identical(adapter, "prepared")) {
-    if (!inherits(input, "qtl2mr_prepared_input")) {
-      stop("adapter = 'prepared' requires an object created by as_qtl2mr_prepared_input()", call. = FALSE)
-    }
-    return("prepared")
-  }
-  if (identical(adapter, "auto")) {
-    if (inherits(input, "qtl2mr_prepared_input")) return("prepared")
-    stop(
-      "adapter = 'auto' requires an object created by as_qtl2mr_prepared_input().",
-      call. = FALSE
-    )
-  }
-  adapter
 }
 
 qtl2mr_relative_path <- function(path, root) {
@@ -458,8 +410,6 @@ qtl2mr_ensure_real_directory <- function(path, purpose = "output path") {
   }
   invisible(canonical)
 }
-
-qtl2mr_is_symlink <- function(path) identical(qtl2mr_path_node_state(path), "link")
 
 qtl2mr_tree_has_symlink <- function(path) {
   state <- qtl2mr_assert_known_path_node(path, "result tree")
@@ -779,20 +729,16 @@ qtl2mr_warning_catalog <- function() {
     warning_id = c(
       "prepared_overlap_engine", "raw_space_psd_invalid",
       "star_space_psd_invalid", "weak_block_first_stage", "primary_so_unbounded",
-      "xprs_heteroskedasticity",
-      "qtl2_validation_fail", "qtl2_validation_unavailable", "xprs_diagnostic_error",
       "loo_mr_error", "instrument_sensitivity_error", "dropped_nonestimable_loci"
     ),
     default_severity = c(
       "info", "technical_qc",
-      "warning", "warning", "warning", "warning",
-      "error", "info", "warning",
+      "warning", "warning", "warning",
       "warning", "warning", "warning"
     ),
     shown_in_main_report = c(
       FALSE, FALSE,
-      TRUE, TRUE, TRUE, TRUE,
-      TRUE, FALSE, TRUE,
+      TRUE, TRUE, TRUE,
       TRUE, TRUE, TRUE
     ),
     consequence = c(
@@ -801,10 +747,6 @@ qtl2mr_warning_catalog <- function() {
       "The selected star-space covariance block may be numerically invalid and should be investigated before interpretation.",
       "Founder-block denominator strength may be limited; this is a heuristic warning for multi-founder blocks.",
       "The theta-dependent second-order objective was not well bracketed or has an unbounded profile interval; the primary theta may be a weak-identification artifact.",
-      "Residual variance changes with the local founder exposure score; uncertainty may need sensitivity analysis.",
-      "Direct LMM beta/SE parity against qtl2 exceeded tolerance.",
-      "qtl2 parity validation was not available, so beta/SE parity was not independently checked.",
-      "The xPRS heteroskedasticity diagnostic did not complete.",
       "Leave-one-locus-out MR sensitivity did not complete for this run.",
       "Instrument-set sensitivity did not complete for this run.",
       "Some selected loci were not estimable in the current sample set because a founder contrast was rank-deficient."
@@ -815,10 +757,6 @@ qtl2mr_warning_catalog <- function() {
       "Inspect PSD diagnostics and do not use invalid star-space blocks silently.",
       "Weak denominator guide: all retained loci have block F below 10. This is a heuristic warning for founder-block denominators, not a Stock-Yogo calibrated failure. Interpret per-locus ratios and weak-instrument-sensitive diagnostics cautiously.",
       "Treat the primary second-order theta as unstable. Inspect Q(theta), profile CI, first-stage strength, and diagnostic comparators such as Two-step IVW before interpretation.",
-      "Residual variance changes across the local founder exposure score. This is a QC warning about residual scale, not a direct causal estimate.",
-      "Inspect qtl2_validation.csv and the direct LMM implementation before trusting the run.",
-      "Run qtl2 validation when qtl2 inputs and scan1coef are available.",
-      "Inspect logs/heteroskedasticity_error.log and rerun diagnostics if needed.",
       "Inspect logs/loo_mr_error.log; primary MR estimate may still be available.",
       "Inspect logs/instrument_sensitivity_error.log; primary MR estimate may still be available.",
       "Inspect dropped_loci output. This usually means one founder has no information at that marker within the pair-specific sample set; do not impute artificial founder probability."
@@ -1065,51 +1003,7 @@ plot_method_comparison <- function(methods,
   invisible(d)
 }
 
-plot_qtl2mr_global_estimate <- function(summary_row,
-                                        main = "Primary qtl2MR estimate",
-                                        xlab = "MR effect",
-                                        ...) {
-  d <- data.frame(
-    label = "Overlap-aware SO",
-    estimate = summary_row$theta[[1L]],
-    lower = summary_row$profile_ci_lower[[1L]],
-    upper = summary_row$profile_ci_upper[[1L]],
-    stringsAsFactors = FALSE
-  )
-  xlim <- range(c(0, d$lower, d$upper), finite = TRUE)
-  pad <- diff(xlim) * 0.15
-  if (!is.finite(pad) || pad <= 0) pad <- 0.2
-  xlim <- xlim + c(-pad, pad)
-  graphics::plot(d$estimate, 1, xlim = xlim, ylim = c(0.5, 1.5), yaxt = "n",
-                 ylab = "", xlab = xlab, pch = 16, col = "#00796b", main = main, ...)
-  graphics::abline(v = 0, lty = 3, col = "grey70")
-  graphics::segments(d$lower, 1, d$upper, 1, lwd = 2, col = "#00796b")
-  graphics::axis(2, at = 1, labels = d$label, las = 1, tick = FALSE)
-  graphics::mtext(sprintf("%.4f [%.4f, %.4f]", d$estimate, d$lower, d$upper), side = 3, line = 0.2, cex = 0.8)
-  invisible(d)
-}
-
-plot_qtl2mr_first_stage <- function(block_first_stage,
-                                    main = "Block first-stage diagnostics",
-                                    ...) {
-  required <- c("marker", "F_X_block")
-  miss <- setdiff(required, names(block_first_stage))
-  if (length(miss)) stop("block_first_stage is missing: ", paste(miss, collapse = ", "), call. = FALSE)
-  d <- block_first_stage[is.finite(block_first_stage$F_X_block), , drop = FALSE]
-  d <- d[order(d$F_X_block, decreasing = TRUE), , drop = FALSE]
-  x <- seq_len(nrow(d))
-  graphics::plot(x, d$F_X_block, pch = 16, col = ifelse(d$F_X_block < 10, "#c46a1b", "#00796b"),
-                 xlab = "Locus rank by F_X", ylab = "Block F_X", main = main, ...)
-  graphics::abline(h = 10, lty = 2, col = "#b2182b")
-  graphics::mtext("F < 10 is a heuristic, not Stock-Yogo calibrated for founder blocks", side = 3, line = 0.2, cex = 0.7, col = "grey35")
-  invisible(d)
-}
-
-qtl2mr_warning_table <- function(result,
-                                 xprs = NULL,
-                                 qtl2_validation = NULL,
-                                 qtl2_validation_status = NULL,
-                                 sample_policy = NULL) {
+qtl2mr_warning_table <- function(result, sample_policy = NULL) {
   s <- result$summary
   rows <- list()
   add <- function(id, severity, message) {
@@ -1188,34 +1082,6 @@ qtl2mr_warning_table <- function(result,
     n_weak <- sum(per_locus$F_X_block < 10, na.rm = TRUE)
     if (n_weak) add("weak_block_first_stage", "warning", sprintf("%d loci have block F_X < 10 heuristic threshold.", n_weak))
   }
-  if (!is.null(xprs) && !is.null(xprs$global_tests) && nrow(xprs$global_tests)) {
-    flagged <- xprs$global_tests[xprs$global_tests$flag_fdr_0.05 %||% FALSE, , drop = FALSE]
-    if (nrow(flagged)) {
-      add("xprs_heteroskedasticity", "warning", paste("xPRS residual-variance FDR flags:", paste(flagged$trait, collapse = ", ")))
-    }
-  }
-  qtl2_validation_status <- qtl2_validation_status %||% qtl2mr_qtl2_validation_status(qtl2_validation)
-  if (!is.null(qtl2_validation_status) && nrow(qtl2_validation_status)) {
-    status <- qtl2_validation_status$validation_status[[1L]]
-    if (identical(status, "fail")) {
-      add(
-        "qtl2_validation_fail",
-        "error",
-        sprintf(
-          "qtl2 scan1coef validation exceeded tolerance: max beta diff=%s, max SE diff=%s, tolerance=%s.",
-          qtl2mr_fmt_num(qtl2_validation_status$max_beta_abs_diff[[1L]], 6),
-          qtl2mr_fmt_num(qtl2_validation_status$max_se_abs_diff[[1L]], 6),
-          qtl2mr_fmt_num(qtl2_validation_status$tolerance[[1L]], 3)
-        )
-      )
-    } else if (identical(status, "not_available")) {
-      add(
-        "qtl2_validation_unavailable",
-        "info",
-        paste("qtl2 scan1coef beta/SE validation was not available:", qtl2_validation_status$reason[[1L]])
-      )
-    }
-  }
   if (!length(rows)) return(qtl2mr_enrich_warnings(NULL))
   qtl2mr_enrich_warnings(do.call(rbind, rows))
 }
@@ -1226,62 +1092,6 @@ qtl2mr_block_first_stage_table <- function(result) {
     return(data.frame(marker = result$selected_loci$marker, chr = result$selected_loci$chr, F_X_block = NA_real_))
   }
   per_locus[, intersect(c("marker", "chr", "F_X_block", "theta", "se", "Q_min", "weight"), names(per_locus)), drop = FALSE]
-}
-
-qtl2mr_qtl2_validation_status <- function(qtl2_validation = NULL,
-                                          error = NULL,
-                                          tolerance = 1e-6,
-                                          requested = TRUE) {
-  if (!isTRUE(requested)) {
-    return(data.frame(
-      validation_status = "not_requested",
-      validation_available = FALSE,
-      n_rows_checked = 0L,
-      max_beta_abs_diff = NA_real_,
-      max_se_abs_diff = NA_real_,
-      tolerance = tolerance,
-      qtl2_version = NA_character_,
-      reason = "optional qtl2 parity validation was not requested",
-      stringsAsFactors = FALSE
-    ))
-  }
-  qtl2_version <- tryCatch(as.character(utils::packageVersion("qtl2")), error = function(e) NA_character_)
-  empty <- is.null(qtl2_validation) || !nrow(qtl2_validation)
-  if (!is.null(error) || isTRUE(empty)) {
-    reason <- if (!is.null(error)) as.character(error) else "qtl2 validation table is empty or was not requested"
-    return(data.frame(
-      validation_status = "not_available",
-      validation_available = FALSE,
-      n_rows_checked = 0L,
-      max_beta_abs_diff = NA_real_,
-      max_se_abs_diff = NA_real_,
-      tolerance = tolerance,
-      qtl2_version = qtl2_version,
-      reason = reason,
-      stringsAsFactors = FALSE
-    ))
-  }
-  beta_diff <- if ("beta_abs_diff" %in% names(qtl2_validation)) qtl2_validation$beta_abs_diff else NA_real_
-  se_diff <- if ("raw_abs_diff" %in% names(qtl2_validation)) qtl2_validation$raw_abs_diff else {
-    if ("adjusted_abs_diff" %in% names(qtl2_validation)) qtl2_validation$adjusted_abs_diff else NA_real_
-  }
-  max_beta <- suppressWarnings(max(abs(beta_diff), na.rm = TRUE))
-  max_se <- suppressWarnings(max(abs(se_diff), na.rm = TRUE))
-  if (!is.finite(max_beta)) max_beta <- NA_real_
-  if (!is.finite(max_se)) max_se <- NA_real_
-  pass <- is.finite(max_beta) && is.finite(max_se) &&
-    max_beta <= tolerance && max_se <= tolerance
-  data.frame(
-    validation_status = if (isTRUE(pass)) "pass" else "fail",
-    validation_available = TRUE,
-    n_rows_checked = nrow(qtl2_validation),
-    max_beta_abs_diff = max_beta,
-    max_se_abs_diff = max_se,
-    tolerance = tolerance,
-    qtl2_version = qtl2_version,
-    reason = if (isTRUE(pass)) "direct LMM beta/SE match qtl2::scan1coef within tolerance" else "direct LMM beta/SE differ from qtl2::scan1coef beyond tolerance",
-    stringsAsFactors = FALSE
-  )
 }
 
 validate_qtl2_scan1coef <- function(genoprobs,
@@ -1351,12 +1161,6 @@ summarise_qtl2mr_result <- function(result) {
   warning_ids <- if (!is.null(main_warnings) && nrow(main_warnings)) {
     paste(main_warnings$warning_id, collapse = ", ")
   } else "none"
-  validation_status <- result$qtl2_validation_status %||%
-    qtl2mr_qtl2_validation_status(result$qtl2_validation, result$validation_error)
-  validation_line <- if (!is.null(validation_status) && nrow(validation_status)) {
-    reason <- if ("reason" %in% names(validation_status)) validation_status$reason[[1L]] else ""
-    paste0(validation_status$validation_status[[1L]], if (nzchar(reason)) paste0(" (", reason, ")") else "")
-  } else "not_available"
   reported <- qtl2mr_summary_reported(s)
   so_theta <- qtl2mr_summary_scalar(s, "theta_so", qtl2mr_summary_scalar(s, "theta"))
   reliable <- qtl2mr_summary_scalar(s, "primary_reliable", NA)
@@ -1368,7 +1172,6 @@ summarise_qtl2mr_result <- function(result) {
     "qtl2MR analysis complete", "",
     paste0("Exposure: ", s$exposure[[1L]]),
     paste0("Outcome: ", s$outcome[[1L]]),
-    paste0("Adapter: ", result$adapter %||% result$metadata$adapter %||% "prepared"),
     paste0("N samples: ", length(result$pilot$sample_ids)),
     paste0("N loci: ", s$n_loci[[1L]]),
     paste0("Reported estimator: ", reported$estimator),
@@ -1381,13 +1184,12 @@ summarise_qtl2mr_result <- function(result) {
     paste0("Q statistic: ", qtl2mr_fmt_num(qtl2mr_summary_scalar(s, "Q"), 6),
       "; Q p-value: ", qtl2mr_q_reported_label(s, digits = 6),
       "; Q reference: ", qtl2mr_q_reference_label(s)),
-    paste0("qtl2 validation: ", validation_line),
     paste0("Actionable warning IDs: ", warning_ids),
     paste0("Outputs: ", if (isTRUE(result$metadata$make_html %||% TRUE)) "report.html; " else "",
       "summary.md; data/main_result.csv; data/warnings.csv; data/output_manifest.csv")
   )
   if (isTRUE(raw_differs)) {
-    lines <- append(lines, paste0("Raw star-space diagnostic theta: ", qtl2mr_fmt_num(so_theta, 6), " (diagnostic only)"), after = 10L)
+    lines <- append(lines, paste0("Raw star-space diagnostic theta: ", qtl2mr_fmt_num(so_theta, 6), " (diagnostic only)"), after = 9L)
   }
   lines
 }
@@ -1478,7 +1280,6 @@ qtl2mr_add_stable_slots <- function(result) {
     package = "qtl2mr",
     version = tryCatch(as.character(utils::packageVersion("qtl2mr")), error = function(e) NA_character_),
     created_at = result$created_at %||% Sys.time(),
-    adapter = result$adapter %||% "prepared",
     input = result$input %||% NA_character_,
     exposure = result$exposure %||% s$exposure[[1L]],
     outcome = result$outcome %||% s$outcome[[1L]],
@@ -1486,8 +1287,6 @@ qtl2mr_add_stable_slots <- function(result) {
   )
   result$primary <- s
   result$diagnostics <- list(
-    qtl2_validation = result$qtl2_validation_status %||% data.frame(),
-    xprs = result$xprs,
     loo_mr = result$loo_mr %||% data.frame(),
     instrument_sensitivity = result$instrument_sensitivity %||% data.frame(),
     locus_diagnostics = result$pilot$locus_diagnostics,
@@ -1507,8 +1306,6 @@ write_qtl2mr_html_report <- function(result, file) {
   result$pilot$summary <- qtl2mr_add_q_fields(result$pilot$summary, fit = result$pilot$fit)
   s <- result$pilot$summary
   reported <- qtl2mr_summary_reported(s)
-  validation <- result$qtl2_validation_status %||%
-    qtl2mr_qtl2_validation_status(result$qtl2_validation, result$validation_error)
   warnings <- result$warnings %||% data.frame()
   actionable <- if (nrow(warnings) && "shown_in_main_report" %in% names(warnings)) {
     warnings[warnings$shown_in_main_report %in% TRUE & warnings$severity %in% c("warning", "error"),
@@ -1568,8 +1365,6 @@ write_qtl2mr_html_report <- function(result, file) {
                   !isTRUE(all.equal(as.numeric(reported$theta), as.numeric(so_theta)))) {
     paste0(" Raw star-space second-order results remain diagnostic only: theta = ", qtl2mr_fmt_num(so_theta, 6), ".")
   } else ""
-  qtl_status <- if (!is.null(validation) && nrow(validation)) validation$validation_status[[1L]] else "not_available"
-  qtl_reason <- if (!is.null(validation) && nrow(validation) && "reason" %in% names(validation)) validation$reason[[1L]] else ""
   primary_table <- data.frame(
     item = c("Reported estimator", "Estimate", "95% CI", "Numerically bounded SO fit", "Effect units", "Confidence set", "Inference calibration", "Sample policy", "Q statistic", "Q p-value", "Q reference"),
     value = c(reported$estimator, qtl2mr_fmt_num(reported$theta, 6),
@@ -1582,9 +1377,8 @@ write_qtl2mr_html_report <- function(result, file) {
       qtl2mr_q_reported_label(s, digits = 5), qtl2mr_q_reference_label(s)),
     stringsAsFactors = FALSE
   )
-  overview <- sprintf("<p><strong>Exposure:</strong> %s<br><strong>Outcome:</strong> %s<br><strong>Adapter:</strong> %s<br><strong>Samples:</strong> %s &nbsp; <strong>Selected loci:</strong> %s</p>",
+  overview <- sprintf("<p><strong>Exposure:</strong> %s<br><strong>Outcome:</strong> %s<br><strong>Samples:</strong> %s &nbsp; <strong>Selected loci:</strong> %s</p>",
     qtl2mr_html_escape(s$exposure[[1L]]), qtl2mr_html_escape(s$outcome[[1L]]),
-    qtl2mr_html_escape(result$adapter %||% result$metadata$adapter %||% "prepared"),
     length(result$pilot$sample_ids), s$n_loci[[1L]])
   html <- c(
     "<!doctype html>",
@@ -1596,7 +1390,6 @@ write_qtl2mr_html_report <- function(result, file) {
     "<div class=\"primary\">", qtl2mr_html_table(primary_table, digits = 6), "</div>",
     paste0("<p class=\"section-note\">Numerical success does not establish 95% coverage or causal validity. Weak instruments, same-sample instrument selection and dependence between loci can invalidate nominal uncertainty. Other methods are diagnostic comparators, not automatic replacements.", raw_note, "</p>"),
     "<h2>QC and actionable warnings</h2>",
-    sprintf("<p class=\"section-note\"><strong>qtl2 validation:</strong> %s%s. This checks direct founder-LMM beta/SE against <code>qtl2::scan1coef</code> only when qtl2 context is available.</p>", qtl2mr_html_escape(qtl_status), if (nzchar(qtl_reason)) paste0(": ", qtl2mr_html_escape(qtl_reason)) else ""),
     if (nrow(actionable)) c("<p class=\"section-note\">F&lt;10 is a heuristic for multi-founder block strength, not a calibrated Stock-Yogo cutoff.</p>", qtl2mr_html_table(actionable)) else "<p>No actionable warnings were recorded.</p>",
     if (nrow(hsq_view)) c("<h3>Polygenic background (null-model heritability)</h3>",
       "<p class=\"section-note\">hsq sets the kinship-based working covariance of each founder LMM. It is estimated by REML under a null model with the intercept and covariates (no locus), using the kinship for that chromosome, and is then treated as fixed. Per-chromosome values are in <code>data/hsq.csv</code>.</p>",
@@ -1646,7 +1439,7 @@ write_qtl2mr_results <- function(result,
   dir.create(data_dir, recursive = TRUE, showWarnings = FALSE)
   dir.create(figure_dir, recursive = TRUE, showWarnings = FALSE)
   dir.create(log_dir, recursive = TRUE, showWarnings = FALSE)
-  qtl2mr_progress(progress_callback, 7L, "Write outputs", "prepare tables and output folders")
+  qtl2mr_progress(progress_callback, 5L, "Write outputs", "prepare tables and output folders")
 
   fit_q_method <- result$pilot$fit$Q_p_method %||%
     if (length(result$pilot$locus_blocks %||% list()) == 1L) "chisq" else "simulation"
@@ -1671,7 +1464,7 @@ write_qtl2mr_results <- function(result,
   }
   if (!is.null(q_sim_n) && identical(fit_q_method, "simulation") && isTRUE(as.integer(q_sim_n) > 0L) &&
       (is.null(result$pilot$fit$Q_p_sim) || !is.finite(result$pilot$fit$Q_p_sim))) {
-    qtl2mr_progress(progress_callback, 7L, "Write outputs", sprintf("simulate heterogeneity Q calibration: nsim=%d", as.integer(q_sim_n)))
+    qtl2mr_progress(progress_callback, 5L, "Write outputs", sprintf("simulate heterogeneity Q calibration: nsim=%d", as.integer(q_sim_n)))
     q_cal <- calibrate_multilocus_q(
       locus_blocks = result$pilot$locus_blocks,
       fit = result$pilot$fit,
@@ -1701,11 +1494,6 @@ write_qtl2mr_results <- function(result,
   result$pilot$summary <- qtl2mr_add_q_fields(result$pilot$summary, fit = result$pilot$fit)
   method_comparison <- qtl2mr_method_comparison_table(result$pilot)
   block_first_stage <- qtl2mr_block_first_stage_table(result$pilot)
-  qtl2_validation_status <- result$qtl2_validation_status %||%
-    qtl2mr_qtl2_validation_status(result$qtl2_validation, result$validation_error)
-  result$qtl2_validation_status <- qtl2_validation_status
-  if (is.null(result$pilot$qc)) result$pilot$qc <- list()
-  result$pilot$qc$qtl2_validation <- qtl2_validation_status
   psd_cols <- intersect(c("marker", "chr", "joint_psd_valid", "joint_psd_status", "joint_min_eigenvalue",
                           "joint_max_cross_singular_value", "star_space_psd_valid", "raw_space_psd_valid",
                           "raw_space_max_cross_singular_value", "star_space_max_cross_singular_value"),
@@ -1716,21 +1504,12 @@ write_qtl2mr_results <- function(result,
                               "independent_samples", "rho_xy", "rho_xy_star",
                               "rho_xy_raw", "cross_cov_model"),
                             names(result$pilot$locus_diagnostics))
-  hetero <- if (!is.null(result$xprs) && !is.null(result$xprs$global_tests)) result$xprs$global_tests else data.frame()
-  warnings <- qtl2mr_warning_table(
-    result$pilot,
-    xprs = result$xprs,
-    qtl2_validation = result$qtl2_validation,
-    qtl2_validation_status = qtl2_validation_status
-  )
+  warnings <- qtl2mr_warning_table(result$pilot)
   append_warning <- function(id, severity, message) {
     qtl2mr_enrich_warnings(rbind(
       warnings[, c("warning_id", "severity", "message"), drop = FALSE],
       data.frame(warning_id = id, severity = severity, message = message, stringsAsFactors = FALSE)
     ))
-  }
-  if (!is.null(result$xprs_error)) {
-    warnings <- append_warning("xprs_diagnostic_error", "warning", paste("xPRS heteroskedasticity diagnostic failed:", result$xprs_error))
   }
   if (!is.null(result$loo_error)) {
     warnings <- append_warning("loo_mr_error", "warning", paste("LOO MR diagnostic failed:", result$loo_error))
@@ -1750,9 +1529,6 @@ write_qtl2mr_results <- function(result,
     block_first_stage = file.path(data_dir, "block_first_stage.csv"),
     psd_qc = file.path(data_dir, "psd_qc.csv"),
     overlap_qc = file.path(data_dir, "overlap_qc.csv"),
-    qtl2_validation = file.path(data_dir, "qtl2_validation.csv"),
-    qtl2_validation_summary = file.path(data_dir, "qtl2_validation_summary.csv"),
-    heteroskedasticity_qc = file.path(data_dir, "heteroskedasticity_qc.csv"),
     loo_mr = file.path(data_dir, "loo_mr.csv"),
     instrument_sensitivity = file.path(data_dir, "instrument_sensitivity.csv"),
     q_calibration = file.path(data_dir, "q_calibration.csv"),
@@ -1792,9 +1568,6 @@ write_qtl2mr_results <- function(result,
     result$pilot$locus_diagnostics[, overlap_cols, drop = FALSE]
   }
   utils::write.csv(overlap_qc, data_paths[["overlap_qc"]], row.names = FALSE)
-  utils::write.csv(result$qtl2_validation %||% data.frame(), data_paths[["qtl2_validation"]], row.names = FALSE)
-  utils::write.csv(qtl2_validation_status, data_paths[["qtl2_validation_summary"]], row.names = FALSE)
-  utils::write.csv(hetero, data_paths[["heteroskedasticity_qc"]], row.names = FALSE)
   utils::write.csv(result$loo_mr %||% data.frame(), data_paths[["loo_mr"]], row.names = FALSE)
   utils::write.csv(result$instrument_sensitivity %||% data.frame(), data_paths[["instrument_sensitivity"]], row.names = FALSE)
   q_calibration <- result$pilot$summary[, intersect(c(
@@ -1810,7 +1583,7 @@ write_qtl2mr_results <- function(result,
   utils::write.csv(result$validation_tests, data_paths[["validation_tests"]], row.names = FALSE)
   utils::write.csv(warnings, data_paths[["warnings"]], row.names = FALSE)
   writeLines(utils::capture.output(utils::sessionInfo()), file.path(data_dir, "session_info.txt"))
-  qtl2mr_progress(progress_callback, 7L, "Write outputs", "data tables and session info")
+  qtl2mr_progress(progress_callback, 5L, "Write outputs", "data tables and session info")
 
   figure_rows <- list()
   add_fig <- function(label, stem, notes) {
@@ -1820,7 +1593,7 @@ write_qtl2mr_results <- function(result,
     if (file.exists(pdf)) figure_rows[[length(figure_rows) + 1L]] <<- data.frame(label = paste(label, "PDF"), path = pdf, format = "pdf", notes = "PDF companion", stringsAsFactors = FALSE)
   }
   if (isTRUE(make_figures)) {
-    qtl2mr_progress(progress_callback, 7L, "Write outputs", "figures")
+    qtl2mr_progress(progress_callback, 5L, "Write outputs", "figures")
     reported_for_fig <- qtl2mr_summary_reported(result$pilot$summary)
     qtl2mr_write_figure_pair(file.path(figure_dir, "method_comparison"), {
       plot_method_comparison(method_comparison, main = "qtl2MR method comparison", xlab = paste(result$pilot$summary$exposure[[1L]], "->", result$pilot$summary$outcome[[1L]], "effect"), show_value_labels = FALSE, primary_method = reported_for_fig)
@@ -1862,13 +1635,6 @@ write_qtl2mr_results <- function(result,
       }, width = 2400, height = 1800, pdf_width = 11, pdf_height = 8)
       add_fig("Founder residual heatmap", file.path(figure_dir, "founder_residual_heatmap"), "Founder residual localization across selected exposure-locus ranks; descriptive only.")
     }
-    if (!is.null(result$xprs) && !is.null(result$xprs$diagnostic)) {
-      qtl2mr_write_figure_pair(file.path(figure_dir, "local_founder_exposure_score_qc"), {
-        plot_multilocus_xprs_heteroskedasticity_global(result$xprs$diagnostic, traits = result$pilot$summary$outcome[[1L]],
-                                                       main = "Outcome residual variance by local founder exposure score")
-      }, width = 1800, height = 1300, pdf_width = 8.5, pdf_height = 6.5)
-      add_fig("Local founder exposure score QC", file.path(figure_dir, "local_founder_exposure_score_qc"), "Outcome residual variance conditional on summed local founder exposure score.")
-    }
     qtl2mr_write_figure_pair(file.path(figure_dir, "weak_denominator_dashboard"), {
       plot_block_first_stage_dashboard(block_first_stage)
     }, width = 2200, height = 1100, pdf_width = 11, pdf_height = 5.5)
@@ -1891,7 +1657,7 @@ write_qtl2mr_results <- function(result,
   session_path <- file.path(data_dir, "session_info.txt")
   run_log_path <- file.path(log_dir, "run.log")
   manifest_path <- file.path(data_dir, "output_manifest.csv")
-  qtl2mr_progress(progress_callback, 7L, "Write outputs", "summary, HTML report, RDS object, and manifest")
+  qtl2mr_progress(progress_callback, 5L, "Write outputs", "summary, HTML report, RDS object, and manifest")
   summary_value <- function(name, default = NA_real_) {
     if (!name %in% names(result$pilot$summary)) return(default)
     result$pilot$summary[[name]][[1L]]
@@ -1900,7 +1666,6 @@ write_qtl2mr_results <- function(result,
   writeLines(c(
     paste0("created_at\t", format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z")),
     paste0("input\t", result$input),
-    paste0("adapter\t", result$adapter %||% "prepared"),
     paste0("output_dir\t", result$output_dir),
     paste0("n_loci\t", result$pilot$summary$n_loci[[1L]]),
     paste0("reported_estimator\t", reported_log$estimator),
@@ -1943,9 +1708,6 @@ write_qtl2mr_results <- function(result,
     block_first_stage = "Block first-stage heuristic diagnostics",
     psd_qc = "Star-space and raw-space PSD diagnostics; raw-space is diagnostic only",
     overlap_qc = "Per-locus overlap counts, overlap fractions, and residual-correlation diagnostics",
-    qtl2_validation = "Row-level qtl2::scan1coef beta/SE validation",
-    qtl2_validation_summary = "Pass/fail/not-available qtl2 validation summary",
-    heteroskedasticity_qc = "Multi-locus local founder exposure score residual-variance diagnostics",
     loo_mr = "Leave-one-locus-out MR sensitivity table",
     instrument_sensitivity = "Instrument-set sensitivity refit table",
     q_calibration = "Reported global Q heterogeneity p-value with chi-square and simulation-calibration fields",
@@ -1970,7 +1732,7 @@ write_qtl2mr_results <- function(result,
   qtl2mr_write_output_manifest_html(output_manifest, manifest_html_path)
   if (isTRUE(make_html)) write_qtl2mr_html_report(result, html_path)
   saveRDS(result, model_path)
-  qtl2mr_progress(progress_callback, 7L, "Write outputs", "publish staged result")
+  qtl2mr_progress(progress_callback, 5L, "Write outputs", "publish staged result")
   qtl2mr_commit_output_transaction(transaction, keep_backup = TRUE)
   output_manifest <- qtl2mr_build_output_manifest(final_output_dir, notes = notes)
   result$output_manifest <- output_manifest
@@ -1987,16 +1749,12 @@ write_qtl2mr_results <- function(result,
 run_qtl2mr_analysis <- function(input,
                                 exposure = NULL,
                                 outcome = NULL,
-                                adapter = c("auto", "prepared"),
                                 output_dir = NULL,
                                 loci = NULL,
                                 overwrite = FALSE,
                                 make_html = TRUE,
                                 make_figures = TRUE,
                                 verbose = TRUE,
-                                run_qtl2_validation = FALSE,
-                                run_heteroskedasticity = TRUE,
-                                heteroskedasticity_B = 300L,
                                 diagnostic_bootstrap_B = 500L,
                                 diagnostic_bootstrap_seed = 1L,
                                 reported_estimator_policy = c("diagnostic_only", "strict_so", "auto_fallback"),
@@ -2008,22 +1766,28 @@ run_qtl2mr_analysis <- function(input,
                                 progress = NULL,
                                 ...) {
   dots <- list(...)
+  retired <- c("adapter", "run_qtl2_validation", "run_heteroskedasticity", "heteroskedasticity_B")
   allowed_dots <- c("standardize_phenotypes", "cross_cov_model", "ridge",
     "engine", "context_cache", "fit_cache")
   dot_names <- names(dots)
   if (length(dots) && (is.null(dot_names) || anyNA(dot_names) ||
       any(!nzchar(dot_names)) || anyDuplicated(dot_names) ||
-      any(!dot_names %in% allowed_dots))) {
+      any(!dot_names %in% c(allowed_dots, retired)))) {
     stop("Unknown, unnamed or duplicate analysis argument in ...; allowed: ",
       paste(allowed_dots, collapse = ", "), call. = FALSE)
   }
-  adapter <- qtl2mr_adapter_from_input(input, adapter = adapter)
+  for (nm in intersect(dot_names, retired)) {
+    warning("run_qtl2mr_analysis(", nm, ") is deprecated in qtl2mr 0.5.0 and ignored; it will be removed in 0.6.0.",
+      call. = FALSE)
+  }
+  dots <- dots[setdiff(dot_names, retired)]
+  if (!inherits(input, "qtl2mr_prepared_input")) {
+    stop("input must be created by as_qtl2mr_prepared_input()", call. = FALSE)
+  }
   reported_estimator_policy <- match.arg(reported_estimator_policy)
   heterogeneity_method <- match.arg(heterogeneity_method)
-  if (identical(adapter, "prepared") && is.list(input)) {
-    exposure <- exposure %||% input$exposure
-    outcome <- outcome %||% input$outcome
-  }
+  exposure <- exposure %||% input$exposure
+  outcome <- outcome %||% input$outcome
   if (is.null(exposure) || is.null(outcome)) {
     stop(
       "run_qtl2mr_analysis() requires exposure and outcome trait names. ",
@@ -2055,66 +1819,36 @@ run_qtl2mr_analysis <- function(input,
     progress_callback,
     1L,
     "Prepare input/output",
-    sprintf("adapter=%s, loci=%s, output=%s", adapter, qtl2mr_loci_label(loci), transaction$destination)
+    sprintf("loci=%s, output=%s", qtl2mr_loci_label(loci), transaction$destination)
   )
 
-  if (identical(adapter, "prepared")) {
-    qtl2mr_progress(progress_callback, 2L, "Fit selected-locus founder LMM/MR blocks", "prepared adapter")
-    cap <- qtl2mr_capture_messages(
-      run_prepared_qtl2mr(
-        input = input,
-        exposure = exposure,
-        outcome = outcome,
-        loci = loci,
-        output_dir = data_dir,
-        write_outputs = TRUE,
-        verbose = verbose,
-        progress_callback = progress_callback,
-        heterogeneity_method = heterogeneity_method,
-        q_sim_n = heterogeneity_nsim,
-        q_sim_seed = heterogeneity_seed,
-        diagnostic_bootstrap_B = diagnostic_bootstrap_B,
-        diagnostic_bootstrap_seed = diagnostic_bootstrap_seed,
-        reported_estimator_policy = reported_estimator_policy,
-        drop_nonestimable_loci = FALSE,
-        ...
-      )
-    )
-    pilot <- cap$value
-    messages <- cap$messages
-    run_heteroskedasticity <- FALSE
-  } else {
-    stop("Unsupported qtl2MR adapter: ", adapter, call. = FALSE)
-  }
-  writeLines(messages, file.path(log_dir, "pilot_messages.log"))
-
-  qtl2_validation <- NULL
-  validation_error <- NULL
-  qtl2_validation_status <- if (isTRUE(run_qtl2_validation)) {
-    qtl2mr_qtl2_validation_status(
-      error = "primary analysis does not run qtl2; call validate_qtl2_scan1coef() with explicit generic inputs",
-      requested = TRUE
-    )
-  } else {
-    qtl2mr_qtl2_validation_status(requested = FALSE)
-  }
-  qtl2mr_progress(
-    progress_callback,
-    3L,
-    "Optional qtl2 parity validation",
-    if (isTRUE(run_qtl2_validation)) "not available in primary analysis; use standalone validator" else "not requested"
+  qtl2mr_progress(progress_callback, 2L, "Fit selected-locus founder LMM/MR blocks", "starting")
+  cap <- qtl2mr_capture_messages(
+    do.call(run_prepared_qtl2mr, c(list(
+      input = input,
+      exposure = exposure,
+      outcome = outcome,
+      loci = loci,
+      output_dir = data_dir,
+      write_outputs = TRUE,
+      verbose = verbose,
+      progress_callback = progress_callback,
+      heterogeneity_method = heterogeneity_method,
+      q_sim_n = heterogeneity_nsim,
+      q_sim_seed = heterogeneity_seed,
+      diagnostic_bootstrap_B = diagnostic_bootstrap_B,
+      diagnostic_bootstrap_seed = diagnostic_bootstrap_seed,
+      reported_estimator_policy = reported_estimator_policy,
+      drop_nonestimable_loci = FALSE
+    ), dots))
   )
-
-  xprs <- NULL
-  xprs_error <- if (isTRUE(run_heteroskedasticity)) {
-    "adapter-specific heteroskedasticity diagnostics are not run by the prepared-input workflow"
-  } else NULL
-  qtl2mr_progress(progress_callback, 4L, "Optional heteroskedasticity diagnostics", "not run")
+  pilot <- cap$value
+  writeLines(cap$messages, file.path(log_dir, "pilot_messages.log"))
 
   loo_mr <- NULL
   loo_error <- NULL
   if (isTRUE(run_loo_mr)) {
-    qtl2mr_progress(progress_callback, 5L, "Run leave-one-locus-out MR", "starting")
+    qtl2mr_progress(progress_callback, 3L, "Run leave-one-locus-out MR", "starting")
     loo_mr <- tryCatch(
       loo_multilocus_founder_mr(pilot$fit),
       error = function(e) {
@@ -2125,21 +1859,21 @@ run_qtl2mr_analysis <- function(input,
     if (!is.null(loo_error)) writeLines(loo_error, file.path(log_dir, "loo_mr_error.log"))
     qtl2mr_progress(
       progress_callback,
-      5L,
+      3L,
       "Run leave-one-locus-out MR",
       if (is.null(loo_error)) sprintf("complete: %d rows", nrow(loo_mr %||% data.frame())) else paste("failed:", loo_error)
     )
   } else {
-    qtl2mr_progress(progress_callback, 5L, "Run leave-one-locus-out MR", "skipped")
+    qtl2mr_progress(progress_callback, 3L, "Run leave-one-locus-out MR", "skipped")
   }
 
   instrument_sensitivity <- NULL
   instrument_sensitivity_error <- NULL
   if (isTRUE(run_instrument_sensitivity)) {
-    qtl2mr_progress(progress_callback, 6L, "Run instrument-set sensitivity", "starting")
+    qtl2mr_progress(progress_callback, 4L, "Run instrument-set sensitivity", "starting")
     instrument_sensitivity <- tryCatch(
       fit_instrument_set_sensitivity(
-        structure(list(pilot = pilot, adapter = adapter), class = c("qtl2mr_analysis_result", "list")),
+        structure(list(pilot = pilot), class = c("qtl2mr_analysis_result", "list")),
         loo = loo_mr
       ),
       error = function(e) {
@@ -2150,12 +1884,12 @@ run_qtl2mr_analysis <- function(input,
     if (!is.null(instrument_sensitivity_error)) writeLines(instrument_sensitivity_error, file.path(log_dir, "instrument_sensitivity_error.log"))
     qtl2mr_progress(
       progress_callback,
-      6L,
+      4L,
       "Run instrument-set sensitivity",
       if (is.null(instrument_sensitivity_error)) sprintf("complete: %d sets", nrow(instrument_sensitivity %||% data.frame())) else paste("failed:", instrument_sensitivity_error)
     )
   } else {
-    qtl2mr_progress(progress_callback, 6L, "Run instrument-set sensitivity", "skipped")
+    qtl2mr_progress(progress_callback, 4L, "Run instrument-set sensitivity", "skipped")
   }
 
   result <- structure(
@@ -2163,17 +1897,11 @@ run_qtl2mr_analysis <- function(input,
       input = "qtl2mr_prepared_input",
       exposure = exposure,
       outcome = outcome,
-      adapter = adapter,
       output_dir = transaction$destination,
       created_at = Sys.time(),
       pilot = pilot,
-      qtl2_validation = qtl2_validation,
-      qtl2_validation_status = qtl2_validation_status,
-      xprs = xprs,
       loo_mr = loo_mr,
       instrument_sensitivity = instrument_sensitivity,
-      validation_error = validation_error,
-      xprs_error = xprs_error,
       loo_error = loo_error,
       instrument_sensitivity_error = instrument_sensitivity_error
     ),
@@ -2381,7 +2109,6 @@ report_qtl2mr_locus <- function(result,
   locus_summary <- data.frame(
     marker = block$marker,
     chr = block$chr,
-    adapter = result$adapter %||% result$metadata$adapter %||% "prepared",
     theta_global = theta,
     theta_locus = local_fit$theta,
     se_locus = local_fit$se,

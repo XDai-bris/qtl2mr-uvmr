@@ -1,30 +1,99 @@
-# qtl2mr 0.4.1 (unreleased)
+# qtl2mr 0.5.0 (unreleased)
 
-- Parallel batch resume validates the complete request and saved outputs before
-  writing. A provenance or integrity mismatch stops the run and preserves prior
-  results; ordinary group failures retain per-pair error rows and counts.
+This release slims the package to two workflows and folds in the unreleased
+0.4.1 fixes. For the same inputs and options, reported estimates, standard
+errors, profile confidence intervals and Q statistics are unchanged from 0.4.x
+(checked to be bitwise identical on the bundled and synthetic batch fixtures).
+
+## Breaking changes and migration
+
+- `run_qtl2mr_batch()` is the single batch entry point. New arguments:
+  `sample_policy` (`"pair_common_complete"`, default, or
+  `"batch_common_complete"`), `on_nonestimable_locus` (`"fail"` or `"drop"`),
+  `min_sample_retention` (batch-common only), and `n_workers` (parallel by
+  exposure). `sample_rule`, `output_mode` and
+  `fit_options$drop_nonestimable_loci` are deprecated and mapped with a
+  warning.
+- `run_qtl2mr_batch_fast()`, `run_qtl2mr_batch_exact_grouped()` and
+  `run_qtl2mr_batch_parallel_by_exposure()` are deprecated thin wrappers that
+  give the same numbers as before; they will be removed in 0.6.0. See the
+  migration table in the README or `?run_qtl2mr_batch_fast`.
+- `run_qtl2mr_analysis()` no longer has `adapter`, `run_qtl2_validation`,
+  `run_heteroskedasticity` or `heteroskedasticity_B`; they had no effect and
+  are now ignored with a warning when supplied.
+- No longer exported (internal or removed): `plan_qtl2mr_batch_exact_groups()`,
+  `qtl2mr_subset_allele_probs_to_loci()`,
+  `qtl2mr_make_common_complete_samples()`, `write_qtl2mr_batch_outputs()`,
+  the block-cache refit functions, `loo_multilocus_founder_mr()`,
+  `founder_residual_scores()`, `founder_coordinate_ratios()`,
+  `fit_multilocus_diagnostic_layer()`, `fit_xprs_heteroskedasticity_diagnostic()`
+  and the `plot_*()` helpers. Their tables and figures are still produced by
+  `run_qtl2mr_analysis()`.
+- Removed the xPRS/score heteroskedasticity diagnostics, the founder-residual
+  null simulation and other code that no workflow used (about 1,700 lines).
+- Batch output layout: completed pairs are stored in `batch_pair_records/`; the
+  exact-group planning tables and the per-exposure `by_exposure/` folders are
+  no longer written. `batch_main_results.csv` drops the redundant
+  `sample_rule` column and ends with `sample_policy`. 0.4.x batch folders
+  cannot be resumed.
+- Single-analysis outputs no longer include the always-empty
+  `qtl2_validation*.csv` and `heteroskedasticity_qc.csv`. Use
+  `validate_qtl2_scan1coef()` for the optional qtl2 comparison.
+
+## Batch resume
+
+- Resume continues from per-pair records: an interrupted run (including a
+  parallel one) continues where it stopped, the output folder may be moved,
+  and `n_workers` may change. Changed inputs, options or package code, or
+  modified records or tables, are refused before anything is written. Pairs
+  that failed are refitted on resume.
+- Invalid pairs become error rows under every sample policy; previously a
+  missing trait aborted a whole `batch_common_complete` run.
+- The batch-common retention gate is checked before any output is written.
+- Exact-group planning was removed: shared fits were already reused through
+  the fit cache, and planning saved about 5% of runtime in benchmarks, within
+  run-to-run variation.
+
+## Reporting and checks
+
+- Null-model heritability is reported per role and chromosome
+  (`data/hsq.csv`, summary line, HTML section, and `hsq_x`/`hsq_y` with status
+  in the batch first-stage table), with notices for boundary estimates and
+  kinship-free OLS fits. How hsq is estimated is unchanged.
+- Identical exposure and outcome, an empty selected-locus set and malformed
+  trait names fail at validation with direct messages.
+- Founder probabilities may exceed [0, 1] by floating-point error up to 1e-8,
+  as in 0.4.0; larger excursions report the observed range.
+- The single-analysis covariate notice also counts samples without a
+  covariate row.
+- Batch warnings describe the shared batch sample set instead of the
+  single-analysis role-specific note.
+- Progress shows five real stages instead of seven.
+
+## Fixes carried over from the unreleased 0.4.1
+
 - Corrected chromosome subsetting in the qtl2 onboarding recipe and added a
-  runnable synthetic cross2-to-prepared-input bridge with regression coverage.
-- Reports distinguish the Q statistic, Q p-value and reference distribution.
-  Q simulation reports completed draws and elapsed time. Its default method,
-  draw count and random-number calculation are unchanged.
-- Founder-probability rounding has an explicit strict/normalization policy and
-  an adjustment ledger. Invalid probabilities still fail. Heritability inputs
-  are checked rather than silently ignored or clamped.
-- Weighted-mode bandwidth and search use dimensionless coordinates. Diagnostic
-  point estimates may change where the former absolute bandwidth floor applied;
-  fixed-locus bootstrap-SE Wald intervals remain the diagnostic CI method.
-- Degenerate per-locus diagnostics return unavailable values with reasons,
-  without replacing or manufacturing a primary estimate.
-- Sample policies and covariate exclusions are reported more clearly. Single
-  analyses retain role-specific samples; exact batch retains pair-complete
-  samples. Neither default policy has changed.
-- Quick-start settings explicitly select a faster Q reference and omit optional
-  sensitivities; they do not change package defaults. Documentation clarifies
-  effect units, the small kinship demonstration and the frozen multi-locus
-  example's reproducibility limits. Bundled synthetic datasets are unchanged.
-- Added the full GPL-3 license text and declared graphics/parallel imports.
-  HTML-disabled runs no longer advertise an absent report file.
+  runnable `cross2`-to-prepared-input example with regression coverage.
+- Reports distinguish the Q statistic, Q p-value and reference distribution;
+  Q simulation reports completed draws and elapsed time. The default method
+  and draw count are unchanged.
+- Founder-probability rounding has an explicit policy:
+  `probability_policy = "normalize_rounding"` (default) normalizes small
+  rounding errors in an analysis-local copy and records them; `"strict"`
+  rejects them. Previously such inputs were rejected.
+- User-supplied `hsq` values are validated and used. Named vectors (for
+  example `qtl2::est_herit()` output) and chromosome-keyed lists were
+  previously ignored and hsq was re-estimated, so analyses that pass hsq this
+  way can now give different estimates. Conflicting entries are an error.
+- Weighted-mode bandwidth no longer depends on measurement units; the
+  diagnostic weighted-mode estimate can change slightly where the old absolute
+  bandwidth floor applied.
+- Degenerate per-locus diagnostics return unavailable values with reasons
+  instead of failing.
+- Covariate exclusions and sample policies are recorded in the outputs
+  (`sample_alignment.csv`, `batch_sample_exclusions.csv`, `sample_policy`).
+- Added the full GPL-3 licence text and declared graphics, grDevices and
+  parallel imports. Runs without HTML no longer list an absent report.
 
 # qtl2mr 0.4.0
 

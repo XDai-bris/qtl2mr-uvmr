@@ -85,45 +85,6 @@ make_fake_qtl2mr_analysis_result <- function() {
   founder_residuals <- do.call(rbind, lapply(blocks, founder_residual_scores, theta = fit$theta))
   founder_ratios <- do.call(rbind, lapply(blocks, founder_coordinate_ratios, theta_ref = fit$theta))
 
-  global_tests <- data.frame(
-    marker = "multi_locus_xprs",
-    chr = "multi",
-    locus_rank = NA_integer_,
-    trait_role = c("exposure", "outcome"),
-    trait = c("exposure_trait", "outcome_trait"),
-    n_loci = 2L,
-    sample_size = length(ids),
-    score_sd = 1,
-    residual_sd = c(0.9, 1.0),
-    joint_test_statistic = c(2.1, 4.4),
-    joint_p = c(0.35, 0.012),
-    joint_q_bh = c(0.35, 0.024),
-    flag_fdr_0.05 = c(FALSE, TRUE),
-    variance_ratio_q5_q1 = c(1.2, 1.7),
-    variance_ratio_max_min = c(1.3, 1.9),
-    bin_variance_slope = c(0.03, 0.11),
-    stringsAsFactors = FALSE
-  )
-  global_bins <- do.call(rbind, lapply(seq_len(nrow(global_tests)), function(i) {
-    vv <- seq(0.8, 1.3, length.out = 5) * (1 + 0.08 * i)
-    data.frame(
-      marker = "multi_locus_xprs",
-      chr = "multi",
-      trait_role = global_tests$trait_role[[i]],
-      trait = global_tests$trait[[i]],
-      score_bin = 1:5,
-      score_bin_label = paste0("Q", 1:5),
-      residual_variance = vv,
-      ci_lower = vv * 0.85,
-      ci_upper = vv * 1.15,
-      stringsAsFactors = FALSE
-    )
-  }))
-  xprs_diag <- structure(
-    list(global_tests = global_tests, global_bins = global_bins),
-    class = c("qtl2mr_xprs_heteroskedasticity_diagnostic", "list")
-  )
-
   pilot <- list(
     summary = summary,
     fit = fit,
@@ -133,7 +94,6 @@ make_fake_qtl2mr_analysis_result <- function() {
     diagnostic_layer = diagnostic_layer,
     founder_residual_scores_global = founder_residuals,
     founder_coordinate_ratios = founder_ratios,
-    hsq_cache = list(),
     sample_ids = ids,
     backend_provenance = qtl2mr:::qtl2mr_lmm_backend_provenance(blocks)
   )
@@ -144,9 +104,7 @@ make_fake_qtl2mr_analysis_result <- function() {
       outcome = "outcome_trait",
       output_dir = tempfile("qtl2mr-result-"),
       created_at = Sys.time(),
-      pilot = pilot,
-      qtl2_validation = data.frame(marker = "m1", trait = "exposure_trait", raw_abs_diff = 0, beta_abs_diff = 0),
-      xprs = list(diagnostic = xprs_diag, global_tests = global_tests, global_bins = global_bins)
+      pilot = pilot
     ),
     class = c("qtl2mr_analysis_result", "list")
   )
@@ -163,7 +121,6 @@ test_that("standard analysis writer creates destination structure and manifest",
   expected <- c(
     "main_result.csv", "method_comparison.csv", "per_locus_results.csv",
     "block_first_stage.csv", "psd_qc.csv", "overlap_qc.csv",
-    "qtl2_validation.csv", "qtl2_validation_summary.csv", "heteroskedasticity_qc.csv",
     "q_calibration.csv", "founder_residuals.csv", "founder_coordinate_ratios.csv",
     "warnings.csv", "session_info.txt", "output_manifest.csv"
   )
@@ -173,14 +130,12 @@ test_that("standard analysis writer creates destination structure and manifest",
   expect_true(file.exists(file.path(out_dir, "report.html")))
   expect_true(file.exists(file.path(out_dir, "logs", "run.log")))
   expect_true(file.exists(file.path(out_dir, "figures", "method_comparison.png")))
-  expect_true(file.exists(file.path(out_dir, "figures", "local_founder_exposure_score_qc.pdf")))
-  qtl2_status <- utils::read.csv(file.path(out_dir, "data", "qtl2_validation_summary.csv"), stringsAsFactors = FALSE)
-  expect_equal(qtl2_status$validation_status[[1L]], "pass")
-  warnings <- utils::read.csv(file.path(out_dir, "data", "warnings.csv"), stringsAsFactors = FALSE)
-  expect_false("qtl2_validation_unavailable" %in% warnings$warning_id)
+  for (retired in c("qtl2_validation.csv", "qtl2_validation_summary.csv", "heteroskedasticity_qc.csv")) {
+    expect_false(file.exists(file.path(out_dir, "data", retired)))
+  }
   manifest <- utils::read.csv(file.path(out_dir, "data", "output_manifest.csv"), stringsAsFactors = FALSE)
   expect_true(all(c("data", "figure", "model_object", "summary", "html_report") %in% manifest$role))
-  expect_output(print(written), "qtl2 validation: pass")
+  expect_output(print(written), "Null-model hsq")
   expect_equal(nrow(summary(written)), 1L)
 })
 

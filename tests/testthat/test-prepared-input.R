@@ -167,13 +167,11 @@ test_that("prepared overlap engine handles no shared samples as independent samp
   expect_equal(prepared$overlap_summary$n_y[[1L]], 48L)
 })
 
-test_that("prepared adapter auto-detects and runs a tiny high-level smoke", {
+test_that("prepared input runs a tiny high-level smoke", {
   input <- make_prepared_smoke_input()
-  expect_equal(qtl2mr:::qtl2mr_adapter_from_input(input, adapter = "auto"), "prepared")
   outdir <- tempfile("qtl2mr-prepared-result-")
   res <- run_qtl2mr_analysis(
     input,
-    adapter = "auto",
     loci = 2,
     output_dir = outdir,
     overwrite = TRUE,
@@ -184,7 +182,6 @@ test_that("prepared adapter auto-detects and runs a tiny high-level smoke", {
     run_instrument_sensitivity = TRUE
   )
   expect_s3_class(res, "qtl2mr_analysis_result")
-  expect_equal(res$adapter, "prepared")
   expect_identical(res$pilot$summary$lmm_backend, "ordinary_least_squares")
   expect_identical(res$pilot$backend_provenance$backend, "ordinary_least_squares")
   expect_equal(qtl2mr_primary_result(res)$reported_estimator_policy, "diagnostic_only")
@@ -195,51 +192,17 @@ test_that("prepared adapter auto-detects and runs a tiny high-level smoke", {
   expect_true(is.finite(qtl2mr_primary_result(res)$profile_ci_upper))
   expect_equal(qtl2mr_primary_result(res)$n_loci, 2)
   expect_true(file.exists(file.path(outdir, "report.html")))
-  expect_identical(res$qtl2_validation_status$validation_status, "not_requested")
-  expect_false(res$qtl2_validation_status$validation_available)
-  expect_false("qtl2_validation_unavailable" %in% qtl2mr_warnings(res)$warning_id)
-  expect_match(
-    paste(readLines(file.path(outdir, "summary.md"), warn = FALSE), collapse = "\n"),
-    "qtl2 validation: not_requested"
-  )
-  expect_match(
-    paste(readLines(file.path(outdir, "report.html"), warn = FALSE), collapse = "\n"),
-    "not_requested"
-  )
-
-  requested_dir <- tempfile("qtl2mr-prepared-qtl2-status-")
-  requested <- run_qtl2mr_analysis(
-    input,
-    adapter = "prepared",
-    loci = 2,
-    output_dir = requested_dir,
-    overwrite = TRUE,
-    make_figures = FALSE,
-    make_html = FALSE,
-    verbose = FALSE,
-    run_qtl2_validation = TRUE,
-    run_heteroskedasticity = FALSE,
-    diagnostic_bootstrap_B = 0L,
-    heterogeneity_method = "chisq",
-    run_loo_mr = FALSE,
-    run_instrument_sensitivity = FALSE,
-    progress = FALSE
-  )
-  expect_identical(requested$qtl2_validation_status$validation_status, "not_available")
-  expect_false(requested$qtl2_validation_status$validation_available)
-  expect_true("qtl2_validation_unavailable" %in% qtl2mr_warnings(requested)$warning_id)
+  expect_false(file.exists(file.path(outdir, "data", "qtl2_validation_summary.csv")))
+  expect_true(file.exists(file.path(outdir, "data", "hsq.csv")))
 })
 
 test_that("public prepared analysis suppresses unreliable SO unless fallback is explicit", {
   input <- make_prepared_unreliable_so_input()
   common_args <- list(
     input = input,
-    adapter = "prepared",
     overwrite = TRUE,
     make_figures = FALSE,
     verbose = FALSE,
-    run_qtl2_validation = FALSE,
-    run_heteroskedasticity = FALSE,
     diagnostic_bootstrap_B = 0L,
     heterogeneity_method = "none",
     run_loo_mr = FALSE,
@@ -296,7 +259,6 @@ test_that("run progress supports console, silent, and log-only modes", {
       input,
       exposure = "x",
       outcome = "y",
-      adapter = "prepared",
       loci = 2,
       output_dir = out_console,
       overwrite = TRUE,
@@ -309,11 +271,11 @@ test_that("run progress supports console, silent, and log-only modes", {
     ),
     type = "message"
   )
-  expect_true(any(grepl("\\[1/7\\]", progress_lines)))
-  expect_true(any(grepl("\\[2/7\\]", progress_lines)))
-  expect_true(any(grepl("\\[3/7\\].*not requested", progress_lines)))
-  expect_true(any(grepl("\\[4/7\\].*not run", progress_lines)))
-  expect_true(any(grepl("\\[7/7\\]", progress_lines)))
+  expect_true(any(grepl("\\[1/5\\]", progress_lines)))
+  expect_true(any(grepl("\\[2/5\\]", progress_lines)))
+  expect_true(any(grepl("\\[3/5\\].*leave-one-locus-out", progress_lines)))
+  expect_true(any(grepl("\\[4/5\\].*instrument-set", progress_lines)))
+  expect_true(any(grepl("\\[5/5\\]", progress_lines)))
   expect_true(file.exists(file.path(out_console, "logs", "progress.log")))
 
   out_silent <- tempfile("qtl2mr-progress-silent-")
@@ -322,7 +284,6 @@ test_that("run progress supports console, silent, and log-only modes", {
       input,
       exposure = "x",
       outcome = "y",
-      adapter = "prepared",
       loci = 2,
       output_dir = out_silent,
       overwrite = TRUE,
@@ -335,7 +296,7 @@ test_that("run progress supports console, silent, and log-only modes", {
     ),
     type = "message"
   )
-  expect_false(any(grepl("\\[[1-7]/7\\]", silent_lines)))
+  expect_false(any(grepl("\\[[1-5]/5\\]", silent_lines)))
   expect_false(file.exists(file.path(out_silent, "logs", "progress.log")))
 
   out_log <- tempfile("qtl2mr-progress-log-")
@@ -344,7 +305,6 @@ test_that("run progress supports console, silent, and log-only modes", {
       input,
       exposure = "x",
       outcome = "y",
-      adapter = "prepared",
       loci = 2,
       output_dir = out_log,
       overwrite = TRUE,
@@ -358,9 +318,9 @@ test_that("run progress supports console, silent, and log-only modes", {
     type = "message"
   )
   progress_log <- file.path(out_log, "logs", "progress.log")
-  expect_false(any(grepl("\\[[1-7]/7\\]", log_only_lines)))
+  expect_false(any(grepl("\\[[1-5]/5\\]", log_only_lines)))
   expect_true(file.exists(progress_log))
   logged <- readLines(progress_log, warn = FALSE)
-  expect_true(any(grepl("\\[1/7\\]", logged)))
-  expect_true(any(grepl("\\[7/7\\]", logged)))
+  expect_true(any(grepl("\\[1/5\\]", logged)))
+  expect_true(any(grepl("\\[5/5\\]", logged)))
 })

@@ -67,7 +67,7 @@ test_that("LOD islands stop at chromosome boundaries and native maps work", {
 test_that("missing selection files and misspelled options are not ignored", {
   f <- v040_fixture()
   expect_error(run_qtl2mr_batch(f$resources, f$pairs, fit_options = list(cross_cov_modle = "zero")), "Unknown option")
-  expect_error(run_qtl2mr_batch(f$resources, f$pairs, sample_rule = list(mdoe = "batch_common_complete")), "Unknown sample_rule")
+  expect_error(suppressWarnings(run_qtl2mr_batch(f$resources, f$pairs, sample_rule = list(mdoe = "batch_common_complete"))), "Unknown sample_rule")
   expect_equal(length(qtl2mr:::qtl2mr_make_common_complete_samples(f$resources, "x", "y", "1",
     sample_rule = list(mode = "common_complete", sample_ids = paste0("s", 1:30)))), 30L)
   expect_error(qtl2mr:::run_prepared_qtl2mr(f$input, "x", "y", standadize = FALSE), "Unused arguments")
@@ -100,24 +100,13 @@ test_that("resume requires exact provenance and leaves one current row per pair"
   expect_error(run_qtl2mr_batch(f$resources, f$pairs, fit_options = f$options, output_dir = path, resume = TRUE, progress = FALSE), "tables changed")
 })
 
-test_that("resume validates referenced cached artifacts", {
-  f <- v040_fixture()
-  path <- tempfile("v040-cache-integrity-")
-  options <- c(f$options, list(save_mr_block_cache = TRUE))
-  result <- run_qtl2mr_batch(f$resources, f$pairs, fit_options = options, output_dir = path, progress = FALSE)
-  expect_identical(result$main_results$status, "ok")
-  saveRDS(list(tampered = TRUE), result$mr_block_cache_manifest$cache_file[[1]])
-  expect_error(run_qtl2mr_batch(f$resources, f$pairs, fit_options = options, output_dir = path,
-    resume = TRUE, progress = FALSE), "block-cache artifacts changed")
-})
-
 test_that("incomplete occupied destinations fail closed without changing files", {
   f <- v040_fixture()
-  for (owned in c("batch_selected_loci.csv", "batch_resume_state.rds", "mr_block_cache")) {
+  for (owned in c("batch_selected_loci.csv", "batch_resume_state.rds", "mr_block_cache", "batch_pair_records")) {
     path <- tempfile("v040-incomplete-")
     dir.create(path)
     target <- file.path(path, owned)
-    if (owned == "mr_block_cache") {
+    if (owned %in% c("mr_block_cache", "batch_pair_records")) {
       dir.create(target)
       target <- file.path(target, "existing.rds")
     }
@@ -126,8 +115,7 @@ test_that("incomplete occupied destinations fail closed without changing files",
     expect_error(run_qtl2mr_batch(f$resources, f$pairs, fit_options = f$options,
       output_dir = path, progress = FALSE), "output already exists")
     expect_error(run_qtl2mr_batch(f$resources, f$pairs, fit_options = f$options,
-      output_dir = path, resume = TRUE, progress = FALSE), "incomplete checkpoint")
-    expect_error(qtl2mr:::qtl2mr_validate_resume(path, list()), "incomplete checkpoint")
+      output_dir = path, resume = TRUE, progress = FALSE), "legacy or incomplete|unreadable checkpoint")
     expect_identical(unname(tools::md5sum(target)), hash)
     expect_false(file.exists(file.path(path, "batch_main_results.csv")))
   }
@@ -136,24 +124,9 @@ test_that("incomplete occupied destinations fail closed without changing files",
   note <- file.path(unrelated, "notes.txt")
   writeLines("user notes", note)
   expect_true(qtl2mr:::qtl2mr_check_batch_destination(unrelated))
-  expect_false(qtl2mr:::qtl2mr_validate_resume(unrelated, list()))
+  result <- run_qtl2mr_batch(f$resources, f$pairs, fit_options = f$options, output_dir = unrelated, progress = FALSE)
+  expect_identical(result$main_results$status, "ok")
   expect_identical(readLines(note), "user notes")
-})
-
-test_that("exact plans bind complete requests, not just pair IDs", {
-  f <- v040_fixture()
-  f$resources$pheno$z <- rev(f$resources$pheno$y)
-  f$pairs$pair_id <- "one"
-  plan <- plan_qtl2mr_batch_exact_groups(f$resources, f$pairs, min_samples = 20L)
-  changed <- f$pairs
-  changed$outcome <- "z"
-  expect_error(run_qtl2mr_batch_exact_grouped(f$resources, changed, plan = plan,
-    fit_options = f$options, progress = FALSE), "plan does not match")
-  expect_error(run_qtl2mr_batch_exact_grouped(f$resources, f$pairs, plan = plan,
-    instrument_rule = list(lod_thresh = 5), fit_options = f$options, progress = FALSE), "plan does not match")
-  result <- run_qtl2mr_batch_exact_grouped(f$resources, f$pairs, plan = plan,
-    fit_options = f$options, progress = FALSE)
-  expect_identical(result$main_results$outcome, "y")
 })
 
 test_that("cache reuse includes actual phenotype and marker probability values", {
@@ -178,8 +151,8 @@ test_that("mixed file and scan selection requests preserve both pairs", {
   write.csv(data.frame(marker = "m3", chr = "1"), file, row.names = FALSE)
   pairs <- data.frame(pair_id = c("scan", "file"), exposure = "x", outcome = "y",
                       selected_loci_file = c(NA, file))
-  for (runner in list(run_qtl2mr_batch_fast, run_qtl2mr_batch_exact_grouped)) {
-    result <- runner(f$resources, pairs, fit_options = f$options, progress = FALSE)
+  for (policy in c("pair_common_complete", "batch_common_complete")) {
+    result <- run_qtl2mr_batch(f$resources, pairs, sample_policy = policy, fit_options = f$options, progress = FALSE)
     expect_equal(result$main_results$status, c("ok", "ok"))
   }
 })
@@ -189,7 +162,8 @@ test_that("fast common-sample counts exclude nonfinite phenotypes", {
   f$resources$pheno$x[1] <- Inf
   ids <- qtl2mr:::qtl2mr_make_batch_common_complete_samples(f$resources, c("x", "y"), "1")
   expect_length(ids, 63L)
-  result <- run_qtl2mr_batch_fast(f$resources, f$pairs, fit_options = f$options, progress = FALSE)
+  result <- run_qtl2mr_batch(f$resources, f$pairs, sample_policy = "batch_common_complete",
+    fit_options = f$options, progress = FALSE)
   expect_equal(result$sample_qc$n_batch_common, 63L)
   expect_equal(result$main_results$n_x_median, result$main_results$n_y_median)
 })
@@ -206,18 +180,17 @@ test_that("resuming a mixed batch does not retain duplicate error rows", {
   expect_equal(anyDuplicated(resumed$main_results$pair_id), 0L)
 })
 
-test_that("batch wrappers preserve valid pairs when another request cannot be planned", {
+test_that("batch runs preserve valid pairs when another request cannot be planned", {
   f <- v040_fixture()
   pairs <- rbind(f$pairs, data.frame(exposure = "x", outcome = "missing"))
-  for (runner in list(run_qtl2mr_batch_exact_grouped, run_qtl2mr_batch_fast, run_qtl2mr_batch_parallel_by_exposure)) {
-    args <- list(resources = f$resources, pairs = pairs, fit_options = f$options,
-                 progress = FALSE, fail_fast = FALSE)
-    if (identical(runner, run_qtl2mr_batch_parallel_by_exposure)) args$n_workers <- 1L
-    result <- do.call(runner, args)
+  for (policy in c("pair_common_complete", "batch_common_complete")) for (n_workers in c(1L, 2L)) {
+    args <- list(resources = f$resources, pairs = pairs, sample_policy = policy, n_workers = n_workers,
+                 fit_options = f$options, progress = FALSE, fail_fast = FALSE)
+    result <- do.call(run_qtl2mr_batch, args)
     expect_equal(result$main_results$status, c("ok", "error"))
     expect_equal(length(unique(result$main_results$pair_id)), 2L)
     args$fail_fast <- TRUE
-    expect_error(do.call(runner, args), "Outcome trait not found")
+    expect_error(do.call(run_qtl2mr_batch, args), "Outcome trait not found")
   }
 })
 

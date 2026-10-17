@@ -1,11 +1,17 @@
-test_that("adapter detection is explicit and unsupported inputs fail clearly", {
-  prepared <- structure(list(), class = c("qtl2mr_prepared_input", "list"))
-  expect_equal(qtl2mr_adapter_from_input(prepared, adapter = "auto"), "prepared")
-  expect_equal(qtl2mr_adapter_from_input(prepared, adapter = "prepared"), "prepared")
-  expect_error(
-    qtl2mr_adapter_from_input(list(genoprobs = list()), adapter = "auto"),
-    "requires an object created by as_qtl2mr_prepared_input"
-  )
+test_that("analysis input must be prepared and retired arguments only warn", {
+  expect_error(run_qtl2mr_analysis(list(genoprobs = list()), exposure = "x", outcome = "y"),
+    "created by as_qtl2mr_prepared_input")
+  data("qtl2mr_example", package = "qtl2mr", envir = environment())
+  ex <- qtl2mr_example
+  input <- as_qtl2mr_prepared_input(ex$allele_probs, ex$pheno, ex$covar, ex$kinship,
+    ex$marker_map, ex$selected_loci, ex$exposure, ex$outcome)
+  expect_warning(
+    run_qtl2mr_analysis(input, loci = 1, output_dir = tempfile("qtl2mr-retired-"), adapter = "prepared",
+      make_figures = FALSE, make_html = FALSE, verbose = FALSE, progress = FALSE,
+      diagnostic_bootstrap_B = 0L, heterogeneity_method = "none",
+      run_loo_mr = FALSE, run_instrument_sensitivity = FALSE),
+    "adapter\\) is deprecated")
+  expect_error(run_qtl2mr_analysis(input, adaptor = "prepared"), "Unknown, unnamed or duplicate")
 })
 
 test_that("relative output paths use a portable directory boundary", {
@@ -68,7 +74,8 @@ test_that("standard result exposes accessors, warning taxonomy, and portable man
   }
 
   smry <- readLines(file.path(out_dir, "summary.md"), warn = FALSE)
-  expect_true(any(grepl("^Adapter: prepared", smry)))
+  expect_false(any(grepl("^Adapter:", smry)))
+  expect_true(any(grepl("^Null-model hsq:", smry)))
   expect_true(any(grepl("^Outputs: report.html", smry)))
   main_ids <- smry[grepl("^Actionable warning IDs:", smry)]
   expect_false(any(grepl("raw_space_psd_invalid", main_ids)))
@@ -105,7 +112,7 @@ test_that("run reports are curated and package coverage is not claimed as run ev
   report <- paste(readLines(file.path(out_dir, "report.html"), warn = FALSE), collapse = "\n")
   expect_match(report, "Analysis overview and primary estimate", fixed = TRUE)
   expect_match(report, "QC and actionable warnings", fixed = TRUE)
-  expect_match(report, "qtl2 validation", fixed = TRUE)
+  expect_false(grepl("qtl2 validation", report, fixed = TRUE))
   expect_match(report, "data/output_manifest.csv", fixed = TRUE)
   expect_false(grepl("Validation and Test Summary|current local package check", report))
   expect_false(grepl("validation_tests.csv", report, fixed = TRUE))

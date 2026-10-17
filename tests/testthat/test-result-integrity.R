@@ -27,9 +27,8 @@ qtl2mr_prepared_example_run <- function(output_dir, overwrite = FALSE, progress 
     metadata = qtl2mr_example$metadata
   )
   run_qtl2mr_analysis(
-    prepared, adapter = "prepared", loci = 2, output_dir = output_dir,
+    prepared, loci = 2, output_dir = output_dir,
     overwrite = overwrite, make_figures = FALSE, make_html = TRUE, verbose = FALSE,
-    run_qtl2_validation = FALSE, run_heteroskedasticity = FALSE,
     diagnostic_bootstrap_B = 0L, heterogeneity_method = "chisq",
     run_loo_mr = FALSE, run_instrument_sensitivity = FALSE, progress = progress
   )
@@ -391,7 +390,7 @@ test_that("broken-symlink transaction conflict preserves the node and backup", {
   }, add = TRUE)
   conflict <- tryCatch(qtl2mr:::qtl2mr_commit_output_transaction(transaction), error = identity)
   expect_s3_class(conflict, "qtl2mr_output_transaction_conflict")
-  expect_true(qtl2mr:::qtl2mr_is_symlink(out_dir))
+  expect_identical(qtl2mr:::qtl2mr_path_node_state(out_dir), "link")
   expect_true(dir.exists(transaction$backup_dir))
   expect_identical(transaction$state, "aborted")
 })
@@ -499,7 +498,7 @@ test_that("empty destinations, repeated overwrite, symlinks, and high-level repl
   link <- tempfile("qtl2mr-symlink-output-")
   if (isTRUE(file.symlink(target, link))) {
     on.exit(qtl2mr_test_remove_link_node(link), add = TRUE)
-    expect_true(qtl2mr:::qtl2mr_is_symlink(link))
+    expect_identical(qtl2mr:::qtl2mr_path_node_state(link), "link")
     expect_error(write_qtl2mr_results(make_fake_qtl2mr_analysis_result(), link,
                                       overwrite = TRUE, make_html = FALSE, make_figures = FALSE), "symlink")
     expect_true(file.exists(target_sentinel))

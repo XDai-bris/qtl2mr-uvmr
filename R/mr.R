@@ -137,11 +137,6 @@ qtl2mr_so_coordinates <- function(blocks, allow_cross_cov, ridge) {
   list(blocks = normalized, scale = scale, evaluate = evaluate)
 }
 
-qtl2mr_multilocus_objective <- function(blocks, allow_cross_cov = TRUE, ridge = 1e-10) {
-  coordinates <- qtl2mr_so_coordinates(blocks, allow_cross_cov, ridge)
-  function(theta) coordinates$evaluate(atan(theta / coordinates$scale))
-}
-
 qtl2mr_so_fit <- function(locus_blocks, allow_cross_cov = TRUE, ridge = 1e-10,
                          theta_grid = NULL) {
   coordinates <- qtl2mr_so_coordinates(locus_blocks, allow_cross_cov, ridge)
@@ -292,14 +287,6 @@ second_order_gls_ivw <- function(beta_x, beta_y, Sigma_x, Sigma_y,
 qtl2mr_fit_multilocus_once <- function(locus_blocks, allow_cross_cov = TRUE,
                                        ridge = 1e-10, theta_grid = NULL) {
   qtl2mr_so_fit(locus_blocks, allow_cross_cov, ridge, theta_grid)
-}
-
-qtl2mr_rmvnorm1 <- function(mu, Sigma, ridge = 1e-10) {
-  mu <- as.numeric(mu)
-  Sigma <- qtl2mr_psd_clip(Sigma, ridge = ridge)
-  ee <- eigen(Sigma, symmetric = TRUE)
-  vals <- pmax(ee$values, 0)
-  as.numeric(mu + ee$vectors %*% (sqrt(vals) * stats::rnorm(length(mu))))
 }
 
 calibrate_multilocus_q <- function(locus_blocks,

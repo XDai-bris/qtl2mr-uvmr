@@ -53,15 +53,12 @@ stopifnot(validate_qtl2mr_input(prepared, require_selected_loci = TRUE))
 result_dir <- tempfile("qtl2mr-getting-started-")
 result <- run_qtl2mr_analysis(
   prepared,
-  adapter = "prepared",
   loci = 2,
   output_dir = result_dir,
   overwrite = TRUE,
   make_figures = FALSE,
   make_html = TRUE,
   verbose = FALSE,
-  run_qtl2_validation = FALSE,
-  run_heteroskedasticity = FALSE,
   diagnostic_bootstrap_B = 0L,
   heterogeneity_method = "chisq",
   run_loo_mr = FALSE,
@@ -71,10 +68,9 @@ result <- run_qtl2mr_analysis(
 ```
 
 Those switches keep this walkthrough fast by skipping optional diagnostics;
-they are not universal analysis defaults. In particular, qtl2 parity validation
-is deliberately not requested here. The primary LMM uses qtl2mr's internal
-backend; the `qtl2` package is optional and is needed only for an explicitly
-requested parity comparison.
+they are not universal analysis defaults. The LMM uses qtl2mr's internal
+backend; the `qtl2` package is optional and is needed only for upstream
+processing or the standalone `validate_qtl2_scan1coef()` comparison.
 The default `heterogeneity_method = "auto"` uses a chi-square Q reference
 for one locus and simulation for multiple loci, with 1,000 draws by default.
 Each draw refits MR; this can dominate runtime even for two loci. The explicit
@@ -174,9 +170,10 @@ list, and harmonized chromosome-specific LOCO kinship. The companion
 explains which choices are yours. A missing selected-locus list no longer
 means "use every marker".
 The single-pair workflow uses separate usable samples for X and Y and models
-their overlap. Exact batch workflows use each pair's common complete samples;
-fast batches use a common complete set across all requested traits. Compare
-engines with identical sample masks and fit options before expecting parity.
+their overlap. For many pairs, `run_qtl2mr_batch()` fits each pair on the
+samples complete for both of its traits by default
+(`sample_policy = "pair_common_complete"`); restricting the single analysis to
+those samples reproduces the batch estimate exactly.
 
 ```{r cleanup, include=FALSE}
 unlink(result_dir, recursive = TRUE, force = TRUE)
