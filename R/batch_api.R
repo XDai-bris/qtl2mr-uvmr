@@ -439,11 +439,7 @@ qtl2mr_read_selected_loci_file <- function(path) {
 qtl2mr_batch_defaults <- function(x, defaults) {
   if (is.null(x)) return(defaults)
   if (!is.list(x) || (length(x) && (is.null(names(x)) || any(!nzchar(names(x))) || anyDuplicated(names(x))))) stop("Options must be a uniquely named list", call. = FALSE)
-  allowed <- names(defaults)
-  if ("standardize_phenotypes" %in% allowed) allowed <- union(allowed, c(
-    "save_mr_block_cache", "mr_block_cache_level", "mr_block_cache_compress",
-    "run_first_stage_filter_grid", "first_stage_filter_grid", "first_stage_filter_min_loci", "steiger_filter"))
-  unknown <- setdiff(names(x), allowed)
+  unknown <- setdiff(names(x), names(defaults))
   if (length(unknown)) stop("Unknown option(s): ", paste(unknown, collapse = ", "), call. = FALSE)
   if ("source" %in% names(x) && !identical(x$source, "exposure_qtl_scan")) stop("Unsupported instrument_rule source", call. = FALSE)
   if ("peak_method" %in% names(x) && !identical(x$peak_method, "contiguous_lod_island_max")) stop("Unsupported peak_method", call. = FALSE)
@@ -457,11 +453,7 @@ qtl2mr_batch_fit_options <- function(options) {
     diagnostic_bootstrap_B = 0L, diagnostic_bootstrap_seed = 1L,
     reported_estimator_policy = "diagnostic_only", min_samples = 50L,
     min_loci = 1L, engine = "batch",
-    cache_contexts = TRUE, cache_lmm_fits = TRUE, save_mr_block_cache = FALSE,
-    mr_block_cache_level = "stripped", mr_block_cache_compress = "xz",
-    run_first_stage_filter_grid = FALSE,
-    first_stage_filter_grid = c(NA_real_, 1, 2, 3, 5, 10),
-    first_stage_filter_min_loci = 1L, steiger_filter = FALSE, verbose = FALSE
+    cache_contexts = TRUE, cache_lmm_fits = TRUE, verbose = FALSE
   ))
 }
 
@@ -693,22 +685,6 @@ qtl2mr_empty_batch_table <- function(name) {
       "n_x", "n_y", "df_x", "df_y", "theta", "se", "Q_min", "weight",
       "hsq_x", "hsq_y", "hsq_status_x", "hsq_status_y"
     ),
-    first_stage_filter_results = c(
-      "pair_id", "exposure", "outcome", "instrument_trait", "filter_id",
-      "F_X_min", "steiger_filter", "n_loci_input", "n_loci_kept",
-      "n_loci_dropped_F", "n_loci_dropped_steiger", "theta", "se",
-      "profile_ci_lower", "profile_ci_upper", "Q", "Q_p_reported",
-      "Q_p_method", "theta_independence", "theta_overlap_delta",
-      "F_X_block_min", "F_X_block_median", "F_X_block_max",
-      "partial_R2_X_block_median", "partial_R2_Y_block_median",
-      "status", "notes", "cache_file"
-    ),
-    mr_block_cache_manifest = c(
-      "pair_id", "exposure", "outcome", "instrument_trait", "cache_file",
-      "cache_level", "n_loci", "n_loci_with_finite_F_X",
-      "n_loci_F_X_ge_2", "n_loci_steiger_pass", "file_size_bytes",
-      "created_at"
-    ),
     warnings = c(
       "pair_id", "warning_id", "severity", "message", "consequence",
       "recommended_action", "shown_in_main_report"
@@ -724,7 +700,7 @@ qtl2mr_empty_batch_table <- function(name) {
       "n_loci_dropped_nonestimable", "parallel_backend", "n_workers",
       "context_cache_enabled", "context_cache_hits", "context_cache_misses",
       "lmm_fit_cache_enabled", "lmm_fit_cache_hits", "lmm_fit_cache_misses",
-      "save_mr_block_cache", "run_first_stage_filter_grid", "wall_sec",
+      "wall_sec",
       "mean_wall_sec_per_pair", "lmm_backend"
     ),
     sample_exclusions = c("pair_id", "exposure", "outcome", "sample_policy", "reason",
@@ -751,8 +727,6 @@ qtl2mr_empty_batch <- function(resources, pairs, config) {
     selected_loci = qtl2mr_empty_batch_table("selected_loci"),
     overlap_qc = qtl2mr_empty_batch_table("overlap_qc"),
     first_stage_summary = qtl2mr_empty_batch_table("first_stage_summary"),
-    first_stage_filter_results = qtl2mr_empty_batch_table("first_stage_filter_results"),
-    mr_block_cache_manifest = qtl2mr_empty_batch_table("mr_block_cache_manifest"),
     warnings = qtl2mr_batch_covariate_warnings(exclusions),
     errors = qtl2mr_empty_batch_table("errors"),
     run_manifest = qtl2mr_empty_batch_table("run_manifest"),
@@ -863,11 +837,8 @@ qtl2mr_strip_locus_block <- function(block,
   out
 }
 
-qtl2mr_make_mr_block_cache <- function(pair,
-                                       pilot,
-                                       cache_level = c("stripped"),
-                                       ridge = 1e-10) {
-  cache_level <- match.arg(cache_level)
+# Per-locus first-stage summaries (block F, partial R2, hsq) for the batch tables.
+qtl2mr_make_mr_block_cache <- function(pair, pilot, ridge = 1e-10) {
   blocks <- pilot$locus_blocks
   if (!is.list(blocks) || !length(blocks)) stop("pilot does not contain locus_blocks", call. = FALSE)
   per_locus <- pilot$diagnostic_layer$per_locus %||% data.frame()
@@ -897,7 +868,7 @@ qtl2mr_make_mr_block_cache <- function(pair,
     exposure = pair$exposure,
     outcome = pair$outcome,
     instrument_trait = pair$instrument_trait,
-    cache_level = cache_level,
+    cache_level = "stripped",
     created_at = as.character(Sys.time()),
     summary = pilot$summary,
     selected_loci = selected,
@@ -934,179 +905,6 @@ qtl2mr_mr_block_cache_first_stage_table <- function(cache_or_blocks) {
       hsq_status_x = b$hsq_status_x %||% NA_character_,
       hsq_status_y = b$hsq_status_y %||% NA_character_,
       stringsAsFactors = FALSE
-    )
-  })
-  out <- do.call(rbind, rows)
-  rownames(out) <- NULL
-  out
-}
-
-qtl2mr_write_mr_block_cache <- function(cache,
-                                        output_dir,
-                                        pair_id = cache$pair_id,
-                                        compress = "xz",
-                                        pair_index = NULL) {
-  dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
-  stem <- qtl2mr_slug(pair_id)
-  if (!is.null(pair_index)) stem <- sprintf("pair_%06d_%s", as.integer(pair_index), stem)
-  path <- file.path(output_dir, paste0(stem, ".rds"))
-  tmp <- paste0(path, ".tmp-", Sys.getpid())
-  on.exit(if (file.exists(tmp)) unlink(tmp), add = TRUE)
-  saveRDS(cache, tmp, compress = compress)
-  if (!file.rename(tmp, path)) stop("Cannot write block cache: ", path, call. = FALSE)
-  path
-}
-
-qtl2mr_cache_manifest_row <- function(cache, path = NA_character_) {
-  fs <- qtl2mr_mr_block_cache_first_stage_table(cache)
-  file_size <- if (!is.na(path) && file.exists(path)) file.info(path)$size else NA_real_
-  data.frame(
-    pair_id = cache$pair_id,
-    exposure = cache$exposure,
-    outcome = cache$outcome,
-    instrument_trait = cache$instrument_trait,
-    cache_file = path,
-    cache_level = cache$cache_level,
-    n_loci = length(cache$blocks),
-    n_loci_with_finite_F_X = sum(is.finite(fs$F_X_block)),
-    n_loci_F_X_ge_2 = sum(is.finite(fs$F_X_block) & fs$F_X_block >= 2),
-    n_loci_steiger_pass = sum(is.finite(fs$partial_R2_X_block) & is.finite(fs$partial_R2_Y_block) &
-                                fs$partial_R2_X_block >= fs$partial_R2_Y_block),
-    file_size_bytes = file_size,
-    created_at = cache$created_at %||% as.character(Sys.time()),
-    stringsAsFactors = FALSE
-  )
-}
-
-qtl2mr_read_mr_block_cache <- function(cache) {
-  if (inherits(cache, "qtl2mr_mr_block_cache")) return(cache)
-  if (is.character(cache) && length(cache) == 1L && file.exists(cache)) return(readRDS(cache))
-  stop("cache must be a qtl2mr_mr_block_cache object or an existing .rds path", call. = FALSE)
-}
-
-refit_qtl2mr_mr_block_cache <- function(cache,
-                                        F_X_min = NA_real_,
-                                        steiger_filter = FALSE,
-                                        min_loci = 1L,
-                                        allow_cross_cov = TRUE,
-                                        ridge = 1e-10,
-                                        heterogeneity_method = "none",
-                                        q_sim_n = 0L,
-                                        q_sim_seed = 1L,
-                                        cache_file = NA_character_) {
-  cache <- qtl2mr_read_mr_block_cache(cache)
-  fs <- qtl2mr_mr_block_cache_first_stage_table(cache)
-  keep <- rep(TRUE, nrow(fs))
-  dropped_F <- 0L
-  dropped_steiger <- 0L
-  filter_label <- if (is.finite(F_X_min)) paste0("F_X_ge_", F_X_min) else "all_loci"
-  if (is.finite(F_X_min)) {
-    by_F <- is.finite(fs$F_X_block) & fs$F_X_block >= F_X_min
-    dropped_F <- sum(!by_F)
-    keep <- keep & by_F
-  }
-  if (isTRUE(steiger_filter)) {
-    by_steiger <- is.finite(fs$partial_R2_X_block) & is.finite(fs$partial_R2_Y_block) &
-      fs$partial_R2_X_block >= fs$partial_R2_Y_block
-    dropped_steiger <- sum(keep & !by_steiger)
-    keep <- keep & by_steiger
-    filter_label <- paste0(filter_label, "_steiger")
-  }
-  n_kept <- sum(keep)
-  base <- data.frame(
-    pair_id = cache$pair_id,
-    exposure = cache$exposure,
-    outcome = cache$outcome,
-    instrument_trait = cache$instrument_trait,
-    filter_id = filter_label,
-    F_X_min = if (is.finite(F_X_min)) F_X_min else NA_real_,
-    steiger_filter = isTRUE(steiger_filter),
-    n_loci_input = nrow(fs),
-    n_loci_kept = n_kept,
-    n_loci_dropped_F = dropped_F,
-    n_loci_dropped_steiger = dropped_steiger,
-    stringsAsFactors = FALSE
-  )
-  if (n_kept < min_loci) {
-    return(cbind(base, data.frame(
-      theta = NA_real_, se = NA_real_, profile_ci_lower = NA_real_,
-      profile_ci_upper = NA_real_, Q = NA_real_, Q_p_reported = NA_real_,
-      Q_p_method = heterogeneity_method, theta_independence = NA_real_,
-      theta_overlap_delta = NA_real_, F_X_block_min = NA_real_,
-      F_X_block_median = NA_real_, F_X_block_max = NA_real_,
-      partial_R2_X_block_median = NA_real_, partial_R2_Y_block_median = NA_real_,
-      status = "too_few_loci", notes = "Filter left fewer loci than min_loci.",
-      cache_file = cache_file, stringsAsFactors = FALSE
-    )))
-  }
-  blocks <- cache$blocks[keep]
-  fit <- tryCatch(
-    fit_multilocus_founder_mr(
-      blocks,
-      allow_cross_cov = allow_cross_cov,
-      ridge = ridge,
-      compute_independence = TRUE,
-      heterogeneity_method = heterogeneity_method,
-      q_sim_n = q_sim_n,
-      q_sim_seed = q_sim_seed
-    ),
-    error = function(e) e
-  )
-  f_keep <- fs$F_X_block[keep]
-  r2x <- fs$partial_R2_X_block[keep]
-  r2y <- fs$partial_R2_Y_block[keep]
-  if (inherits(fit, "error")) {
-    return(cbind(base, data.frame(
-      theta = NA_real_, se = NA_real_, profile_ci_lower = NA_real_,
-      profile_ci_upper = NA_real_, Q = NA_real_, Q_p_reported = NA_real_,
-      Q_p_method = heterogeneity_method, theta_independence = NA_real_,
-      theta_overlap_delta = NA_real_, F_X_block_min = min(f_keep, na.rm = TRUE),
-      F_X_block_median = stats::median(f_keep, na.rm = TRUE),
-      F_X_block_max = max(f_keep, na.rm = TRUE),
-      partial_R2_X_block_median = stats::median(r2x, na.rm = TRUE),
-      partial_R2_Y_block_median = stats::median(r2y, na.rm = TRUE),
-      status = "failed", notes = conditionMessage(fit),
-      cache_file = cache_file, stringsAsFactors = FALSE
-    )))
-  }
-  cbind(base, data.frame(
-    theta = fit$theta,
-    se = fit$se,
-    profile_ci_lower = fit$profile_ci_lower,
-    profile_ci_upper = fit$profile_ci_upper,
-    Q = fit$Q,
-    Q_p_reported = fit$Q_p_reported %||% NA_real_,
-    Q_p_method = fit$Q_p_method %||% heterogeneity_method,
-    theta_independence = fit$independence$theta %||% NA_real_,
-    theta_overlap_delta = fit$theta_overlap_delta %||% NA_real_,
-    F_X_block_min = min(f_keep, na.rm = TRUE),
-    F_X_block_median = stats::median(f_keep, na.rm = TRUE),
-    F_X_block_max = max(f_keep, na.rm = TRUE),
-    partial_R2_X_block_median = stats::median(r2x, na.rm = TRUE),
-    partial_R2_Y_block_median = stats::median(r2y, na.rm = TRUE),
-    status = "ok",
-    notes = "",
-    cache_file = cache_file,
-    stringsAsFactors = FALSE
-  ))
-}
-
-refit_qtl2mr_mr_block_cache_grid <- function(cache,
-                                             F_X_min_grid = c(NA_real_, 1, 2, 3, 5, 10),
-                                             steiger_filter = FALSE,
-                                             min_loci = 1L,
-                                             cache_file = NULL,
-                                             ...) {
-  cache_file <- cache_file %||% if (is.character(cache) && length(cache) == 1L) cache else NA_character_
-  cache <- qtl2mr_read_mr_block_cache(cache)
-  rows <- lapply(F_X_min_grid, function(fmin) {
-    refit_qtl2mr_mr_block_cache(
-      cache,
-      F_X_min = as.numeric(fmin),
-      steiger_filter = steiger_filter,
-      min_loci = min_loci,
-      cache_file = cache_file,
-      ...
     )
   })
   out <- do.call(rbind, rows)
@@ -1284,8 +1082,6 @@ write_qtl2mr_batch_outputs <- function(batch, output_dir) {
   utils::write.csv(batch$selected_loci, file.path(output_dir, "batch_selected_loci.csv"), row.names = FALSE)
   utils::write.csv(batch$overlap_qc, file.path(output_dir, "batch_overlap_qc.csv"), row.names = FALSE)
   utils::write.csv(batch$first_stage_summary, file.path(output_dir, "batch_first_stage_summary.csv"), row.names = FALSE)
-  utils::write.csv(batch$first_stage_filter_results, file.path(output_dir, "batch_first_stage_filter_results.csv"), row.names = FALSE)
-  utils::write.csv(batch$mr_block_cache_manifest, file.path(output_dir, "batch_mr_block_cache_manifest.csv"), row.names = FALSE)
   utils::write.csv(batch$warnings, file.path(output_dir, "batch_warnings.csv"), row.names = FALSE)
   utils::write.csv(batch$errors, file.path(output_dir, "batch_errors.csv"), row.names = FALSE)
   utils::write.csv(batch$run_manifest, file.path(output_dir, "batch_run_manifest.csv"), row.names = FALSE)
@@ -1297,7 +1093,7 @@ write_qtl2mr_batch_outputs <- function(batch, output_dir) {
   if (!is.null(batch$input_alignment)) utils::write.csv(batch$input_alignment, file.path(output_dir, "batch_input_alignment.csv"), row.names = FALSE)
   writeLines(qtl2mr_json_value(batch$config), file.path(output_dir, "batch_config.json"))
   tables <- c("main_results", "method_comparison", "selected_loci", "overlap_qc", "first_stage_summary",
-    "first_stage_filter_results", "mr_block_cache_manifest", "warnings", "errors", "run_manifest",
+    "warnings", "errors", "run_manifest",
     "sample_qc", "sample_exclusions", "probability_normalization",
     if (!is.null(batch$input_alignment)) "input_alignment")
   invisible(c(paste0("batch_", tables, ".csv"), "batch_config.json"))
@@ -1398,8 +1194,6 @@ qtl2mr_batch_append_pair <- function(batch, result) {
   batch <- qtl2mr_batch_append(batch, "selected_loci", result$selected)
   batch <- qtl2mr_batch_append(batch, "overlap_qc", result$overlap)
   batch <- qtl2mr_batch_append(batch, "first_stage_summary", result$first)
-  batch <- qtl2mr_batch_append(batch, "first_stage_filter_results", result$filter)
-  batch <- qtl2mr_batch_append(batch, "mr_block_cache_manifest", result$cache_manifest)
   batch <- qtl2mr_batch_append(batch, "warnings", result$warnings)
   batch <- qtl2mr_batch_append(batch, "errors", result$error)
   qtl2mr_batch_append(batch, "probability_normalization", result$probability)
@@ -1413,7 +1207,7 @@ qtl2mr_batch_select_for_pair <- function(resources, pair, instrument_rule) {
 # applies fail_fast.
 qtl2mr_batch_fit_pair <- function(resources, pair, instrument_rule, sample_policy,
                                   on_nonestimable_locus, fit_options, batch_samples,
-                                  sample_ids, context_cache, fit_cache, output_dir, pair_index) {
+                                  sample_ids, context_cache, fit_cache) {
   t0 <- proc.time()[["elapsed"]]
   tryCatch({
     selected <- qtl2mr_batch_select_for_pair(resources, pair, instrument_rule)
@@ -1447,31 +1241,14 @@ qtl2mr_batch_fit_pair <- function(resources, pair, instrument_rule, sample_polic
     main <- qtl2mr_compact_main_row(pair, pilot, "ok", "", runtime, instrument_rule, sample_policy)
     methods <- cbind(pair_id = pair$pair_id, exposure = pair$exposure, outcome = pair$outcome,
       qtl2mr_method_comparison_table(pilot))
-    cache <- qtl2mr_make_mr_block_cache(pair = pair, pilot = pilot, cache_level = fit_options$mr_block_cache_level)
-    cache_file <- NA_character_
-    cache_manifest <- data.frame()
-    if (isTRUE(fit_options$save_mr_block_cache)) {
-      if (!is.null(output_dir)) {
-        cache_file <- qtl2mr_write_mr_block_cache(cache, output_dir = file.path(output_dir, "mr_block_cache"),
-          pair_id = pair$pair_id, compress = fit_options$mr_block_cache_compress, pair_index = pair_index)
-      }
-      cache_manifest <- qtl2mr_cache_manifest_row(cache, cache_file)
-      if (!is.na(cache_file)) cache_manifest$cache_file <- file.path("mr_block_cache", basename(cache_file))
-    }
-    filter <- data.frame()
-    if (isTRUE(fit_options$run_first_stage_filter_grid)) {
-      filter <- refit_qtl2mr_mr_block_cache_grid(cache, F_X_min_grid = fit_options$first_stage_filter_grid,
-        steiger_filter = isTRUE(fit_options$steiger_filter), min_loci = fit_options$first_stage_filter_min_loci,
-        allow_cross_cov = TRUE, heterogeneity_method = "none", q_sim_n = 0L,
-        cache_file = if (is.na(cache_file)) NA_character_ else file.path("mr_block_cache", basename(cache_file)))
-    }
+    cache <- qtl2mr_make_mr_block_cache(pair = pair, pilot = pilot)
     warn <- qtl2mr_warning_table(pilot, sample_policy = sample_policy)
     if (nrow(warn)) warn <- cbind(pair_id = pair$pair_id, warn)
     list(
       main = main, methods = methods, selected = qtl2mr_batch_locus_audit(pair, pilot),
       overlap = cbind(pair_id = pair$pair_id, pilot$overlap_summary),
       first = cbind(pair_id = pair$pair_id, qtl2mr_mr_block_cache_first_stage_table(cache)),
-      filter = filter, cache_manifest = cache_manifest, warnings = warn,
+      warnings = warn,
       probability = qtl2mr_batch_probability_table(pair, pilot), error = NULL
     )
   }, error = function(e) {
@@ -1663,7 +1440,7 @@ run_qtl2mr_batch <- function(resources,
   fit_one <- function(i, context_cache, fit_cache) {
     pair <- todo[i, , drop = FALSE]
     result <- qtl2mr_batch_fit_pair(resources, pair, instrument_rule, sample_policy, on_nonestimable_locus,
-      fit_options, batch_samples, sample_ids, context_cache, fit_cache, output_dir, pair_index[[i]])
+      fit_options, batch_samples, sample_ids, context_cache, fit_cache)
     if (!is.null(output_dir) && is.null(result$error)) {
       qtl2mr_write_pair_record(output_dir, pair_index[[i]], pair$pair_id, fingerprint, result)
     }
@@ -1757,8 +1534,6 @@ run_qtl2mr_batch <- function(resources,
     context_cache_hits = stat_sum(1L, "hits"), context_cache_misses = stat_sum(1L, "misses"),
     lmm_fit_cache_enabled = isTRUE(fit_options$cache_lmm_fits),
     lmm_fit_cache_hits = stat_sum(2L, "hits"), lmm_fit_cache_misses = stat_sum(2L, "misses"),
-    save_mr_block_cache = isTRUE(fit_options$save_mr_block_cache),
-    run_first_stage_filter_grid = isTRUE(fit_options$run_first_stage_filter_grid),
     wall_sec = wall_sec, mean_wall_sec_per_pair = wall_sec / max(nrow(todo), 1L),
     lmm_backend = qtl2mr_backend_label(batch$main_results$lmm_backend[batch$main_results$status == "ok"]),
     stringsAsFactors = FALSE

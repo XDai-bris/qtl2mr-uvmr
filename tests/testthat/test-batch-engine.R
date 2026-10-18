@@ -445,58 +445,6 @@ test_that("failed parallel workers become one error row per affected pair", {
   expect_match(rows$error$error_message, "root cause")
 })
 
-test_that("stripped MR block cache refits first-stage and Steiger filters", {
-  make_block <- function(marker, bx_value, by_value, sx = 0.05, sy = 0.10) {
-    coords <- paste0("FC", 1:7)
-    beta_x <- stats::setNames(rep(bx_value, 7), coords)
-    beta_y <- stats::setNames(rep(by_value, 7), coords)
-    Sx <- diag(sx^2, 7)
-    Sy <- diag(sy^2, 7)
-    dimnames(Sx) <- list(coords, coords)
-    dimnames(Sy) <- list(coords, coords)
-    list(
-      marker = marker,
-      chr = "1",
-      beta_x = beta_x,
-      beta_y = beta_y,
-      Sigma_x = Sx,
-      Sigma_y = Sy,
-      Sigma_xy = matrix(0, 7, 7, dimnames = list(coords, coords)),
-      n_overlap = 100L,
-      O_xy_summary = list(n_x = 100L, n_y = 100L, n_overlap = 100L),
-      cross_cov_model = "star",
-      fit_x = list(n = 100L, df = 90, sigma2 = 1),
-      fit_y = list(n = 100L, df = 90, sigma2 = 1)
-    )
-  }
-  blocks <- list(
-    m1 = make_block("m1", bx_value = 0.20, by_value = 0.12),
-    m2 = make_block("m2", bx_value = 0.02, by_value = 0.01),
-    m3 = make_block("m3", bx_value = 0.15, by_value = 0.50)
-  )
-  pilot <- list(
-    locus_blocks = blocks,
-    diagnostic_layer = list(per_locus = data.frame()),
-    selected_loci = data.frame(marker = names(blocks), chr = "1", locus_rank = 1:3),
-    summary = data.frame(theta = 0.5),
-    overlap_summary = data.frame()
-  )
-  pair <- data.frame(pair_id = "x__to__y", exposure = "x", outcome = "y",
-                     instrument_trait = "x", stringsAsFactors = FALSE)
-  cache <- qtl2mr:::qtl2mr_make_mr_block_cache(pair, pilot)
-  fs <- qtl2mr:::qtl2mr_mr_block_cache_first_stage_table(cache)
-  expect_true(all(c("F_X_block", "F_Y_block", "partial_R2_X_block", "partial_R2_Y_block") %in% names(fs)))
-  expect_lt(fs$F_X_block[fs$marker == "m2"], 2)
-  direct <- fit_multilocus_founder_mr(blocks, heterogeneity_method = "none")
-  from_cache <- refit_qtl2mr_mr_block_cache(cache, F_X_min = NA_real_)
-  expect_equal(from_cache$theta, direct$theta, tolerance = 1e-10)
-  f2 <- refit_qtl2mr_mr_block_cache(cache, F_X_min = 2)
-  expect_equal(f2$n_loci_kept, 2L)
-  expect_equal(f2$n_loci_dropped_F, 1L)
-  steiger <- refit_qtl2mr_mr_block_cache(cache, F_X_min = NA_real_, steiger_filter = TRUE)
-  expect_lt(steiger$n_loci_kept, from_cache$n_loci_kept)
-})
-
 test_that("prepared batch engine matches locus engine for primary fit", {
   gp <- make_sim_genoprobs(n = 74, marker = "m1", seed = 821)
   ids <- dimnames(gp[[1]])[[1]]

@@ -26,7 +26,8 @@ errors, profile confidence intervals and Q statistics are unchanged from 0.4.x
 - No longer exported (internal or removed): `plan_qtl2mr_batch_exact_groups()`,
   `qtl2mr_subset_allele_probs_to_loci()`,
   `qtl2mr_make_common_complete_samples()`, `write_qtl2mr_batch_outputs()`,
-  the block-cache refit functions, `loo_multilocus_founder_mr()`,
+  the block-cache functions (`qtl2mr_read_mr_block_cache()`,
+  `refit_qtl2mr_mr_block_cache()`, `refit_qtl2mr_mr_block_cache_grid()`), `loo_multilocus_founder_mr()`,
   `founder_residual_scores()`, `founder_coordinate_ratios()`,
   `fit_multilocus_diagnostic_layer()`, `fit_xprs_heteroskedasticity_diagnostic()`
   and the `plot_*()` helpers. Their tables and figures are still produced by
@@ -36,8 +37,16 @@ errors, profile confidence intervals and Q statistics are unchanged from 0.4.x
 - Batch output layout: completed pairs are stored in `batch_pair_records/`; the
   exact-group planning tables and the per-exposure `by_exposure/` folders are
   no longer written. `batch_main_results.csv` drops the redundant
-  `sample_rule` column and ends with `sample_policy`. Block-cache files are
-  named with the pair index. 0.4.x batch folders cannot be resumed.
+  `sample_rule` column and ends with `sample_policy`. 0.4.x batch folders
+  cannot be resumed.
+- Removed the undocumented batch `fit_options` for saving per-pair block
+  caches (`save_mr_block_cache` and related settings), the post-hoc F-threshold
+  refit grid (`run_first_stage_filter_grid`, `first_stage_filter_grid`,
+  `first_stage_filter_min_loci`) and the Steiger-style filter
+  (`steiger_filter`), together with `batch_mr_block_cache_manifest.csv` and
+  `batch_first_stage_filter_results.csv`. Per-locus block F statistics remain in
+  `batch_first_stage_summary.csv`; F-threshold subsets of a single analysis can
+  be refitted with `fit_instrument_set_sensitivity()`.
 - Single-analysis outputs no longer include the always-empty
   `qtl2_validation*.csv` and `heteroskedasticity_qc.csv`. Use
   `validate_qtl2_scan1coef()` for the optional qtl2 comparison.
