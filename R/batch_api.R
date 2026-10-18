@@ -594,6 +594,8 @@ qtl2mr_resume_abort <- function(message) {
     class = c("qtl2mr_resume_error", "error", "condition")))
 }
 
+# Paths written by run_qtl2mr_batch(). Names used only by 0.4.x (exact-group
+# tables, block caches, by_exposure/) are kept so force = TRUE can clear old folders.
 qtl2mr_batch_owned_paths <- function(output_dir) {
   if (is.null(output_dir)) return(character())
   tables <- c("main_results", "method_comparison", "selected_loci", "overlap_qc",
@@ -819,8 +821,8 @@ qtl2mr_strip_locus_block <- function(block,
   out
 }
 
-# Per-locus first-stage summaries (block F, partial R2, hsq) for the batch tables.
-qtl2mr_make_mr_block_cache <- function(pair, pilot, ridge = 1e-10) {
+# Per-locus first-stage table (block F, partial R2, hsq) for batch results.
+qtl2mr_pair_first_stage_table <- function(pilot, ridge = 1e-10) {
   blocks <- pilot$locus_blocks
   if (!is.list(blocks) || !length(blocks)) stop("pilot does not contain locus_blocks", call. = FALSE)
   per_locus <- pilot$diagnostic_layer$per_locus %||% data.frame()
@@ -844,26 +846,10 @@ qtl2mr_make_mr_block_cache <- function(pair, pilot, ridge = 1e-10) {
   })
   names(stripped) <- vapply(stripped, function(x) as.character(x$marker %||% NA_character_), character(1))
   if (anyNA(names(stripped)) || any(!nzchar(names(stripped)))) names(stripped) <- paste0("locus_", seq_along(stripped))
-  first_stage <- qtl2mr_mr_block_cache_first_stage_table(stripped)
-  out <- list(
-    pair_id = pair$pair_id,
-    exposure = pair$exposure,
-    outcome = pair$outcome,
-    instrument_trait = pair$instrument_trait,
-    cache_level = "stripped",
-    created_at = as.character(Sys.time()),
-    summary = pilot$summary,
-    selected_loci = selected,
-    overlap_summary = pilot$overlap_summary %||% data.frame(),
-    first_stage = first_stage,
-    blocks = stripped
-  )
-  class(out) <- c("qtl2mr_mr_block_cache", "list")
-  out
+  qtl2mr_first_stage_table(stripped)
 }
 
-qtl2mr_mr_block_cache_first_stage_table <- function(cache_or_blocks) {
-  blocks <- if (inherits(cache_or_blocks, "qtl2mr_mr_block_cache")) cache_or_blocks$blocks else cache_or_blocks
+qtl2mr_first_stage_table <- function(blocks) {
   if (!is.list(blocks) || !length(blocks)) return(qtl2mr_empty_batch_table("first_stage_summary"))
   rows <- lapply(seq_along(blocks), function(i) {
     b <- blocks[[i]]
@@ -1224,13 +1210,12 @@ qtl2mr_batch_fit_pair <- function(resources, pair, instrument_rule, sample_polic
     main <- qtl2mr_compact_main_row(pair, pilot, "ok", "", runtime, instrument_rule, sample_policy)
     methods <- cbind(pair_id = pair$pair_id, exposure = pair$exposure, outcome = pair$outcome,
       qtl2mr_method_comparison_table(pilot))
-    cache <- qtl2mr_make_mr_block_cache(pair = pair, pilot = pilot)
     warn <- qtl2mr_warning_table(pilot, sample_policy = sample_policy)
     if (nrow(warn)) warn <- cbind(pair_id = pair$pair_id, warn)
     list(
       main = main, methods = methods, selected = qtl2mr_batch_locus_audit(pair, pilot),
       overlap = cbind(pair_id = pair$pair_id, pilot$overlap_summary),
-      first = cbind(pair_id = pair$pair_id, qtl2mr_mr_block_cache_first_stage_table(cache)),
+      first = cbind(pair_id = pair$pair_id, qtl2mr_pair_first_stage_table(pilot)),
       warnings = warn,
       probability = qtl2mr_batch_probability_table(pair, pilot), error = NULL
     )

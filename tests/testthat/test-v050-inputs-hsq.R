@@ -107,3 +107,29 @@ test_that("batch warnings describe the shared batch sample policy", {
   expect_false("prepared_overlap_engine" %in% batch$warning_id)
   expect_match(batch$message[batch$warning_id == "batch_shared_samples"], "batch_common_complete")
 })
+
+test_that("confidence_set_bounded reflects every confidence-set type", {
+  f <- qtl2mr:::qtl2mr_confidence_set_bounded
+  set <- function(lower, upper) data.frame(lower = lower, upper = upper)
+  expect_true(f(list(confidence_set_type = "bounded", confidence_set = set(0.1, 0.9))))
+  expect_false(f(list(confidence_set_type = "unbounded", confidence_set = set(0.1, Inf))))
+  expect_true(f(list(confidence_set_type = "disconnected", confidence_set = set(c(-2, 1), c(-1, 2)))))
+  expect_false(f(list(confidence_set_type = "disconnected", confidence_set = set(c(-Inf, 1), c(-1, Inf)))))
+  expect_false(f(list(confidence_set_type = "all_real", confidence_set = set(-Inf, Inf))))
+  expect_true(is.na(f(list(confidence_set_type = "unresolved", confidence_set = set(-Inf, Inf)))))
+  expect_true(is.na(f(list())))
+})
+
+test_that("summary() gives a compact overview, also for results saved before 0.5.0", {
+  input <- do.call(as_qtl2mr_prepared_input, v050_input())
+  result <- run_qtl2mr_analysis(input, output_dir = tempfile("qtl2mr-summary-"), make_figures = FALSE,
+    make_html = FALSE, verbose = FALSE, progress = FALSE, heterogeneity_method = "chisq",
+    diagnostic_bootstrap_B = 0L, run_loo_mr = FALSE, run_instrument_sensitivity = FALSE)
+  overview <- summary(result)
+  primary <- qtl2mr_primary_result(result)
+  expect_identical(overview$estimate, primary$theta_reported)
+  expect_identical(overview$confidence_set_bounded, primary$confidence_set_bounded)
+  old <- result
+  old$pilot$summary$confidence_set_bounded <- NULL
+  expect_identical(summary(old)$confidence_set_bounded, primary$confidence_set_bounded)
+})

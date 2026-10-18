@@ -241,3 +241,25 @@ test_that("the resume fingerprint ignores probabilities at markers the run does 
   expect_identical(qtl2mr:::qtl2mr_batch_fingerprint(f$resources, f$pairs, list(), markers = c("m1", "m2"))$data,
     qtl2mr:::qtl2mr_batch_fingerprint(extra$resources, f$pairs, list(), markers = c("m1", "m2"))$data)
 })
+
+test_that("the batch first-stage table matches the locus fits and error rows carry NA bounds", {
+  f <- v050_batch_fixture()
+  f$pairs <- rbind(f$pairs, data.frame(exposure = "absent", outcome = "y"))
+  b <- run_qtl2mr_batch(f$resources, f$pairs, fit_options = f$options, progress = FALSE)
+  first <- b$first_stage_summary
+  expect_true(all(c("F_X_block", "F_Y_block", "partial_R2_X_block", "hsq_x", "hsq_y",
+    "hsq_status_x", "hsq_status_y") %in% names(first)))
+  expect_true(all(is.finite(first$F_X_block) & first$F_X_block > 0))
+  expect_true(all(first$partial_R2_X_block >= 0 & first$partial_R2_X_block <= 1))
+  expect_true(all(first$hsq_status_x == "not_applicable"))
+  expect_true(is.na(b$main_results$confidence_set_bounded[b$main_results$status == "error"]))
+
+  input <- as_qtl2mr_prepared_input(f$resources$allele_probs, f$resources$pheno, f$resources$covar,
+    marker_map = f$resources$marker_map, selected_loci = "m1", exposure = "x", outcome = "y",
+    exposure_samples = qtl2mr:::qtl2mr_make_common_complete_samples(f$resources, "x", "y", "1"),
+    outcome_samples = qtl2mr:::qtl2mr_make_common_complete_samples(f$resources, "x", "y", "1"))
+  single <- qtl2mr:::run_prepared_qtl2mr(input, "x", "y", verbose = FALSE,
+    heterogeneity_method = "none", diagnostic_bootstrap_B = 0L)
+  expect_equal(first$F_X_block[first$pair_id == "x__to__y"],
+    mr_block_first_stage_f(single$locus_blocks[[1L]]), tolerance = 1e-10)
+})

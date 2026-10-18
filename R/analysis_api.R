@@ -1189,7 +1189,7 @@ summary.qtl2mr_analysis_result <- function(object, ...) {
     reported_estimator = get("reported_estimator", NA_character_),
     primary_reliable = get("primary_reliable", NA),
     confidence_set_type = get("confidence_set_type", NA_character_),
-    confidence_set_bounded = get("confidence_set_bounded", NA),
+    confidence_set_bounded = get("confidence_set_bounded", qtl2mr_confidence_set_bounded(object$pilot$fit)),
     Q = get("Q", NA_real_), Q_p = get("Q_p_reported", NA_real_), Q_p_method = get("Q_p_method", NA_character_),
     sample_policy = get("sample_policy", NA_character_),
     warnings = paste(unique(shown), collapse = ";"),
@@ -1746,8 +1746,10 @@ run_qtl2mr_analysis <- function(input,
   if (length(dots) && (is.null(dot_names) || anyNA(dot_names) ||
       any(!nzchar(dot_names)) || anyDuplicated(dot_names) ||
       any(!dot_names %in% allowed_dots))) {
-    stop("Unknown, unnamed or duplicate analysis argument in ...; allowed: ",
-      paste(allowed_dots, collapse = ", "), call. = FALSE)
+    bad <- if (is.null(dot_names)) "<unnamed>" else unique(ifelse(is.na(dot_names) | !nzchar(dot_names),
+      "<unnamed>", dot_names)[!dot_names %in% allowed_dots | duplicated(dot_names)])
+    stop("Unknown, unnamed or duplicate analysis argument in ...: ", paste(bad, collapse = ", "),
+      ". Allowed: ", paste(allowed_dots, collapse = ", "), call. = FALSE)
   }
   if (!inherits(input, "qtl2mr_prepared_input")) {
     stop("input must be created by as_qtl2mr_prepared_input()", call. = FALSE)

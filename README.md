@@ -200,7 +200,11 @@ per draw. On a laptop, the bundled 400-mouse, 40-locus example takes roughly
 | `run_qtl2mr_batch_fast(r, p)` | `run_qtl2mr_batch(r, p, sample_policy = "batch_common_complete", on_nonestimable_locus = "drop")` |
 | `run_qtl2mr_batch_exact_grouped(r, p)` | `run_qtl2mr_batch(r, p)` |
 | `run_qtl2mr_batch_parallel_by_exposure(r, p, n_workers = k)` | `run_qtl2mr_batch(r, p, sample_policy = "batch_common_complete", on_nonestimable_locus = "drop", n_workers = k)` |
+| `run_qtl2mr_batch_parallel_by_exposure(r, p, fast = FALSE, n_workers = k)` | `run_qtl2mr_batch(r, p, n_workers = k)` |
+| `fit_options = list(save_mr_block_cache = TRUE)`, `run_first_stage_filter_grid`, `steiger_filter`, `refit_qtl2mr_mr_block_cache()` | removed; for one pair, refit locus subsets with `fit_instrument_set_sensitivity()` |
 | `run_qtl2mr_analysis(..., adapter = "prepared")` | drop `adapter` (and `run_qtl2_validation`, `run_heteroskedasticity`, `heteroskedasticity_B`) |
+| `run_qtl2mr_analysis(input, "x", "y", "prepared", out)` (positional) | `run_qtl2mr_analysis(input, "x", "y", out)`: `output_dir` is now the fourth argument |
+| `summary(result)` (99 columns) | `qtl2mr_primary_result(result)`; `summary()` is now a one-row overview |
 
 The three old batch functions were removed in 0.5.0; the replacements give the
 same numbers. Batch output folders from 0.4.x cannot be resumed by 0.5.0.

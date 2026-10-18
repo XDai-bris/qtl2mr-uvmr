@@ -170,8 +170,15 @@ comparator estimates (\code{theta_two_step_ivw},
 \code{theta_weighted_median}, \code{theta_weighted_mode},
 \code{theta_independence}); and \code{sample_policy}.
 
-\code{summary()} returns a one-row overview (estimate, SE, CI, units,
-reliability, confidence-set type, Q and warning IDs).
+\code{summary()} returns a one-row overview with \code{exposure},
+\code{outcome}, \code{n_samples}, \code{n_loci}, the reported \code{estimate},
+\code{se}, \code{ci_lower} and \code{ci_upper} (under
+\code{"auto_fallback"} these can be the Two-step IVW comparator),
+\code{effect_units}, \code{reported_estimator}, \code{primary_reliable},
+\code{confidence_set_type} and \code{confidence_set_bounded} (which describe
+the second-order profile set), \code{Q}, \code{Q_p}, \code{Q_p_method},
+\code{sample_policy} and \code{warnings} (IDs of warnings shown in the
+report).
 \code{qtl2mr_warnings()}, \code{qtl2mr_method_comparison()} and
 \code{qtl2mr_output_paths()} return data frames. \code{report_qtl2mr_locus()}
 invisibly returns the locus report directory, \code{export_qtl2mr_lite_result()}

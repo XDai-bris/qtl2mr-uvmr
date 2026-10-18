@@ -20,13 +20,17 @@ errors, profile confidence intervals and Q statistics are unchanged from 0.4.x
 - Removed the `run_qtl2mr_analysis()` arguments `adapter`,
   `run_qtl2_validation`, `run_heteroskedasticity` and `heteroskedasticity_B`,
   which had no effect. `output_dir` is now the fourth argument.
-- `summary()` of an analysis result returns a one-row overview (estimate, CI,
-  units, reliability, confidence-set type, Q, sample policy and warnings)
-  instead of the full 99-column table; `qtl2mr_primary_result()` still returns
-  every column.
-- New column `confidence_set_bounded` (TRUE when every confidence-set piece is
-  finite) in single-analysis and batch results, appended after
-  `sample_policy`, so two-sided unbounded sets can be filtered directly.
+- `summary()` of an analysis result returns a one-row overview (`exposure`,
+  `outcome`, `n_samples`, `n_loci`, the reported `estimate`, `se`, `ci_lower`,
+  `ci_upper`, `effect_units`, `reported_estimator`, `primary_reliable`,
+  `confidence_set_type`, `confidence_set_bounded`, `Q`, `Q_p`, `Q_p_method`,
+  `sample_policy` and the IDs of warnings shown in the report) instead of the
+  full 99-column table; `qtl2mr_primary_result()` still returns every column.
+- New column `confidence_set_bounded` in single-analysis and batch results,
+  appended after `sample_policy`: TRUE when every piece of the second-order
+  confidence set is finite, FALSE when any piece reaches minus or plus infinity
+  (including the whole real line), NA when the set is unresolved or the pair
+  failed.
 - The package and method name is written `qtl2mr` throughout; result labels
   change accordingly (for example `"Star-space qtl2mr"` in
   `reported_estimator` and the method-comparison table).
@@ -34,30 +38,43 @@ errors, profile confidence intervals and Q statistics are unchanged from 0.4.x
   inventory, not run evidence). `logs/pilot_messages.log` is now
   `logs/fit_messages.log`; the lite export writes `README_LITE.md` and
   `LITE_EXPORT_AUDIT.csv`.
-- No longer exported (internal or removed): `plan_qtl2mr_batch_exact_groups()`,
-  `qtl2mr_subset_allele_probs_to_loci()`,
-  `qtl2mr_make_common_complete_samples()`, `write_qtl2mr_batch_outputs()`,
-  the block-cache functions (`qtl2mr_read_mr_block_cache()`,
-  `refit_qtl2mr_mr_block_cache()`, `refit_qtl2mr_mr_block_cache_grid()`), `loo_multilocus_founder_mr()`,
-  `founder_residual_scores()`, `founder_coordinate_ratios()`,
-  `fit_multilocus_diagnostic_layer()`, `fit_xprs_heteroskedasticity_diagnostic()`
-  and the `plot_*()` helpers. Their tables and figures are still produced by
-  `run_qtl2mr_analysis()`.
-- Removed the xPRS/score heteroskedasticity diagnostics, the founder-residual
-  null simulation and other code that no workflow used (about 1,700 lines).
+- No longer exported, but still used internally (their tables and figures are
+  still written by `run_qtl2mr_analysis()` or `run_qtl2mr_batch()`):
+  `loo_multilocus_founder_mr()`, `founder_residual_scores()`,
+  `founder_coordinate_ratios()`, `fit_multilocus_diagnostic_layer()`,
+  `qtl2mr_make_common_complete_samples()`, `write_qtl2mr_batch_outputs()` and
+  the plotting helpers `plot_method_comparison()`, `plot_per_locus_so_forest()`,
+  `plot_founder_residual_heatmap()`, `plot_founder_ratio_forest()`,
+  `plot_loo_multilocus_mr()`, `plot_instrument_set_sensitivity()` and
+  `plot_block_first_stage_dashboard()`.
+- Removed: `plan_qtl2mr_batch_exact_groups()`,
+  `qtl2mr_subset_allele_probs_to_loci()`, `qtl2mr_read_mr_block_cache()`,
+  `refit_qtl2mr_mr_block_cache()`, `refit_qtl2mr_mr_block_cache_grid()` and
+  `fit_xprs_heteroskedasticity_diagnostic()` (with its print/plot methods),
+  together with the xPRS/score heteroskedasticity diagnostics, the
+  founder-residual null simulation and other code that no workflow used.
 - Batch output layout: completed pairs are stored in `batch_pair_records/`; the
   exact-group planning tables and the per-exposure `by_exposure/` folders are
   no longer written. `batch_main_results.csv` drops the redundant
   `sample_rule` column and ends with `sample_policy` and
   `confidence_set_bounded`. 0.4.x batch folders cannot be resumed.
-- Removed the undocumented batch `fit_options` for saving per-pair block
-  caches (`save_mr_block_cache` and related settings), the post-hoc F-threshold
+- Removed, without a deprecation period, the batch `fit_options` documented in
+  0.4.x for saving per-pair block caches (`save_mr_block_cache`,
+  `mr_block_cache_level`, `mr_block_cache_compress`), the post-hoc F-threshold
   refit grid (`run_first_stage_filter_grid`, `first_stage_filter_grid`,
   `first_stage_filter_min_loci`) and the Steiger-style filter
-  (`steiger_filter`), together with `batch_mr_block_cache_manifest.csv` and
-  `batch_first_stage_filter_results.csv`. Per-locus block F statistics remain in
-  `batch_first_stage_summary.csv`; F-threshold subsets of a single analysis can
-  be refitted with `fit_instrument_set_sensitivity()`.
+  (`steiger_filter`); they now give "Unknown option(s)". Also removed:
+  `batch_mr_block_cache_manifest.csv`, `batch_first_stage_filter_results.csv`
+  and `mr_block_cache/`. Per-locus block F statistics remain in
+  `batch_first_stage_summary.csv`; F-threshold subsets of one analysis can be
+  refitted with `fit_instrument_set_sensitivity()`.
+- `batch_run_manifest.csv` has one layout for all batch runs: columns that
+  belonged to the removed entry points or caches (for example `output_mode`,
+  `sample_mode`, `sample_approximation`, `parallel_strategy`,
+  `execution_strategy` and the block-cache and filter-grid columns) are gone,
+  and `n_pairs_resumed` is added. `batch_config.json` records
+  `sample_policy`, `on_nonestimable_locus` and `min_sample_retention` instead
+  of `sample_rule`, and no cache settings.
 - Single-analysis outputs no longer include the always-empty
   `qtl2_validation*.csv` and `heteroskedasticity_qc.csv`. Use
   `validate_qtl2_scan1coef()` for the optional qtl2 comparison.
