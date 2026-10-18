@@ -1,4 +1,4 @@
-# qtl2mr 0.5.0 (unreleased)
+# qtl2mr 0.5.0
 
 This release slims the package to two workflows and folds in the unreleased
 0.4.1 fixes. For the same inputs and options, reported estimates, standard

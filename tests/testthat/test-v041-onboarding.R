@@ -84,8 +84,8 @@ test_that("README quick start keeps the documented explicit fast-demo settings",
   call <- parse(text = getting[seq.int(start, end)])[[1L]][[3L]]
   expect_identical(fast[settings], as.list(call)[-1L][settings])
   text <- paste(source, collapse = "\n")
-  expect_match(text, "qtl2mr **0.5.0**, which has not been released yet", fixed = TRUE)
-  expect_match(text, "releases/tag/v0.4.0", fixed = TRUE)
+  expect_match(text, "**Current release:** [v0.5.0]", fixed = TRUE)
+  expect_match(text, "releases/tag/v0.5.0", fixed = TRUE)
   expect_match(text, "samples complete for both of its traits", fixed = TRUE)
   expect_false(grepl("run_qtl2mr_batch_fast", sub("## Upgrading from 0.4.x.*", "", text), fixed = TRUE))
 })

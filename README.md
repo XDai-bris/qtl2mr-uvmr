@@ -8,11 +8,9 @@ using selected QTL as instruments. Each instrument is represented by founder
 haplotype probabilities from `qtl2`, not by a single SNP dosage, and the
 estimator accounts for exposure-outcome sample overlap.
 
-**Status:** this branch is qtl2mr **0.5.0**, which has not been released yet.
-Until it is, the latest release is
-[v0.4.0](https://github.com/XDai-bris/qtl2mr-uvmr/releases/tag/v0.4.0).
-See [NEWS.md](NEWS.md) for what changed, including the
-[migration table](#upgrading-from-04x).
+**Current release:** [v0.5.0](https://github.com/XDai-bris/qtl2mr-uvmr/releases/tag/v0.5.0).
+See [NEWS.md](NEWS.md) for what changed and the
+[migration table](#upgrading-from-04x) if you used 0.4.x.
 
 ## Installation
 
