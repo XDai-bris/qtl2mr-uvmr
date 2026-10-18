@@ -67,9 +67,6 @@ test_that("LOD islands stop at chromosome boundaries and native maps work", {
 test_that("missing selection files and misspelled options are not ignored", {
   f <- v040_fixture()
   expect_error(run_qtl2mr_batch(f$resources, f$pairs, fit_options = list(cross_cov_modle = "zero")), "Unknown option")
-  expect_error(suppressWarnings(run_qtl2mr_batch(f$resources, f$pairs, sample_rule = list(mdoe = "batch_common_complete"))), "Unknown sample_rule")
-  expect_equal(length(qtl2mr:::qtl2mr_make_common_complete_samples(f$resources, "x", "y", "1",
-    sample_rule = list(mode = "common_complete", sample_ids = paste0("s", 1:30)))), 30L)
   expect_error(qtl2mr:::run_prepared_qtl2mr(f$input, "x", "y", standadize = FALSE), "Unused arguments")
   f$pairs$selected_loci_file <- file.path(tempdir(), "absent-v040-selected.csv")
   b <- run_qtl2mr_batch(f$resources, f$pairs, fit_options = f$options, progress = FALSE)
@@ -91,7 +88,6 @@ test_that("resume requires exact provenance and leaves one current row per pair"
   expect_error(run_qtl2mr_batch(changed, f$pairs, fit_options = f$options, output_dir = path, resume = TRUE, progress = FALSE), "fingerprint changed")
   expect_error(run_qtl2mr_batch(f$resources, f$pairs, fit_options = c(f$options, list(cross_cov_model = "zero")), output_dir = path, resume = TRUE, progress = FALSE), "fingerprint changed")
   expect_false(formals(run_qtl2mr_batch)$resume)
-  expect_false(formals(run_qtl2mr_batch_fast)$resume)
   legacy <- tempfile("v040-legacy-")
   dir.create(legacy)
   file.copy(file.path(path, "batch_main_results.csv"), file.path(legacy, "batch_main_results.csv"))

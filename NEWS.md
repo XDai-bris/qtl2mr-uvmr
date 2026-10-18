@@ -11,18 +11,29 @@ errors, profile confidence intervals and Q statistics are unchanged from 0.4.x
   `sample_policy` (`"pair_common_complete"`, default, or
   `"batch_common_complete"`), `on_nonestimable_locus` (`"fail"` or `"drop"`),
   `min_sample_retention` (batch-common only, default 0.85), and `n_workers`
-  (parallel by exposure). `sample_rule`, `output_mode` and
-  `fit_options$drop_nonestimable_loci` are deprecated and mapped with a
-  warning; the deprecated `sample_rule` keeps the 0.4.x behaviour of no
-  retention gate unless `min_sample_retention` is supplied.
-- `run_qtl2mr_batch_fast()`, `run_qtl2mr_batch_exact_grouped()` and
-  `run_qtl2mr_batch_parallel_by_exposure()` are deprecated thin wrappers that
-  give the same numbers as before; they will be removed in 0.6.0. See the
-  migration table in the README or `?run_qtl2mr_batch_fast`.
-- `run_qtl2mr_analysis()` no longer uses `adapter`, `run_qtl2_validation`,
-  `run_heteroskedasticity` or `heteroskedasticity_B`; they had no effect and
-  are now ignored with a warning when supplied. `adapter` keeps its position
-  so positional 0.4.x calls are unaffected.
+  (parallel by exposure). The `sample_rule` and `output_mode` arguments and
+  `fit_options$drop_nonestimable_loci` were removed.
+- Removed `run_qtl2mr_batch_fast()`, `run_qtl2mr_batch_exact_grouped()` and
+  `run_qtl2mr_batch_parallel_by_exposure()`. Each is an option combination of
+  `run_qtl2mr_batch()`, which gives the same numbers; see the migration table
+  in the README.
+- Removed the `run_qtl2mr_analysis()` arguments `adapter`,
+  `run_qtl2_validation`, `run_heteroskedasticity` and `heteroskedasticity_B`,
+  which had no effect. `output_dir` is now the fourth argument.
+- `summary()` of an analysis result returns a one-row overview (estimate, CI,
+  units, reliability, confidence-set type, Q, sample policy and warnings)
+  instead of the full 99-column table; `qtl2mr_primary_result()` still returns
+  every column.
+- New column `confidence_set_bounded` (TRUE when every confidence-set piece is
+  finite) in single-analysis and batch results, appended after
+  `sample_policy`, so two-sided unbounded sets can be filtered directly.
+- The package and method name is written `qtl2mr` throughout; result labels
+  change accordingly (for example `"Star-space qtl2mr"` in
+  `reported_estimator` and the method-comparison table).
+- Result folders no longer include `data/validation_tests.csv` (a package test
+  inventory, not run evidence). `logs/pilot_messages.log` is now
+  `logs/fit_messages.log`; the lite export writes `README_LITE.md` and
+  `LITE_EXPORT_AUDIT.csv`.
 - No longer exported (internal or removed): `plan_qtl2mr_batch_exact_groups()`,
   `qtl2mr_subset_allele_probs_to_loci()`,
   `qtl2mr_make_common_complete_samples()`, `write_qtl2mr_batch_outputs()`,
@@ -37,8 +48,8 @@ errors, profile confidence intervals and Q statistics are unchanged from 0.4.x
 - Batch output layout: completed pairs are stored in `batch_pair_records/`; the
   exact-group planning tables and the per-exposure `by_exposure/` folders are
   no longer written. `batch_main_results.csv` drops the redundant
-  `sample_rule` column and ends with `sample_policy`. 0.4.x batch folders
-  cannot be resumed.
+  `sample_rule` column and ends with `sample_policy` and
+  `confidence_set_bounded`. 0.4.x batch folders cannot be resumed.
 - Removed the undocumented batch `fit_options` for saving per-pair block
   caches (`save_mr_block_cache` and related settings), the post-hoc F-threshold
   refit grid (`run_first_stage_filter_grid`, `first_stage_filter_grid`,
@@ -61,7 +72,7 @@ errors, profile confidence intervals and Q statistics are unchanged from 0.4.x
 - Invalid pairs become error rows under every sample policy; previously a
   missing trait aborted a whole `batch_common_complete` run. The batch-common
   sample set and `batch_sample_exclusions.csv` use only the valid pairs'
-  traits, and a `sample_ids` restriction is recorded as `not_in_sample_ids`.
+  traits.
 - With `fail_fast = TRUE` the completed pairs and the failing pair are written
   before the error. If a parallel worker dies, the pairs it had finished are
   kept and only its unfinished pairs are reported as errors.
@@ -88,6 +99,7 @@ errors, profile confidence intervals and Q statistics are unchanged from 0.4.x
 - Batch warnings describe the shared batch sample set instead of the
   single-analysis role-specific note.
 - Progress shows five real stages instead of seven.
+- Continuous integration runs on every push and pull request.
 
 ## Fixes carried over from the unreleased 0.4.1
 
@@ -145,14 +157,14 @@ errors, profile confidence intervals and Q statistics are unchanged from 0.4.x
   include the source package with all three prebuilt HTML vignettes and a
   separate SHA-256 checksum file.
 
-# qtl2MR 0.3.0
+# qtl2mr 0.3.0
 
 - Kinship decomposition and null-model ML/REML heritability estimation now use
   one internal base-R LMM backend in direct and batch workflows. `qtl2` is an
   optional dependency used only for explicitly requested numerical parity
   checks; its absence does not prevent primary analysis.
 
-# qtl2MR 0.2.3
+# qtl2mr 0.2.3
 
 - Instrument scans now require exact `instrument_trait` matching and positive,
   finite LOD thresholds; batch selection no longer falls back silently to a
@@ -163,7 +175,7 @@ errors, profile confidence intervals and Q statistics are unchanged from 0.4.x
 - Improved vignette-test, forest-plot, and Q-simulation robustness, including
   plus-one empirical p-values and requested-versus-completed simulation counts.
 
-# qtl2MR 0.2.2
+# qtl2mr 0.2.2
 
 - Finite-ridge second-order MR and diagnostics now use basis-invariant
   trace/mean-diagonal scaling across founder-contrast rotations, while keeping
@@ -176,7 +188,7 @@ errors, profile confidence intervals and Q statistics are unchanged from 0.4.x
   scales, output races/failures, Windows junction/path behavior, and
   ancestor-link return identity.
 
-# qtl2MR 0.2.1
+# qtl2mr 0.2.1
 
 - Added a buildable, self-contained getting-started vignette and the small
   deterministic `qtl2mr_example` synthetic prepared-input dataset for
@@ -186,7 +198,7 @@ errors, profile confidence intervals and Q statistics are unchanged from 0.4.x
   handling, `v0.2.1` release/tag guidance, optional `build_vignettes = TRUE`
   installation for the formal vignette, and tested conda/qtl2 setup notes.
 
-# qtl2MR 0.2.0
+# qtl2mr 0.2.0
 
 - **Compatibility-visible default:** high-level reported estimates now use
   `diagnostic_only`. A reliable star-space second-order estimate remains
@@ -203,7 +215,7 @@ errors, profile confidence intervals and Q statistics are unchanged from 0.4.x
   behavior, audited screening drops, and deterministic public unreliable-SO
   behavior.
 
-# qtl2MR 0.1.0
+# qtl2mr 0.1.0
 
 - Initial local research package.
 - qtl2-compatible full-covariance founder LMM fitter.

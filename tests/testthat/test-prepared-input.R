@@ -185,7 +185,7 @@ test_that("prepared input runs a tiny high-level smoke", {
   expect_identical(res$pilot$summary$lmm_backend, "ordinary_least_squares")
   expect_identical(res$pilot$backend_provenance$backend, "ordinary_least_squares")
   expect_equal(qtl2mr_primary_result(res)$reported_estimator_policy, "diagnostic_only")
-  expect_equal(qtl2mr_primary_result(res)$reported_estimator, "Star-space qtl2MR")
+  expect_equal(qtl2mr_primary_result(res)$reported_estimator, "Star-space qtl2mr")
   expect_equal(qtl2mr_primary_result(res)$theta_reported, qtl2mr_primary_result(res)$theta_so)
   expect_true(is.finite(qtl2mr_primary_result(res)$theta))
   expect_true(is.finite(qtl2mr_primary_result(res)$profile_ci_lower))

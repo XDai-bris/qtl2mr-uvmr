@@ -228,25 +228,10 @@ qtl2mr_select_loci_for_traits <- function(qtl_scan,
 qtl2mr_make_common_complete_samples <- function(resources,
                                                 exposure,
                                                 outcome,
-                                                selected_chr = NULL,
-                                                sample_rule = "common_complete") {
-  mode <- if (is.list(sample_rule)) sample_rule$mode %||% "common_complete" else sample_rule
-  if (identical(mode, "pair_common_complete")) mode <- "common_complete"
-  if (identical(mode, "batch_common_complete")) {
-    stop("Use qtl2mr_make_batch_common_complete_samples() for batch_common_complete sample sets", call. = FALSE)
-  }
-  if (!identical(mode, "common_complete")) {
-    stop("Supported batch sample modes are 'common_complete', 'pair_common_complete', and 'batch_common_complete'", call. = FALSE)
-  }
-  requested <- if (is.list(sample_rule)) sample_rule$sample_ids else NULL
-  if (!is.null(requested)) {
-    qtl2mr_validate_ids(requested, "sample_rule sample_ids")
-    if (length(setdiff(requested, resources$sample_ids))) stop("sample_rule sample_ids are absent from allele_probs", call. = FALSE)
-  }
+                                                selected_chr = NULL) {
   pheno <- resources$pheno
   covar <- resources$covar
   ids <- Reduce(intersect, list(resources$sample_ids, rownames(pheno), if (is.null(covar)) resources$sample_ids else rownames(covar)))
-  if (!is.null(requested)) ids <- ids[ids %in% requested]
   if (!exposure %in% names(pheno)) stop("Exposure trait not found in pheno: ", exposure, call. = FALSE)
   if (!outcome %in% names(pheno)) stop("Outcome trait not found in pheno: ", outcome, call. = FALSE)
   if (!is.numeric(pheno[[exposure]]) || !is.numeric(pheno[[outcome]])) stop("Exposure and outcome phenotypes must be numeric", call. = FALSE)
@@ -462,7 +447,7 @@ qtl2mr_batch_sample_policy <- function(policy = NULL) {
 }
 
 qtl2mr_batch_sample_exclusions <- function(resources, pairs, sample_policy = NULL,
-                                           batch_traits = NULL, sample_ids = NULL) {
+                                           batch_traits = NULL) {
   if (!nrow(pairs)) return(qtl2mr_empty_batch_table("sample_exclusions"))
   ids <- resources$sample_ids
   pheno <- resources$pheno
@@ -493,7 +478,6 @@ qtl2mr_batch_sample_exclusions <- function(resources, pairs, sample_policy = NUL
       missing_covar_id = missing_covar,
       incomplete_covar = incomplete_covar
     )
-    if (!is.null(sample_ids)) reasons$not_in_sample_ids <- !ids %in% as.character(sample_ids)
     if (identical(policy, "batch_common_complete")) {
       other_traits <- setdiff(batch_traits, c(pair$exposure, pair$outcome))
       reasons$nonfinite_other_batch_trait <- Reduce(`|`, lapply(other_traits, nonfinite_trait),
@@ -531,8 +515,7 @@ qtl2mr_batch_probability_table <- function(pair, pilot) {
   cbind(pair_id = pair$pair_id, adjustments, stringsAsFactors = FALSE)
 }
 
-qtl2mr_batch_preflight <- function(resources, pairs, instrument_rule, fit_options, fail_fast,
-                                   sample_ids = NULL) {
+qtl2mr_batch_preflight <- function(resources, pairs, instrument_rule, fit_options, fail_fast) {
   rule <- qtl2mr_batch_defaults(instrument_rule, list(source = "exposure_qtl_scan", lod_thresh = 4,
     peak_method = "contiguous_lod_island_max", exclude_chr = "X", max_loci = NULL))
   errors <- lapply(seq_len(nrow(pairs)), function(i) {
@@ -543,8 +526,7 @@ qtl2mr_batch_preflight <- function(resources, pairs, instrument_rule, fit_option
       probe <- resources
       probe$selected_loci <- selected
       validate_qtl2mr_input(probe, exposure = pair$exposure, outcome = pair$outcome, require_selected_loci = TRUE)
-      samples <- qtl2mr_make_common_complete_samples(resources, pair$exposure, pair$outcome, selected$chr,
-        sample_rule = list(mode = "common_complete", sample_ids = sample_ids))
+      samples <- qtl2mr_make_common_complete_samples(resources, pair$exposure, pair$outcome, selected$chr)
       if (length(samples) < fit_options$min_samples) stop("too_few_samples: complete samples below min_samples", call. = FALSE)
       as.character(selected$marker)
     }, error = function(e) {
@@ -663,7 +645,7 @@ qtl2mr_empty_batch_table <- function(name) {
       "theta_overlap_delta", "theta_two_step_ivw", "theta_weighted_median",
       "theta_weighted_mode", "Q", "Q_chisq_df", "Q_p_chisq", "Q_p_reported",
       "Q_p_method", "cross_cov_model", "standardize_phenotypes", "lod_thresh",
-      "exclude_chr", "runtime_sec", "sample_policy"
+      "exclude_chr", "runtime_sec", "sample_policy", "confidence_set_bounded"
     ),
     method_comparison = c(
       "pair_id", "exposure", "outcome", "method", "estimate", "se",
@@ -720,7 +702,7 @@ qtl2mr_empty_batch <- function(resources, pairs, config) {
   config$sample_policy <- qtl2mr_batch_sample_policy(config$sample_policy)
   config$probability_policy <- resources$probability_policy %||% "strict"
   exclusions <- qtl2mr_batch_sample_exclusions(resources, pairs, config$sample_policy,
-    batch_traits = config$batch_traits, sample_ids = config$sample_ids)
+    batch_traits = config$batch_traits)
   out <- list(
     main_results = qtl2mr_empty_batch_table("main_results"),
     method_comparison = qtl2mr_empty_batch_table("method_comparison"),
@@ -993,7 +975,7 @@ qtl2mr_compact_main_row <- function(pair, pilot, status, error_message, runtime_
     reported_ci_lower = s$reported_ci_lower %||% s$profile_ci_lower[[1L]],
     reported_ci_upper = s$reported_ci_upper %||% s$profile_ci_upper[[1L]],
     reported_ci_type = s$reported_ci_type %||% "profile",
-    reported_estimator = s$reported_estimator %||% "Star-space qtl2MR",
+    reported_estimator = s$reported_estimator %||% "Star-space qtl2mr",
     reported_estimator_source = s$reported_estimator_source %||% "primary",
     reported_estimator_policy = s$reported_estimator_policy %||% "diagnostic_only",
     reported_estimator_reason = s$reported_estimator_reason %||% "",
@@ -1034,6 +1016,7 @@ qtl2mr_compact_main_row <- function(pair, pilot, status, error_message, runtime_
     exclude_chr = paste(instrument_rule$exclude_chr %||% character(), collapse = ","),
     runtime_sec = runtime_sec,
     sample_policy = qtl2mr_batch_sample_policy(sample_policy),
+    confidence_set_bounded = s$confidence_set_bounded %||% NA,
     stringsAsFactors = FALSE
   )
 }
@@ -1207,14 +1190,14 @@ qtl2mr_batch_select_for_pair <- function(resources, pair, instrument_rule) {
 # applies fail_fast.
 qtl2mr_batch_fit_pair <- function(resources, pair, instrument_rule, sample_policy,
                                   on_nonestimable_locus, fit_options, batch_samples,
-                                  sample_ids, context_cache, fit_cache) {
+                                  context_cache, fit_cache) {
   t0 <- proc.time()[["elapsed"]]
   tryCatch({
     selected <- qtl2mr_batch_select_for_pair(resources, pair, instrument_rule)
     if (nrow(selected) < fit_options$min_loci) stop("no_selected_loci: selected loci below min_loci", call. = FALSE)
     samples <- if (identical(sample_policy, "batch_common_complete")) batch_samples else
       qtl2mr_make_common_complete_samples(resources, exposure = pair$exposure, outcome = pair$outcome,
-        selected_chr = selected$chr, sample_rule = list(mode = "common_complete", sample_ids = sample_ids))
+        selected_chr = selected$chr)
     if (length(samples) < fit_options$min_samples) stop("too_few_samples: common complete samples below min_samples", call. = FALSE)
     prepared <- as_qtl2mr_prepared_input(
       allele_probs = resources$allele_probs, pheno = resources$pheno, covar = resources$covar,
@@ -1318,36 +1301,8 @@ run_qtl2mr_batch <- function(resources,
                              resume = FALSE,
                              force = FALSE,
                              output_dir = NULL,
-                             progress = TRUE,
-                             ...) {
+                             progress = TRUE) {
   if (!inherits(resources, "qtl2mr_resources")) stop("resources must come from qtl2mr_prepare_resources()", call. = FALSE)
-  legacy <- list(...)
-  if (length(legacy) && (is.null(names(legacy)) || any(is.na(names(legacy)) | !nzchar(names(legacy))))) {
-    stop("Arguments passed through ... must be named; only the deprecated sample_rule and output_mode are accepted",
-      call. = FALSE)
-  }
-  unknown <- setdiff(names(legacy), c("sample_rule", "output_mode"))
-  if (length(unknown)) stop("Unknown argument(s): ", paste(unknown, collapse = ", "), call. = FALSE)
-  if (!is.null(legacy$output_mode)) {
-    qtl2mr_deprecated("run_qtl2mr_batch(output_mode)", "it had no effect on results and is ignored")
-  }
-  sample_ids <- NULL
-  if (!is.null(legacy$sample_rule)) {
-    if (!missing(sample_policy)) stop("Supply sample_policy or the deprecated sample_rule, not both", call. = FALSE)
-    qtl2mr_deprecated("run_qtl2mr_batch(sample_rule)", "use sample_policy = \"pair_common_complete\" or \"batch_common_complete\"")
-    # 0.4.x run_qtl2mr_batch() had no retention gate; keep that unless one is requested.
-    if (missing(min_sample_retention)) min_sample_retention <- 0
-    rule <- legacy$sample_rule
-    mode <- if (is.list(rule)) rule$mode %||% "common_complete" else rule
-    if (is.list(rule)) {
-      bad <- setdiff(names(rule), c("mode", "sample_ids"))
-      if (length(bad)) stop("Unknown sample_rule option(s): ", paste(bad, collapse = ", "), call. = FALSE)
-      sample_ids <- rule$sample_ids
-    }
-    if (mode %in% c("common_complete", "pair_common_complete")) sample_policy <- "pair_common_complete"
-    else if (identical(mode, "batch_common_complete")) sample_policy <- "batch_common_complete"
-    else stop("Unsupported sample_rule mode", call. = FALSE)
-  }
   sample_policy <- match.arg(sample_policy)
   on_nonestimable_locus <- match.arg(on_nonestimable_locus)
   fail_fast <- qtl2mr_check_flag(fail_fast, "fail_fast")
@@ -1363,12 +1318,6 @@ run_qtl2mr_batch <- function(resources,
     stop("n_workers must be a positive integer", call. = FALSE)
   }
   n_workers <- as.integer(n_workers)
-  if (!is.null(sample_ids)) qtl2mr_validate_ids(as.character(sample_ids), "sample_rule sample_ids")
-  if ("drop_nonestimable_loci" %in% names(fit_options)) {
-    qtl2mr_deprecated("fit_options$drop_nonestimable_loci", "use on_nonestimable_locus = \"drop\" or \"fail\"")
-    if (isTRUE(fit_options$drop_nonestimable_loci)) on_nonestimable_locus <- "drop"
-    fit_options$drop_nonestimable_loci <- NULL
-  }
   pairs <- qtl2mr_normalize_pairs(pairs)
   instrument_rule <- qtl2mr_batch_defaults(instrument_rule, list(
     source = "exposure_qtl_scan", lod_thresh = 4, peak_method = "contiguous_lod_island_max",
@@ -1379,15 +1328,13 @@ run_qtl2mr_batch <- function(resources,
     sample_policy = sample_policy,
     on_nonestimable_locus = on_nonestimable_locus,
     min_sample_retention = if (identical(sample_policy, "batch_common_complete")) min_sample_retention else NA_real_,
-    sample_ids = sample_ids,
     fit_options = fit_options
   )
 
   # Destination, pair preflight, the sample-retention gate and the checkpoint are
   # all checked before anything in output_dir is written or removed.
   qtl2mr_check_batch_destination(output_dir, resume, force)
-  preflight <- qtl2mr_batch_preflight(resources, pairs, instrument_rule, fit_options, fail_fast,
-    sample_ids = sample_ids)
+  preflight <- qtl2mr_batch_preflight(resources, pairs, instrument_rule, fit_options, fail_fast)
   valid <- preflight$valid
   batch <- qtl2mr_empty_batch(resources, pairs, c(config, list(
     batch_traits = unique(c(valid$exposure, valid$outcome)), created_at = as.character(Sys.time()))))
@@ -1400,13 +1347,7 @@ run_qtl2mr_batch <- function(resources,
     selected_chr <- unique(as.character(selected$chr))
     traits <- unique(c(valid$exposure, valid$outcome))
     eligible <- qtl2mr_make_batch_eligible_samples(resources, selected_chr = selected_chr)
-    # A requested sample_ids restriction is the user's choice, not sample loss.
-    if (!is.null(sample_ids)) eligible <- intersect(eligible, as.character(sample_ids))
     batch_samples <- qtl2mr_make_batch_common_complete_samples(resources, traits = traits, selected_chr = selected_chr)
-    if (!is.null(sample_ids)) {
-      if (length(setdiff(sample_ids, batch_samples))) stop("sample_rule sample_ids must be complete for every batch trait and input", call. = FALSE)
-      batch_samples <- as.character(sample_ids)
-    }
     ratio <- if (length(eligible)) length(batch_samples) / length(eligible) else NA_real_
     gate <- if (is.finite(ratio) && ratio >= min_sample_retention) "pass" else "fail"
     batch$sample_qc <- data.frame(
@@ -1440,7 +1381,7 @@ run_qtl2mr_batch <- function(resources,
   fit_one <- function(i, context_cache, fit_cache) {
     pair <- todo[i, , drop = FALSE]
     result <- qtl2mr_batch_fit_pair(resources, pair, instrument_rule, sample_policy, on_nonestimable_locus,
-      fit_options, batch_samples, sample_ids, context_cache, fit_cache)
+      fit_options, batch_samples, context_cache, fit_cache)
     if (!is.null(output_dir) && is.null(result$error)) {
       qtl2mr_write_pair_record(output_dir, pair_index[[i]], pair$pair_id, fingerprint, result)
     }
@@ -1547,47 +1488,3 @@ run_qtl2mr_batch <- function(resources,
   batch
 }
 
-qtl2mr_deprecated <- function(what, instead) {
-  warning(what, " is deprecated in qtl2mr 0.5.0 and will be removed in 0.6.0; ", instead, ".", call. = FALSE)
-}
-
-run_qtl2mr_batch_exact_grouped <- function(resources, pairs, plan = NULL, instrument_rule = list(),
-                                           fit_options = list(), output_mode = "compact", fail_fast = FALSE,
-                                           n_workers = 1L, output_dir = NULL, progress = TRUE, force = FALSE) {
-  qtl2mr_deprecated("run_qtl2mr_batch_exact_grouped()", "use run_qtl2mr_batch(), which reuses fits for shared sample sets automatically")
-  if (!is.null(plan)) warning("plan is ignored; selection and sample settings now come from instrument_rule and fit_options (min_samples, min_loci).", call. = FALSE)
-  run_qtl2mr_batch(resources, pairs, instrument_rule = instrument_rule, sample_policy = "pair_common_complete",
-    on_nonestimable_locus = "fail", fit_options = fit_options, n_workers = n_workers, fail_fast = fail_fast,
-    force = force, output_dir = output_dir, progress = progress)
-}
-
-run_qtl2mr_batch_fast <- function(resources, pairs, instrument_rule = list(lod_thresh = 4, exclude_chr = "X"),
-                                  sample_retention_min = 0.85, allow_sample_loss = FALSE, fit_options = list(),
-                                  output_dir = NULL, progress = TRUE, fail_fast = FALSE, resume = FALSE,
-                                  force = FALSE) {
-  qtl2mr_deprecated("run_qtl2mr_batch_fast()",
-    "use run_qtl2mr_batch(sample_policy = \"batch_common_complete\", on_nonestimable_locus = \"drop\")")
-  drop <- if (is.null(fit_options$drop_nonestimable_loci)) TRUE else isTRUE(fit_options$drop_nonestimable_loci)
-  fit_options$drop_nonestimable_loci <- NULL
-  run_qtl2mr_batch(resources, pairs, instrument_rule = instrument_rule, sample_policy = "batch_common_complete",
-    on_nonestimable_locus = if (drop) "drop" else "fail",
-    min_sample_retention = if (isTRUE(allow_sample_loss)) 0 else sample_retention_min,
-    fit_options = fit_options, fail_fast = fail_fast, resume = resume, force = force,
-    output_dir = output_dir, progress = progress)
-}
-
-run_qtl2mr_batch_parallel_by_exposure <- function(resources, pairs, fast = TRUE, n_workers = 2L,
-                                                  instrument_rule = list(lod_thresh = 4, exclude_chr = "X"),
-                                                  sample_retention_min = 0.85, allow_sample_loss = FALSE,
-                                                  fit_options = list(), output_dir = NULL, progress = TRUE,
-                                                  fail_fast = FALSE, resume = FALSE, force = FALSE) {
-  qtl2mr_deprecated("run_qtl2mr_batch_parallel_by_exposure()", "use run_qtl2mr_batch(n_workers = ...)")
-  drop <- if (is.null(fit_options$drop_nonestimable_loci)) isTRUE(fast) else isTRUE(fit_options$drop_nonestimable_loci)
-  fit_options$drop_nonestimable_loci <- NULL
-  run_qtl2mr_batch(resources, pairs, instrument_rule = instrument_rule,
-    sample_policy = if (isTRUE(fast)) "batch_common_complete" else "pair_common_complete",
-    on_nonestimable_locus = if (drop) "drop" else "fail",
-    min_sample_retention = if (isTRUE(allow_sample_loss)) 0 else sample_retention_min,
-    fit_options = fit_options, n_workers = n_workers, fail_fast = fail_fast, resume = resume,
-    force = force, output_dir = output_dir, progress = progress)
-}

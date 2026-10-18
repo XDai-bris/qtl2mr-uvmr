@@ -61,7 +61,7 @@ test_that("qtl2mr_example supports the public quick workflow and lite export", {
   expect_equal(primary$n_loci[[1L]], 2L)
   expect_equal(primary$reported_estimator_policy[[1L]], "diagnostic_only")
   expect_true(primary$primary_reliable[[1L]])
-  expect_equal(primary$reported_estimator[[1L]], "Star-space qtl2MR")
+  expect_equal(primary$reported_estimator[[1L]], "Star-space qtl2mr")
   expect_true(is.finite(primary$theta_reported[[1L]]))
   expect_true(is.finite(primary$se_reported[[1L]]))
 

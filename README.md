@@ -163,6 +163,8 @@ Only autosomal loci, continuous traits and additive covariates are supported.
   LMM; a value of 0 means kinship had no effect there.
 - **Warnings.** `qtl2mr_warnings(result)` gives each warning's consequence and
   recommended action.
+- **Overview.** `summary(result)` gives a one-row overview; `confidence_set_bounded`
+  is `FALSE` when the confidence set reaches plus or minus infinity.
 
 ## Runtime
 
@@ -198,12 +200,12 @@ per draw. On a laptop, the bundled 400-mouse, 40-locus example takes roughly
 | `run_qtl2mr_batch_fast(r, p)` | `run_qtl2mr_batch(r, p, sample_policy = "batch_common_complete", on_nonestimable_locus = "drop")` |
 | `run_qtl2mr_batch_exact_grouped(r, p)` | `run_qtl2mr_batch(r, p)` |
 | `run_qtl2mr_batch_parallel_by_exposure(r, p, n_workers = k)` | `run_qtl2mr_batch(r, p, sample_policy = "batch_common_complete", on_nonestimable_locus = "drop", n_workers = k)` |
-| `run_qtl2mr_analysis(..., adapter = "prepared")` | drop `adapter` (still accepted with a warning) |
+| `run_qtl2mr_analysis(..., adapter = "prepared")` | drop `adapter` (and `run_qtl2_validation`, `run_heteroskedasticity`, `heteroskedasticity_B`) |
 
-The three old batch functions still work in 0.5.0 with a deprecation warning
-and give the same numbers; they will be removed in 0.6.0. Batch output folders
-from 0.4.x cannot be resumed by 0.5.0. Several internal helpers are no longer
-exported; see NEWS.
+The three old batch functions were removed in 0.5.0; the replacements give the
+same numbers. Batch output folders from 0.4.x cannot be resumed by 0.5.0.
+Several internal helpers are no longer exported, and result labels now read
+`qtl2mr` (for example `"Star-space qtl2mr"`); see NEWS.
 
 ## Method in brief
 

@@ -83,7 +83,7 @@ test_that("diagnostic_only reports reliable SO and suppresses unreliable SO", {
   )
   reliable <- qtl2mr:::qtl2mr_reported_estimate(reliable_fit, diagnostic_layer)
   expect_equal(reliable$policy, "diagnostic_only")
-  expect_equal(reliable$estimator, "Star-space qtl2MR")
+  expect_equal(reliable$estimator, "Star-space qtl2mr")
   expect_equal(reliable$source, "primary")
   expect_equal(reliable$theta, reliable_fit$theta)
   expect_equal(reliable$se, reliable_fit$se)

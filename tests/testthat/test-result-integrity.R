@@ -184,7 +184,7 @@ test_that("overwrite rejects unknown directories and preserves their contents", 
   expect_error(
     write_qtl2mr_results(make_fake_qtl2mr_analysis_result(), out_dir, overwrite = TRUE,
                           make_html = FALSE, make_figures = FALSE),
-    "recognized prior qtl2MR"
+    "recognized prior qtl2mr"
   )
   expect_identical(qtl2mr_file_bytes(sentinel), before)
 })
@@ -256,7 +256,7 @@ test_that("overwrite rejects malformed lookalike results without moving them", {
   out_dir <- tempfile("qtl2mr-lookalike-output-")
   dir.create(file.path(out_dir, "data"), recursive = TRUE)
   writeLines("not an RDS", file.path(out_dir, "result_object.rds"))
-  writeLines("not a qtl2MR summary", file.path(out_dir, "summary.md"))
+  writeLines("not a qtl2mr summary", file.path(out_dir, "summary.md"))
   utils::write.csv(data.frame(
     role = c("model_object", "summary", "data", "data"),
     path_relative = c("result_object.rds", "summary.md", "../escape.csv", "data/warnings.csv"),
@@ -266,7 +266,7 @@ test_that("overwrite rejects malformed lookalike results without moving them", {
   writeLines("do not move", sentinel)
   expect_error(write_qtl2mr_results(make_fake_qtl2mr_analysis_result(), out_dir,
                                     overwrite = TRUE, make_html = FALSE, make_figures = FALSE),
-               "recognized prior qtl2MR")
+               "recognized prior qtl2mr")
   expect_true(file.exists(sentinel))
 })
 
@@ -283,7 +283,7 @@ test_that("prior-result signature files must physically exist", {
   expect_false(qtl2mr:::qtl2mr_is_prior_result_dir(out_dir))
   expect_error(write_qtl2mr_results(make_fake_qtl2mr_analysis_result(), out_dir,
                                     overwrite = TRUE, make_html = FALSE, make_figures = FALSE),
-               "recognized prior qtl2MR")
+               "recognized prior qtl2mr")
 })
 
 test_that("directories at required signature paths do not qualify as prior results", {
@@ -560,7 +560,7 @@ test_that("lite ZIP is rebuilt with relative, scrubbed portable artifacts", {
   expect_false(grepl(normalizePath(source_root), text, fixed = TRUE))
   expect_false(qtl2mr:::qtl2mr_has_portable_path_leak(text, normalizePath(source_root), "not-present-lite-root"))
   lite_manifest <- utils::read.csv(file.path(unzip_dir, "LITE_MANIFEST.csv"), stringsAsFactors = FALSE)
-  audit <- utils::read.csv(file.path(unzip_dir, "SMOKE_RESULT_SIZE_AUDIT.csv"), stringsAsFactors = FALSE)
+  audit <- utils::read.csv(file.path(unzip_dir, "LITE_EXPORT_AUDIT.csv"), stringsAsFactors = FALSE)
   expect_false("path_absolute" %in% names(lite_manifest))
   expect_false("path_absolute" %in% names(audit))
   expect_true(all(vapply(lite_manifest$path_relative, qtl2mr:::qtl2mr_is_safe_relative_path, logical(1))))

@@ -1,7 +1,8 @@
 name: R-CMD-check
 
 on:
-  # Run explicitly after repository visibility and Actions settings are reviewed.
+  push:
+  pull_request:
   workflow_dispatch:
 
 permissions:

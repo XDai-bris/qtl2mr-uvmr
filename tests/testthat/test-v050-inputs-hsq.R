@@ -48,7 +48,7 @@ test_that("null-model hsq is reported per role and chromosome and appended to ou
   expect_identical(hsq$markers, c("m1;m2", "m1;m2"))
   expect_true(all(hsq$hsq_source == "reml_null_model"))
   expect_equal(hsq$hsq, c(fit$locus_blocks[[1]]$fit_x$hsq, fit$locus_blocks[[1]]$fit_y$hsq))
-  expect_identical(utils::tail(names(fit$summary), 1L), "sample_policy")
+  expect_identical(utils::tail(names(fit$summary), 2L), c("sample_policy", "confidence_set_bounded"))
 
   user <- v050_input()
   user$hsq <- 0.3

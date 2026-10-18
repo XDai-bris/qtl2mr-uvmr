@@ -6,7 +6,7 @@
 \title{Prepare and validate the input for one analysis}
 \description{
 \if{latex}{\out{\sloppy}}
-Create and validate an explicit qtl2MR prepared-input object, and fit a
+Create and validate an explicit qtl2mr prepared-input object, and fit a
 single locus when exposure and outcome sample sets differ.
 }
 \usage{
@@ -113,7 +113,7 @@ genetic scaffold, exposure/outcome phenotypes, optional shared covariates, one
 union-sample kinship source, marker map, and selected loci. The high-level
 prepared adapter always uses the generalized partial-overlap engine; full
 overlap and no overlap are special cases. Users must harmonize sample IDs before
-calling qtl2MR.
+calling qtl2mr.
 
 The validator checks sample IDs, covariates, kinship names and coverage, marker
 IDs, selected loci, and the eight-founder autosomal additive assumption.

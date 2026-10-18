@@ -40,30 +40,21 @@ v050_run <- function(f, path, ...) {
     progress = FALSE, ...)
 }
 
-test_that("deprecated batch entry points equal run_qtl2mr_batch with mapped options", {
+test_that("one batch entry point remains and retired arguments are rejected", {
   f <- v050_batch_fixture()
+  ns <- getNamespaceExports("qtl2mr")
+  for (old in c("run_qtl2mr_batch_fast", "run_qtl2mr_batch_exact_grouped", "run_qtl2mr_batch_parallel_by_exposure")) {
+    expect_false(old %in% ns)
+  }
+  expect_error(run_qtl2mr_batch(f$resources, f$pairs, sample_rule = list(mode = "batch_common_complete")), "unused argument")
+  expect_error(run_qtl2mr_batch(f$resources, f$pairs, fit_options = list(drop_nonestimable_loci = TRUE)), "Unknown option")
   pair_common <- run_qtl2mr_batch(f$resources, f$pairs, fit_options = f$options, progress = FALSE)
   batch_common <- run_qtl2mr_batch(f$resources, f$pairs, sample_policy = "batch_common_complete",
-    on_nonestimable_locus = "drop", fit_options = f$options, progress = FALSE)
+    fit_options = f$options, progress = FALSE)
   expect_true(all(pair_common$main_results$status == "ok"))
   expect_false(identical(v050_numbers(pair_common)$theta, v050_numbers(batch_common)$theta))
-
-  expect_warning(grouped <- run_qtl2mr_batch_exact_grouped(f$resources, f$pairs,
-    fit_options = f$options, progress = FALSE), "deprecated")
-  expect_identical(v050_numbers(grouped), v050_numbers(pair_common))
-  expect_warning(fast <- run_qtl2mr_batch_fast(f$resources, f$pairs, fit_options = f$options,
-    progress = FALSE), "deprecated")
-  expect_identical(v050_numbers(fast), v050_numbers(batch_common))
-  for (fast_mode in c(TRUE, FALSE)) {
-    expect_warning(par <- run_qtl2mr_batch_parallel_by_exposure(f$resources, f$pairs, fast = fast_mode,
-      n_workers = 2L, fit_options = f$options, progress = FALSE), "deprecated")
-    expect_identical(v050_numbers(par), v050_numbers(if (fast_mode) batch_common else pair_common))
-  }
-  expect_warning(legacy <- run_qtl2mr_batch(f$resources, f$pairs, fit_options = f$options,
-    sample_rule = list(mode = "batch_common_complete"), progress = FALSE), "deprecated")
-  expect_identical(v050_numbers(legacy)$theta, v050_numbers(run_qtl2mr_batch(f$resources, f$pairs,
-    sample_policy = "batch_common_complete", fit_options = f$options, progress = FALSE))$theta)
-  expect_error(run_qtl2mr_batch(f$resources, f$pairs, sample_polcy = "batch_common_complete"), "Unknown argument")
+  expect_true(all(pair_common$main_results$confidence_set_bounded))
+  expect_identical(utils::tail(names(pair_common$main_results), 2L), c("sample_policy", "confidence_set_bounded"))
 })
 
 test_that("worker count does not change results", {
@@ -207,41 +198,8 @@ test_that("invalid pairs become error rows in every sample policy", {
     b <- run_qtl2mr_batch(f$resources, f$pairs, sample_policy = policy, fit_options = f$options, progress = FALSE)
     expect_identical(b$main_results$status, c(rep("ok", 4L), "error", "error"))
     expect_match(b$main_results$error_message[[6L]], "must be different traits")
-    expect_identical(utils::tail(names(b$main_results), 1L), "sample_policy")
+    expect_identical(utils::tail(names(b$main_results), 2L), c("sample_policy", "confidence_set_bounded"))
   }
-})
-
-test_that("the deprecated sample_rule keeps the 0.4.x behaviour of no retention gate", {
-  f <- v050_batch_fixture()
-  f$resources$pheno$y[4:12] <- NA_real_
-  expect_error(run_qtl2mr_batch(f$resources, f$pairs, sample_policy = "batch_common_complete",
-    fit_options = f$options, progress = FALSE), "below min_sample_retention")
-  expect_warning(legacy <- run_qtl2mr_batch(f$resources, f$pairs, fit_options = f$options, progress = FALSE,
-    sample_rule = list(mode = "batch_common_complete")), "deprecated")
-  expect_true(all(legacy$main_results$status == "ok"))
-  expect_identical(legacy$run_manifest$sample_retention_min, 0)
-  expect_error(suppressWarnings(run_qtl2mr_batch(f$resources, f$pairs, sample_policy = "pair_common_complete",
-    sample_rule = list(mode = "batch_common_complete"))), "not both")
-  # An unnamed value reaches ... only after every formal argument is supplied.
-  expect_error(run_qtl2mr_batch(f$resources, f$pairs, list(), "pair_common_complete", "fail", 0.85,
-    f$options, 1L, FALSE, FALSE, FALSE, NULL, FALSE, "extra"), "must be named")
-})
-
-test_that("sample_ids restrictions are applied in preflight, the gate and the exclusion ledger", {
-  f <- v050_batch_fixture()
-  keep <- paste0("s", 4:33)  # s1-s3 lack outcome v, so the batch-common set must exclude them
-  for (mode in c("common_complete", "batch_common_complete")) {
-    b <- suppressWarnings(run_qtl2mr_batch(f$resources, f$pairs, fit_options = f$options, progress = FALSE,
-      sample_rule = list(mode = mode, sample_ids = keep), min_sample_retention = 0.85))
-    expect_true(all(b$main_results$status == "ok"))
-    expect_true(all(b$main_results$n_x_median <= 30))
-    ledger <- b$sample_exclusions[b$sample_exclusions$reason == "not_in_sample_ids", ]
-    expect_true(all(ledger$n_excluded == 18L))
-  }
-  small <- suppressWarnings(run_qtl2mr_batch(f$resources, f$pairs, fit_options = list(min_samples = 40L),
-    progress = FALSE, sample_rule = list(mode = "common_complete", sample_ids = keep)))
-  expect_true(all(small$errors$stage == "preflight"))
-  expect_true(all(grepl("too_few_samples", small$errors$error_message)))
 })
 
 test_that("batch-common exclusions only count traits of valid pairs", {

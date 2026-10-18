@@ -26,7 +26,7 @@ run_qtl2mr_batch(resources, pairs, instrument_rule = list(),
   sample_policy = c("pair_common_complete", "batch_common_complete"),
   on_nonestimable_locus = c("fail", "drop"), min_sample_retention = 0.85,
   fit_options = list(), n_workers = 1L, fail_fast = FALSE, resume = FALSE,
-  force = FALSE, output_dir = NULL, progress = TRUE, ...)
+  force = FALSE, output_dir = NULL, progress = TRUE)
 }
 \arguments{
 \if{latex}{\out{\sloppy}}
@@ -100,11 +100,6 @@ written by \code{run_qtl2mr_batch()} are removed.}
 \item{output_dir}{Optional output directory for CSV tables and resume records.}
 \item{progress}{Print one progress line per pair (or per exposure group when
 running in parallel).}
-\item{...}{Deprecated arguments \code{sample_rule} and \code{output_mode}, which
-are accepted with a warning until qtl2mr 0.6.0. \code{sample_rule} cannot be
-combined with \code{sample_policy}; as in 0.4.x it applies no retention gate
-unless \code{min_sample_retention} is given, and its \code{sample_ids} restrict
-the samples of every pair. Any other name is an error.}
 }
 \details{
 \if{latex}{\out{\sloppy}}
@@ -144,7 +139,8 @@ frames, written as \code{batch_<name>.csv} when \code{output_dir} is given:
 \code{main_results} (one row per pair: status, error message, sample counts,
 the reported and raw second-order estimates with profile confidence limits,
 \code{primary_reliable}, \code{confidence_set_type}, \code{effect_units}, Q
-statistics, comparator estimates and \code{sample_policy}),
+statistics, comparator estimates, \code{sample_policy} and
+\code{confidence_set_bounded}),
 \code{method_comparison}, \code{selected_loci} (with per-locus retention
 status), \code{overlap_qc}, \code{first_stage_summary} (per-locus block F
 statistics and null-model hsq), \code{warnings}, \code{errors},
@@ -153,8 +149,7 @@ and \code{run_manifest}. The run configuration is written to
 \code{batch_config.json}.
 }
 \seealso{
-\code{\link{run_qtl2mr_analysis}} for one pair with a full report;
-\code{\link{run_qtl2mr_batch_fast}} for the deprecated entry points.
+\code{\link{run_qtl2mr_analysis}} for one pair with a full report.
 }
 \examples{
 data("qtl2mr_example", package = "qtl2mr")

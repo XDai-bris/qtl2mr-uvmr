@@ -1,7 +1,7 @@
 \name{qtl2mr_example}
 \alias{qtl2mr_example}
 \docType{data}
-\title{Small deterministic synthetic qtl2MR teaching fixture}
+\title{Small deterministic synthetic qtl2mr teaching fixture}
 \description{
 \if{latex}{\out{\sloppy}}
 A compact, deterministic synthetic prepared-input fixture for the getting-started

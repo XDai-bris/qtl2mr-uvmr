@@ -562,7 +562,7 @@ qtl2mr_reported_estimate <- function(fit,
     ci_lower = fit$profile_ci_lower %||% NA_real_,
     ci_upper = fit$profile_ci_upper %||% NA_real_,
     ci_type = "profile",
-    estimator = "Star-space qtl2MR",
+    estimator = "Star-space qtl2mr",
     reason = "The numerical search returned a finite estimate and bounded confidence interval; statistical calibration and causal assumptions require separate assessment.",
     source = "primary"
   )
@@ -626,6 +626,16 @@ qtl2mr_reported_estimate <- function(fit,
     source = "none",
     policy = policy
   )
+}
+
+# TRUE when every confidence-set component is finite (a bounded interval or
+# several finite pieces), FALSE when a component reaches -Inf/Inf, NA when the
+# set could not be resolved.
+qtl2mr_confidence_set_bounded <- function(fit) {
+  type <- fit$confidence_set_type %||% "unresolved"
+  set <- fit$confidence_set
+  if (identical(type, "unresolved") || !is.data.frame(set) || !nrow(set)) return(NA)
+  all(is.finite(c(set$lower, set$upper)))
 }
 
 qtl2mr_hsq_table <- function(blocks, exposure, outcome) {
@@ -985,6 +995,7 @@ run_prepared_qtl2mr <- function(input,
     summary$n_loci_complete_overlap <- sum(overlap_summary$complete_overlap, na.rm = TRUE)
   }
   summary$sample_policy <- "role_specific_complete"
+  summary$confidence_set_bounded <- qtl2mr_confidence_set_bounded(fit)
   hsq_table <- qtl2mr_hsq_table(blocks, exposure = exposure, outcome = outcome)
   founder_residuals <- do.call(rbind, lapply(blocks, founder_residual_scores, theta = fit$theta))
   founder_ratios <- do.call(rbind, lapply(blocks, founder_coordinate_ratios, theta_ref = fit$theta))

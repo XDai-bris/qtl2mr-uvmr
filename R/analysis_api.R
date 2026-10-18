@@ -100,11 +100,11 @@ qtl2mr_make_progress_reporter <- function(progress = NULL,
   if (isTRUE(settings$log)) {
     if (is.null(log_file)) stop("log_file is required when progress logging is enabled", call. = FALSE)
     dir.create(dirname(log_file), recursive = TRUE, showWarnings = FALSE)
-    writeLines(sprintf("# qtl2MR progress log\n# started\t%s", format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z")), log_file)
+    writeLines(sprintf("# qtl2mr progress log\n# started\t%s", format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z")), log_file)
   }
   function(stage, label, detail = NULL) {
     line <- sprintf(
-      "[qtl2MR %s] [%s/5] %s%s",
+      "[qtl2mr %s] [%s/5] %s%s",
       format(Sys.time(), "%H:%M:%S"),
       as.integer(stage),
       label,
@@ -205,7 +205,7 @@ qtl2mr_summary_reported <- function(summary_row) {
     ci_lower = qtl2mr_summary_scalar(summary_row, "reported_ci_lower", qtl2mr_summary_scalar(summary_row, "profile_ci_lower")),
     ci_upper = qtl2mr_summary_scalar(summary_row, "reported_ci_upper", qtl2mr_summary_scalar(summary_row, "profile_ci_upper")),
     ci_type = qtl2mr_summary_scalar(summary_row, "reported_ci_type", "profile"),
-    estimator = qtl2mr_summary_scalar(summary_row, "reported_estimator", "Star-space qtl2MR"),
+    estimator = qtl2mr_summary_scalar(summary_row, "reported_estimator", "Star-space qtl2mr"),
     source = qtl2mr_summary_scalar(summary_row, "reported_estimator_source", "primary"),
     policy = qtl2mr_summary_scalar(summary_row, "reported_estimator_policy", "strict_so"),
     reason = qtl2mr_summary_scalar(summary_row, "reported_estimator_reason", "")
@@ -248,57 +248,14 @@ qtl2mr_html_output_table <- function(x, digits = 4) {
   paste0("<table><thead>", header, "</thead><tbody>", paste(rows, collapse = "\n"), "</tbody></table>")
 }
 
-qtl2mr_validation_tests_table <- function(check_status = "not_run_in_analysis", check_log = NA_character_) {
-  # This is package coverage metadata, not evidence that tests ran for an
-  # individual analysis. Keep legacy arguments for callers that read the
-  # schema, but never promote the inventory to a per-run pass claim.
-  check_status <- "not_run_in_analysis"
-  check_log <- NA_character_
-  data.frame(
-    category = c(
-      "Founder contrasts and basis invariance",
-      "Direct founder LMM and qtl2 parity",
-      "Star-space Sigma_xy, overlap, and PSD",
-      "Prepared input and sample-overlap modes",
-      "MR optimizer and uncertainty policy",
-      "LOO and instrument-set sensitivity",
-      "Diagnostics and plotting helpers",
-      "Reporting, accessors, and lite export"
-    ),
-    what_is_checked = c(
-      "Orthonormal founder contrasts and invariance of the multi-locus estimate to orthonormal basis rotation.",
-      "Direct selected-locus founder LMM beta/SE match qtl2::scan1coef with and without kinship/hsq.",
-      "Star-space cross-covariance formula, O_xy sample matching, residual correlation, PSD validation, and invalid-PSD detection.",
-      "Prepared input validation, one union kinship source, full overlap, no overlap, and partial-overlap kinship sample matching.",
-      "Second-order optimizer bracketing/convergence metadata, profile CI reporting, and auto Q p-value policy labelling.",
-      "Leave-one-locus-out MR, explicit parallel guardrail, named instrument-set refits, and sensitivity plots.",
-      "Founder residual diagnostics, founder-coordinate ratios, and explicit-device plot rendering.",
-      "Standard destination folder, manifest schema, warning taxonomy, public accessors, method-comparison labels, locus report, and lite export."
-    ),
-    evidence = c(
-      "test-founder-contrasts.R; test-basis-invariance.R",
-      "test-direct-lmm.R; test-qtl2-parity-kinship.R",
-      "test-starspace-sigmaxy-truth.R; test-mr-overlap.R",
-      "test-prepared-input.R; test-partial-overlap-workflow.R",
-      "test-optimizer-bracketing.R; main_result Q_p_reported and Q_p_method",
-      "test-loo-instrument-sensitivity.R",
-      "test-diagnostics.R",
-      "test-analysis-api.R; test-reporting-usability.R; test-report-locus.R"
-    ),
-    status = rep(check_status, 8L),
-    check_log = rep(check_log %||% NA_character_, 8L),
-    stringsAsFactors = FALSE
-  )
-}
-
 qtl2mr_write_output_manifest_html <- function(manifest, file) {
   html <- c(
     "<!doctype html>",
-    "<html><head><meta charset=\"utf-8\"><title>qtl2MR Output Manifest</title>",
+    "<html><head><meta charset=\"utf-8\"><title>qtl2mr Output Manifest</title>",
     "<style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;margin:28px;color:#1d2528;line-height:1.45;}main{max-width:1180px;margin:auto;}table{border-collapse:collapse;width:100%;font-size:13px;margin:10px 0 22px;}th,td{border:1px solid #d9dfdd;padding:6px 8px;text-align:left;vertical-align:top;}th{background:#eef3f1;}code{background:#eef3f1;padding:1px 4px;}</style>",
     "</head><body><main>",
-    "<h1>qtl2MR Output Manifest</h1>",
-    "<p>This page lists every file written by the qtl2MR destination workflow. The main report shows only a compact summary.</p>",
+    "<h1>qtl2mr Output Manifest</h1>",
+    "<p>This page lists every file written by the qtl2mr destination workflow. The main report shows only a compact summary.</p>",
     qtl2mr_html_output_table(manifest[, intersect(c("role", "path_relative", "format", "size_kb", "included_in_lite", "notes"), names(manifest)), drop = FALSE], digits = 5),
     "</main></body></html>"
   )
@@ -454,7 +411,7 @@ qtl2mr_write_output_transaction_token <- function(stage_dir, token) {
 qtl2mr_remove_output_transaction_backup <- function(backup_dir) {
   backup_state <- qtl2mr_assert_known_path_node(backup_dir, "transaction backup")
   if (identical(backup_state, "directory") && unlink(backup_dir, recursive = TRUE, force = TRUE) != 0L) {
-    stop("Could not remove qtl2MR backup after final-path rewrites", call. = FALSE)
+    stop("Could not remove qtl2mr backup after final-path rewrites", call. = FALSE)
   }
   invisible(NULL)
 }
@@ -467,7 +424,7 @@ qtl2mr_remove_output_transaction_token <- function(token_file) {
 qtl2mr_transaction_path <- function(parent, base, kind) {
   path <- tempfile(paste0(".", base, ".qtl2mr-", kind, "-"), tmpdir = parent)
   if (!identical(qtl2mr_assert_known_path_node(path, "transaction path"), "absent")) {
-    stop("Unable to allocate a unique qtl2MR transaction path", call. = FALSE)
+    stop("Unable to allocate a unique qtl2mr transaction path", call. = FALSE)
   }
   path
 }
@@ -494,7 +451,7 @@ qtl2mr_begin_output_transaction <- function(output_dir, overwrite = FALSE) {
     stop("output_dir exists and is not empty; use overwrite = TRUE or choose a new output_dir", call. = FALSE)
   }
   if (nonempty && !qtl2mr_is_prior_result_dir(destination)) {
-    stop("overwrite = TRUE only permits a recognized prior qtl2MR result directory", call. = FALSE)
+    stop("overwrite = TRUE only permits a recognized prior qtl2mr result directory", call. = FALSE)
   }
   base <- basename(destination)
   stage_dir <- qtl2mr_transaction_path(parent, base, "stage")
@@ -502,14 +459,14 @@ qtl2mr_begin_output_transaction <- function(output_dir, overwrite = FALSE) {
   if (existing) {
     backup_dir <- qtl2mr_transaction_path(parent, base, "backup")
     if (!file.rename(destination, backup_dir)) {
-      stop("Could not preserve the prior qtl2MR result for replacement", call. = FALSE)
+      stop("Could not preserve the prior qtl2mr result for replacement", call. = FALSE)
     }
   }
   if (!dir.create(stage_dir, recursive = FALSE, showWarnings = FALSE)) {
     if (!is.null(backup_dir) && identical(qtl2mr_assert_known_path_node(backup_dir, "transaction backup"), "directory") && !file.rename(backup_dir, destination)) {
       stop("Could not restore prior result after staging setup failure", call. = FALSE)
     }
-    stop("Could not create qtl2MR output staging directory", call. = FALSE)
+    stop("Could not create qtl2mr output staging directory", call. = FALSE)
   }
   token <- paste0("qtl2mr-transaction-", basename(stage_dir))
   token_ok <- tryCatch({
@@ -519,11 +476,11 @@ qtl2mr_begin_output_transaction <- function(output_dir, overwrite = FALSE) {
   if (!isTRUE(token_ok)) {
     if (!is.null(backup_dir) && identical(qtl2mr_assert_known_path_node(backup_dir, "transaction backup"), "directory")) {
       if (!file.rename(backup_dir, destination)) {
-        stop("Could not create qtl2MR transaction token; prior result remains recoverable at ", backup_dir,
+        stop("Could not create qtl2mr transaction token; prior result remains recoverable at ", backup_dir,
              " and staging remains at ", stage_dir, call. = FALSE)
       }
     }
-    stop("Could not create qtl2MR output transaction token; staging remains at ", stage_dir, call. = FALSE)
+    stop("Could not create qtl2mr output transaction token; staging remains at ", stage_dir, call. = FALSE)
   }
   transaction <- new.env(parent = emptyenv())
   transaction$destination <- destination
@@ -537,7 +494,7 @@ qtl2mr_begin_output_transaction <- function(output_dir, overwrite = FALSE) {
 
 qtl2mr_validate_transaction <- function(transaction) {
   if (!inherits(transaction, "qtl2mr_output_transaction") || !is.environment(transaction)) {
-    stop("Invalid internal qtl2MR output transaction", call. = FALSE)
+    stop("Invalid internal qtl2mr output transaction", call. = FALSE)
   }
   required_paths <- c("destination", "stage_dir")
   valid_state <- is.character(transaction$state) && length(transaction$state) == 1L &&
@@ -549,7 +506,7 @@ qtl2mr_validate_transaction <- function(transaction) {
     is.character(value) && length(value) == 1L && !is.na(value) && nzchar(value)
   }, logical(1)))
   if (!valid_state || !valid_token || !valid_paths) {
-    stop("Invalid internal qtl2MR output transaction", call. = FALSE)
+    stop("Invalid internal qtl2mr output transaction", call. = FALSE)
   }
   invisible(transaction)
 }
@@ -587,7 +544,7 @@ qtl2mr_abort_output_transaction <- function(transaction) {
   if (identical(transaction$state, "finalized") || identical(transaction$state, "aborted")) return(invisible(NULL))
   if (qtl2mr_transaction_owned(transaction$stage_dir, transaction)) {
     if (unlink(transaction$stage_dir, recursive = TRUE, force = TRUE) != 0L) {
-      stop("Could not remove owned qtl2MR staging directory", call. = FALSE)
+      stop("Could not remove owned qtl2mr staging directory", call. = FALSE)
     }
   }
   has_backup <- !is.null(transaction$backup_dir) && identical(qtl2mr_assert_known_path_node(transaction$backup_dir, "transaction backup"), "directory")
@@ -598,12 +555,12 @@ qtl2mr_abort_output_transaction <- function(transaction) {
       qtl2mr_stop_output_transaction_conflict(transaction)
     }
     if (unlink(transaction$destination, recursive = TRUE, force = TRUE) != 0L) {
-      stop("Could not remove owned published qtl2MR result during rollback", call. = FALSE)
+      stop("Could not remove owned published qtl2mr result during rollback", call. = FALSE)
     }
   }
   if (has_backup) {
     if (!file.rename(transaction$backup_dir, transaction$destination)) {
-      stop("Could not restore prior qtl2MR result from backup: ", transaction$backup_dir, call. = FALSE)
+      stop("Could not restore prior qtl2mr result from backup: ", transaction$backup_dir, call. = FALSE)
     }
   }
   transaction$state <- "aborted"
@@ -613,13 +570,13 @@ qtl2mr_abort_output_transaction <- function(transaction) {
 qtl2mr_commit_output_transaction <- function(transaction, keep_backup = FALSE) {
   qtl2mr_validate_transaction(transaction)
   if (!identical(transaction$state, "staging") || !qtl2mr_transaction_owned(transaction$stage_dir, transaction)) {
-    stop("qtl2MR staging directory is unavailable for publication", call. = FALSE)
+    stop("qtl2mr staging directory is unavailable for publication", call. = FALSE)
   }
   if (qtl2mr_path_occupied(transaction$destination)) {
     qtl2mr_stop_output_transaction_conflict(transaction)
   }
   if (!file.rename(transaction$stage_dir, transaction$destination)) {
-    stop("Could not publish staged qtl2MR result", call. = FALSE)
+    stop("Could not publish staged qtl2mr result", call. = FALSE)
   }
   transaction$state <- "published"
   # Retain any backup until all final-path rewrites have completed. The
@@ -630,7 +587,7 @@ qtl2mr_commit_output_transaction <- function(transaction, keep_backup = FALSE) {
 qtl2mr_finalize_output_transaction <- function(transaction) {
   qtl2mr_validate_transaction(transaction)
   if (!identical(transaction$state, "published") || !qtl2mr_transaction_owned(transaction$destination, transaction)) {
-    stop("Cannot finalize an unowned qtl2MR publication", call. = FALSE)
+    stop("Cannot finalize an unowned qtl2mr publication", call. = FALSE)
   }
   if (!is.null(transaction$backup_dir) && identical(qtl2mr_assert_known_path_node(transaction$backup_dir, "transaction backup"), "directory")) {
     qtl2mr_remove_output_transaction_backup(transaction$backup_dir)
@@ -638,7 +595,7 @@ qtl2mr_finalize_output_transaction <- function(transaction) {
   token_file <- file.path(transaction$destination, ".qtl2mr-transaction-token")
   if (!qtl2mr_remove_output_transaction_token(token_file)) {
     transaction$state <- "finalized"
-    warning("qtl2MR result was published, but transaction-token cleanup failed; the result remains valid", call. = FALSE)
+    warning("qtl2mr result was published, but transaction-token cleanup failed; the result remains valid", call. = FALSE)
     return(invisible(NULL))
   }
   transaction$state <- "finalized"
@@ -846,13 +803,13 @@ qtl2mr_method_comparison_table <- function(result) {
     )
   }
   add(
-    "Star-space qtl2MR",
+    "Star-space qtl2mr",
     s$theta[[1L]], s$se[[1L]], s$profile_ci_lower[[1L]], s$profile_ci_upper[[1L]],
     "profile", "current_package", "Overlap-aware SO Founder GLS-IVW; reported when optimizer/profile diagnostics are reliable"
   )
   if (!is.null(fit$independence)) {
     ci <- qtl2mr_wald_ci(fit$independence$theta, fit$independence$se)
-    add("Sigma_xy=0 qtl2MR", fit$independence$theta, fit$independence$se, ci[["lower"]], ci[["upper"]],
+    add("Sigma_xy=0 qtl2mr", fit$independence$theta, fit$independence$se, ci[["lower"]], ci[["upper"]],
         "Wald", "current_package", "No overlap term")
   }
   for (label in c("Two-step IVW", "Weighted median", "Weighted mode")) {
@@ -935,7 +892,7 @@ qtl2mr_diagnostic_ci_caption <- function(methods, detailed = FALSE) {
 }
 
 plot_method_comparison <- function(methods,
-                                   main = "qtl2MR method comparison",
+                                   main = "qtl2mr method comparison",
                                    xlab = "MR effect",
                                    show_value_labels = TRUE,
                                    primary_method = NULL,
@@ -974,10 +931,10 @@ plot_method_comparison <- function(methods,
     graphics::text(d$estimate, y, labels = label, pos = 4, cex = 0.72, col = cols, xpd = TRUE)
   }
   if (is.null(primary_method)) {
-    primary <- methods[methods$method == "Star-space qtl2MR", , drop = FALSE]
+    primary <- methods[methods$method == "Star-space qtl2mr", , drop = FALSE]
     if (nrow(primary)) {
       primary_method <- list(
-        estimator = "Star-space qtl2MR",
+        estimator = "Star-space qtl2mr",
         theta = primary$estimate[[1L]],
         ci_lower = primary$ci_lower[[1L]],
         ci_upper = primary$ci_upper[[1L]],
@@ -1148,7 +1105,7 @@ qtl2mr_write_figure_pair <- function(stem, plot_expr,
 
 write_summary_md <- function(result, file) {
   lines <- summarise_qtl2mr_result(result)
-  writeLines(c("# qtl2MR analysis summary", "", lines), file)
+  writeLines(c("# qtl2mr analysis summary", "", lines), file)
   invisible(file)
 }
 
@@ -1169,7 +1126,7 @@ summarise_qtl2mr_result <- function(result) {
   raw_differs <- !isTRUE(reliable) || !is.finite(reported$theta) || !is.finite(so_theta) ||
     !isTRUE(all.equal(as.numeric(reported$theta), as.numeric(so_theta)))
   lines <- c(
-    "qtl2MR analysis complete", "",
+    "qtl2mr analysis complete", "",
     paste0("Exposure: ", s$exposure[[1L]]),
     paste0("Outcome: ", s$outcome[[1L]]),
     paste0("N samples: ", length(result$pilot$sample_ids)),
@@ -1215,8 +1172,29 @@ print.qtl2mr_analysis_result <- function(x, ...) {
   invisible(x)
 }
 
+# A one-row overview of the result; qtl2mr_primary_result() has every column.
 summary.qtl2mr_analysis_result <- function(object, ...) {
-  qtl2mr_add_q_fields(object$pilot$summary, fit = object$pilot$fit)
+  s <- qtl2mr_add_q_fields(object$pilot$summary, fit = object$pilot$fit)
+  get <- function(name, default = NA) qtl2mr_summary_scalar(s, name, default)
+  warnings <- object$warnings %||% data.frame()
+  shown <- if (nrow(warnings) && "shown_in_main_report" %in% names(warnings)) {
+    warnings$warning_id[warnings$shown_in_main_report %in% TRUE]
+  } else character()
+  data.frame(
+    exposure = get("exposure", NA_character_), outcome = get("outcome", NA_character_),
+    n_samples = length(object$pilot$sample_ids), n_loci = get("n_loci", NA_integer_),
+    estimate = get("theta_reported", NA_real_), se = get("se_reported", NA_real_),
+    ci_lower = get("reported_ci_lower", NA_real_), ci_upper = get("reported_ci_upper", NA_real_),
+    effect_units = get("effect_units", NA_character_),
+    reported_estimator = get("reported_estimator", NA_character_),
+    primary_reliable = get("primary_reliable", NA),
+    confidence_set_type = get("confidence_set_type", NA_character_),
+    confidence_set_bounded = get("confidence_set_bounded", NA),
+    Q = get("Q", NA_real_), Q_p = get("Q_p_reported", NA_real_), Q_p_method = get("Q_p_method", NA_character_),
+    sample_policy = get("sample_policy", NA_character_),
+    warnings = paste(unique(shown), collapse = ";"),
+    stringsAsFactors = FALSE
+  )
 }
 
 qtl2mr_primary_result <- function(result) {
@@ -1382,10 +1360,10 @@ write_qtl2mr_html_report <- function(result, file) {
     length(result$pilot$sample_ids), s$n_loci[[1L]])
   html <- c(
     "<!doctype html>",
-    "<html><head><meta charset=\"utf-8\"><title>qtl2MR Analysis Report</title>",
+    "<html><head><meta charset=\"utf-8\"><title>qtl2mr Analysis Report</title>",
     "<style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;margin:28px;color:#1d2528;line-height:1.5;}main{max-width:960px;margin:auto;}table{border-collapse:collapse;width:100%;font-size:14px;margin:10px 0 22px;}th,td{border:1px solid #d9dfdd;padding:6px 8px;text-align:left;vertical-align:top;}th{background:#eef3f1;}figure{border:1px solid #ddd;padding:12px;margin:18px 0;}img{max-width:100%;height:auto;display:block;margin:auto;}code{background:#eef3f1;padding:1px 4px;}.primary{border:2px solid #00796b;background:#f2fbf8;padding:14px;margin:16px 0 22px;}.section-note{color:#445;max-width:900px;}</style>",
     "</head><body><main>",
-    "<h1>qtl2MR analysis report</h1>",
+    "<h1>qtl2mr analysis report</h1>",
     "<h2>Analysis overview and primary estimate</h2>", overview,
     "<div class=\"primary\">", qtl2mr_html_table(primary_table, digits = 6), "</div>",
     paste0("<p class=\"section-note\">Numerical success does not establish 95% coverage or causal validity. Weak instruments, same-sample instrument selection and dependence between loci can invalidate nominal uncertainty. Other methods are diagnostic comparators, not automatic replacements.", raw_note, "</p>"),
@@ -1423,7 +1401,7 @@ write_qtl2mr_results <- function(result,
                                  .transaction = NULL) {
   transaction <- .transaction %||% qtl2mr_begin_output_transaction(output_dir, overwrite = overwrite)
   if (!identical(qtl2mr_assert_known_path_node(transaction$stage_dir, "transaction staging directory"), "directory")) {
-    stop("Supplied qtl2MR transaction has no safe staging directory", call. = FALSE)
+    stop("Supplied qtl2mr transaction has no safe staging directory", call. = FALSE)
   }
   published <- FALSE
   on.exit({
@@ -1520,7 +1498,6 @@ write_qtl2mr_results <- function(result,
   result$warnings <- warnings
   result$method_comparison <- method_comparison
   result$first_stage_summary <- tryCatch(summarize_block_first_stage(block_first_stage), error = function(e) data.frame())
-  result$validation_tests <- qtl2mr_validation_tests_table()
 
   data_paths <- c(
     main_result = file.path(data_dir, "main_result.csv"),
@@ -1535,7 +1512,6 @@ write_qtl2mr_results <- function(result,
     first_stage_summary = file.path(data_dir, "first_stage_summary.csv"),
     founder_residuals = file.path(data_dir, "founder_residuals.csv"),
     founder_coordinate_ratios = file.path(data_dir, "founder_coordinate_ratios.csv"),
-    validation_tests = file.path(data_dir, "validation_tests.csv"),
     warnings = file.path(data_dir, "warnings.csv")
   )
   data_paths <- c(data_paths,
@@ -1580,7 +1556,6 @@ write_qtl2mr_results <- function(result,
   utils::write.csv(result$first_stage_summary %||% data.frame(), data_paths[["first_stage_summary"]], row.names = FALSE)
   utils::write.csv(result$pilot$founder_residual_scores_global %||% data.frame(), data_paths[["founder_residuals"]], row.names = FALSE)
   utils::write.csv(result$pilot$founder_coordinate_ratios %||% data.frame(), data_paths[["founder_coordinate_ratios"]], row.names = FALSE)
-  utils::write.csv(result$validation_tests, data_paths[["validation_tests"]], row.names = FALSE)
   utils::write.csv(warnings, data_paths[["warnings"]], row.names = FALSE)
   writeLines(utils::capture.output(utils::sessionInfo()), file.path(data_dir, "session_info.txt"))
   qtl2mr_progress(progress_callback, 5L, "Write outputs", "data tables and session info")
@@ -1596,10 +1571,10 @@ write_qtl2mr_results <- function(result,
     qtl2mr_progress(progress_callback, 5L, "Write outputs", "figures")
     reported_for_fig <- qtl2mr_summary_reported(result$pilot$summary)
     qtl2mr_write_figure_pair(file.path(figure_dir, "method_comparison"), {
-      plot_method_comparison(method_comparison, main = "qtl2MR method comparison", xlab = paste(result$pilot$summary$exposure[[1L]], "->", result$pilot$summary$outcome[[1L]], "effect"), show_value_labels = FALSE, primary_method = reported_for_fig)
+      plot_method_comparison(method_comparison, main = "qtl2mr method comparison", xlab = paste(result$pilot$summary$exposure[[1L]], "->", result$pilot$summary$outcome[[1L]], "effect"), show_value_labels = FALSE, primary_method = reported_for_fig)
     }, width = 2400, height = 1400, pdf_width = 10.5, pdf_height = 6.8)
     add_fig("Method comparison", file.path(figure_dir, "method_comparison"),
-      trimws(paste("Reported qtl2MR estimate and comparator estimates.", qtl2mr_diagnostic_ci_caption(method_comparison))))
+      trimws(paste("Reported qtl2mr estimate and comparator estimates.", qtl2mr_diagnostic_ci_caption(method_comparison))))
     if (!is.null(result$pilot$diagnostic_layer$per_locus)) {
       qtl2mr_write_figure_pair(file.path(figure_dir, "per_locus_forest"), {
         plot_per_locus_so_forest(result$pilot$diagnostic_layer$per_locus, estimates = result$pilot$diagnostic_layer$estimates,
@@ -1714,7 +1689,6 @@ write_qtl2mr_results <- function(result,
     first_stage_summary = "Summary of block F_X heuristic diagnostics",
     founder_residuals = "Descriptive founder residual localization diagnostics",
     founder_coordinate_ratios = "Diagnostic founder-coordinate Wald ratios",
-    validation_tests = "Package coverage inventory; not per-run validation evidence",
     warnings = "Warnings with consequence and recommended action"
   )
   output_manifest <- qtl2mr_build_output_manifest(output_dir, notes = notes)
@@ -1749,7 +1723,6 @@ write_qtl2mr_results <- function(result,
 run_qtl2mr_analysis <- function(input,
                                 exposure = NULL,
                                 outcome = NULL,
-                                adapter = NULL,
                                 output_dir = NULL,
                                 loci = NULL,
                                 overwrite = FALSE,
@@ -1767,23 +1740,15 @@ run_qtl2mr_analysis <- function(input,
                                 progress = NULL,
                                 ...) {
   dots <- list(...)
-  retired <- c("run_qtl2_validation", "run_heteroskedasticity", "heteroskedasticity_B")
   allowed_dots <- c("standardize_phenotypes", "cross_cov_model", "ridge",
     "engine", "context_cache", "fit_cache")
   dot_names <- names(dots)
   if (length(dots) && (is.null(dot_names) || anyNA(dot_names) ||
       any(!nzchar(dot_names)) || anyDuplicated(dot_names) ||
-      any(!dot_names %in% c(allowed_dots, retired)))) {
+      any(!dot_names %in% allowed_dots))) {
     stop("Unknown, unnamed or duplicate analysis argument in ...; allowed: ",
       paste(allowed_dots, collapse = ", "), call. = FALSE)
   }
-  # adapter keeps its 0.4.x position so positional calls do not shift into output_dir.
-  ignored <- c(if (!is.null(adapter)) "adapter", intersect(dot_names, retired))
-  for (nm in ignored) {
-    warning("run_qtl2mr_analysis(", nm, ") is deprecated in qtl2mr 0.5.0 and ignored; it will be removed in 0.6.0.",
-      call. = FALSE)
-  }
-  dots <- dots[setdiff(dot_names, retired)]
   if (!inherits(input, "qtl2mr_prepared_input")) {
     stop("input must be created by as_qtl2mr_prepared_input()", call. = FALSE)
   }
@@ -1846,7 +1811,7 @@ run_qtl2mr_analysis <- function(input,
     ), dots))
   )
   pilot <- cap$value
-  writeLines(cap$messages, file.path(log_dir, "pilot_messages.log"))
+  writeLines(cap$messages, file.path(log_dir, "fit_messages.log"))
 
   loo_mr <- NULL
   loo_error <- NULL
@@ -1929,7 +1894,7 @@ export_qtl2mr_lite_result <- function(result_dir,
                                       include_rds = FALSE) {
   if (inherits(result_dir, "qtl2mr_analysis_result")) result_dir <- result_dir$output_dir
   if (!is.character(result_dir) || length(result_dir) != 1L || !dir.exists(result_dir)) {
-    stop("result_dir must be an existing qtl2MR result directory or qtl2mr_analysis_result", call. = FALSE)
+    stop("result_dir must be an existing qtl2mr result directory or qtl2mr_analysis_result", call. = FALSE)
   }
   result_state <- qtl2mr_assert_known_path_node(result_dir, "result_dir")
   if (!identical(result_state, "directory") || qtl2mr_tree_has_symlink(result_dir)) {
@@ -1958,7 +1923,7 @@ export_qtl2mr_lite_result <- function(result_dir,
     stop("Could not create unique lite-export staging directory", call. = FALSE)
   }
   zip_lock <- qtl2mr_transaction_path(zip_parent, basename(dest_zip), "lite-lock")
-  if (!file.create(zip_lock)) stop("Could not reserve qtl2MR lite ZIP destination", call. = FALSE)
+  if (!file.create(zip_lock)) stop("Could not reserve qtl2mr lite ZIP destination", call. = FALSE)
   temp_zip <- tempfile(paste0(".", basename(dest_zip), ".qtl2mr-"), tmpdir = zip_parent, fileext = ".zip")
   published <- FALSE
   on.exit({
@@ -2001,19 +1966,19 @@ export_qtl2mr_lite_result <- function(result_dir,
   }
 
   audit <- full_manifest[, setdiff(names(full_manifest), "path_absolute"), drop = FALSE]
-  utils::write.csv(audit, file.path(lite_root, "SMOKE_RESULT_SIZE_AUDIT.csv"), row.names = FALSE)
+  utils::write.csv(audit, file.path(lite_root, "LITE_EXPORT_AUDIT.csv"), row.names = FALSE)
   writeLines(c(
-    "# qtl2MR Lite Result",
+    "# qtl2mr Lite Result",
     "",
-    "This is a portable lightweight qtl2MR result package for external discussion.",
+    "This is a portable lightweight qtl2mr result package for external discussion.",
     "",
     paste0("- max_file_mb: ", max_file_mb),
     paste0("- include_rds: ", include_rds),
     "",
     "Large complete R objects and large sample-level tables are excluded by default.",
-    "See SMOKE_RESULT_SIZE_AUDIT.csv for inclusion/exclusion decisions.",
+    "See LITE_EXPORT_AUDIT.csv for inclusion/exclusion decisions.",
     "Use the full local result directory when complete R object reload is needed."
-  ), file.path(lite_root, "README_SMOKE_RESULT_LITE.md"))
+  ), file.path(lite_root, "README_LITE.md"))
   # Scrub copied source-derived text before generating the portable manifest so
   # manifest sizes and the HTML provenance view describe the shipped bytes.
   text_like <- list.files(lite_root, recursive = TRUE, full.names = TRUE, all.files = FALSE, no.. = TRUE)
@@ -2065,7 +2030,7 @@ export_qtl2mr_lite_result <- function(result_dir,
   # file.link is a same-filesystem, no-replace publication primitive: unlike
   # rename it fails if another process wins the destination race.
   if (!file.exists(temp_zip) || !file.link(temp_zip, dest_zip) || unlink(temp_zip, force = TRUE) != 0L) {
-    stop("Could not publish qtl2MR lite ZIP", call. = FALSE)
+    stop("Could not publish qtl2mr lite ZIP", call. = FALSE)
   }
   published <- TRUE
   invisible(normalizePath(dest_zip, winslash = "/", mustWork = FALSE))
@@ -2169,7 +2134,7 @@ report_qtl2mr_locus <- function(result,
   }
   if (isTRUE(make_html)) {
     html <- c(
-      "<!doctype html><html><head><meta charset=\"utf-8\"><title>qtl2MR locus report</title>",
+      "<!doctype html><html><head><meta charset=\"utf-8\"><title>qtl2mr locus report</title>",
       "<style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;margin:28px;line-height:1.45;}table{border-collapse:collapse;width:100%;}th,td{border:1px solid #ddd;padding:6px 8px;text-align:left;}th{background:#eef3f1;}img{max-width:100%;}figure{border:1px solid #ddd;padding:12px;margin:16px 0;}code{background:#eef3f1;padding:1px 4px;}</style></head><body>",
       sprintf("<h1>Locus report: %s</h1>", qtl2mr_html_escape(locus_id)),
       "<h2>Locus Summary</h2>",

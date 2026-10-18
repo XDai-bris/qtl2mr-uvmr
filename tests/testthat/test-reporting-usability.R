@@ -1,26 +1,29 @@
-test_that("analysis input must be prepared and retired arguments only warn", {
+test_that("analysis input must be prepared and retired arguments are rejected", {
   expect_error(run_qtl2mr_analysis(list(genoprobs = list()), exposure = "x", outcome = "y"),
     "created by as_qtl2mr_prepared_input")
   data("qtl2mr_example", package = "qtl2mr", envir = environment())
   ex <- qtl2mr_example
   input <- as_qtl2mr_prepared_input(ex$allele_probs, ex$pheno, ex$covar, ex$kinship,
     ex$marker_map, ex$selected_loci, ex$exposure, ex$outcome)
-  expect_warning(
-    run_qtl2mr_analysis(input, loci = 1, output_dir = tempfile("qtl2mr-retired-"), adapter = "prepared",
-      make_figures = FALSE, make_html = FALSE, verbose = FALSE, progress = FALSE,
-      diagnostic_bootstrap_B = 0L, heterogeneity_method = "none",
-      run_loo_mr = FALSE, run_instrument_sensitivity = FALSE),
-    "adapter\\) is deprecated")
-  expect_error(run_qtl2mr_analysis(input, adaptor = "prepared"), "Unknown, unnamed or duplicate")
-  # adapter keeps its 0.4.x position: a positional value must not become output_dir.
+  for (retired in list(list(adapter = "prepared"), list(run_heteroskedasticity = FALSE),
+                       list(run_qtl2_validation = FALSE), list(heteroskedasticity_B = 10L))) {
+    expect_error(do.call(run_qtl2mr_analysis, c(list(input, output_dir = tempfile()), retired)),
+      "Unknown, unnamed or duplicate")
+  }
   out <- tempfile("qtl2mr-positional-")
-  expect_warning(result <- run_qtl2mr_analysis(input, "x", "y", "prepared", out, loci = 1,
+  result <- run_qtl2mr_analysis(input, "x", "y", out, loci = 1,
     make_figures = FALSE, make_html = FALSE, verbose = FALSE, progress = FALSE,
     diagnostic_bootstrap_B = 0L, heterogeneity_method = "none",
-    run_loo_mr = FALSE, run_instrument_sensitivity = FALSE), "adapter\\) is deprecated")
+    run_loo_mr = FALSE, run_instrument_sensitivity = FALSE)
   expect_identical(normalizePath(result$output_dir), normalizePath(out))
+  overview <- summary(result)
+  expect_identical(nrow(overview), 1L)
+  expect_lte(ncol(overview), 20L)
+  expect_true(all(c("estimate", "ci_lower", "ci_upper", "effect_units", "primary_reliable",
+    "confidence_set_type", "confidence_set_bounded", "warnings") %in% names(overview)))
+  expect_identical(overview$estimate, qtl2mr_primary_result(result)$theta_reported)
+  expect_true(file.exists(file.path(out, "logs", "fit_messages.log")))
 })
-
 test_that("relative output paths use a portable directory boundary", {
   windows_root <- "C:/Temp/Rtmpqtl2/lite"
   expect_equal(
@@ -112,9 +115,7 @@ test_that("run reports are curated and package coverage is not claimed as run ev
   out_dir <- tempfile("qtl2mr-curated-report-")
   written <- write_qtl2mr_results(result, output_dir = out_dir, make_html = TRUE, make_figures = FALSE)
 
-  coverage <- utils::read.csv(file.path(out_dir, "data", "validation_tests.csv"), stringsAsFactors = FALSE)
-  expect_true(all(coverage$status == "not_run_in_analysis"))
-  expect_false(any(coverage$status == "pass"))
+  expect_false(file.exists(file.path(out_dir, "data", "validation_tests.csv")))
 
   report <- paste(readLines(file.path(out_dir, "report.html"), warn = FALSE), collapse = "\n")
   expect_match(report, "Analysis overview and primary estimate", fixed = TRUE)
@@ -135,14 +136,6 @@ test_that("run reports are curated and package coverage is not claimed as run ev
   expect_lte(length(smry), 21L)
 })
 
-test_that("automatic package coverage status is a non-claim", {
-  coverage <- qtl2mr:::qtl2mr_validation_tests_table()
-  expect_true(all(coverage$status == "not_run_in_analysis"))
-  expect_false(any(coverage$status == "pass"))
-  legacy_request <- qtl2mr:::qtl2mr_validation_tests_table(check_status = "pass")
-  expect_true(all(legacy_request$status == "not_run_in_analysis"))
-})
-
 test_that("lite export excludes large RDS files and records decisions", {
   result <- make_fake_qtl2mr_analysis_result()
   out_dir <- tempfile("qtl2mr-lite-src-")
@@ -152,7 +145,7 @@ test_that("lite export excludes large RDS files and records decisions", {
   expect_true(file.exists(lite))
   listing <- utils::unzip(lite, list = TRUE)
   expect_true(any(grepl("LITE_MANIFEST.csv$", listing$Name)))
-  expect_true(any(grepl("SMOKE_RESULT_SIZE_AUDIT.csv$", listing$Name)))
+  expect_true(any(grepl("LITE_EXPORT_AUDIT.csv$", listing$Name)))
   expect_false(any(grepl("[.]rds$", listing$Name)))
 })
 

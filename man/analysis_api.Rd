@@ -16,7 +16,7 @@ parts of the result.
 }
 \usage{
 run_qtl2mr_analysis(input, exposure = NULL, outcome = NULL,
-  adapter = NULL, output_dir = NULL, loci = NULL, overwrite = FALSE, make_html = TRUE,
+  output_dir = NULL, loci = NULL, overwrite = FALSE, make_html = TRUE,
   make_figures = TRUE, verbose = TRUE, diagnostic_bootstrap_B = 500L,
   diagnostic_bootstrap_seed = 1L,
   reported_estimator_policy = c("diagnostic_only", "strict_so", "auto_fallback"),
@@ -49,8 +49,6 @@ validate_qtl2_scan1coef(genoprobs, pheno, kinship = NULL,
 \item{input}{An object created by \code{\link{as_qtl2mr_prepared_input}()}.}
 \item{exposure, outcome}{Trait names; default to the names stored in
 \code{input}. They must differ.}
-\item{adapter}{Deprecated and ignored (with a warning) until 0.6.0. It keeps its
-0.4.x position so that positional calls still reach \code{output_dir}.}
 \item{output_dir}{Destination directory. If omitted, a new directory is created
 under \code{tempdir()}; set option \code{qtl2mr.output_root} or environment
 variable \code{QTL2MR_OUTPUT_ROOT} to use another root.}
@@ -88,9 +86,7 @@ messages and writes \code{logs/progress.log}; \code{"log"} only writes the log;
 \item{...}{Advanced fit settings: \code{standardize_phenotypes} (default
 \code{TRUE}), \code{cross_cov_model} (default \code{"star"}) and \code{ridge};
 \code{engine}, \code{context_cache} and \code{fit_cache} are internal tuning
-hooks. The retired arguments \code{run_qtl2_validation},
-\code{run_heteroskedasticity} and \code{heteroskedasticity_B} are ignored with a
-warning until 0.6.0. Other names are an error.}
+hooks. Other names are an error.}
 \item{result}{A \code{qtl2mr_analysis_result}; for \code{report_qtl2mr_locus()}
 also a path to its \code{result_object.rds}.}
 \item{detail}{For \code{qtl2mr_output_paths()}, return the full file manifest
@@ -166,14 +162,16 @@ every file.
 \code{reported_ci_upper}, \code{reported_estimator} and
 \code{reported_estimator_reason} (the reported result);
 \code{theta_so}, \code{se_so} and \code{profile_ci_lower}/\code{upper} (the raw
-second-order fit); \code{primary_reliable}, \code{confidence_set_type} and
-\code{inference_status}; \code{effect_units} and \code{theta_raw_units};
+second-order fit); \code{primary_reliable}, \code{confidence_set_type},
+\code{confidence_set_bounded} and \code{inference_status}; \code{effect_units} and \code{theta_raw_units};
 \code{n_loci}, \code{n_x_median}, \code{n_y_median} and
 \code{n_overlap_median}; \code{Q}, \code{Q_p_reported} and \code{Q_p_method};
 comparator estimates (\code{theta_two_step_ivw},
 \code{theta_weighted_median}, \code{theta_weighted_mode},
 \code{theta_independence}); and \code{sample_policy}.
 
+\code{summary()} returns a one-row overview (estimate, SE, CI, units,
+reliability, confidence-set type, Q and warning IDs).
 \code{qtl2mr_warnings()}, \code{qtl2mr_method_comparison()} and
 \code{qtl2mr_output_paths()} return data frames. \code{report_qtl2mr_locus()}
 invisibly returns the locus report directory, \code{export_qtl2mr_lite_result()}

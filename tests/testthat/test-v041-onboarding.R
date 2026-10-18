@@ -87,7 +87,7 @@ test_that("README quick start keeps the documented explicit fast-demo settings",
   expect_match(text, "qtl2mr **0.5.0**, which has not been released yet", fixed = TRUE)
   expect_match(text, "releases/tag/v0.4.0", fixed = TRUE)
   expect_match(text, "samples complete for both of its traits", fixed = TRUE)
-  expect_false(grepl("run_qtl2mr_batch_fast(r, p)`", sub("## Upgrading from 0.4.x.*", "", text), fixed = TRUE))
+  expect_false(grepl("run_qtl2mr_batch_fast", sub("## Upgrading from 0.4.x.*", "", text), fixed = TRUE))
 })
 
 test_that("the historical extractor fails clearly without its undistributed input", {
