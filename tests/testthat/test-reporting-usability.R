@@ -12,6 +12,13 @@ test_that("analysis input must be prepared and retired arguments only warn", {
       run_loo_mr = FALSE, run_instrument_sensitivity = FALSE),
     "adapter\\) is deprecated")
   expect_error(run_qtl2mr_analysis(input, adaptor = "prepared"), "Unknown, unnamed or duplicate")
+  # adapter keeps its 0.4.x position: a positional value must not become output_dir.
+  out <- tempfile("qtl2mr-positional-")
+  expect_warning(result <- run_qtl2mr_analysis(input, "x", "y", "prepared", out, loci = 1,
+    make_figures = FALSE, make_html = FALSE, verbose = FALSE, progress = FALSE,
+    diagnostic_bootstrap_B = 0L, heterogeneity_method = "none",
+    run_loo_mr = FALSE, run_instrument_sensitivity = FALSE), "adapter\\) is deprecated")
+  expect_identical(normalizePath(result$output_dir), normalizePath(out))
 })
 
 test_that("relative output paths use a portable directory boundary", {

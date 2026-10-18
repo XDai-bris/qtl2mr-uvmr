@@ -210,3 +210,76 @@ test_that("invalid pairs become error rows in every sample policy", {
     expect_identical(utils::tail(names(b$main_results), 1L), "sample_policy")
   }
 })
+
+test_that("the deprecated sample_rule keeps the 0.4.x behaviour of no retention gate", {
+  f <- v050_batch_fixture()
+  f$resources$pheno$y[4:12] <- NA_real_
+  expect_error(run_qtl2mr_batch(f$resources, f$pairs, sample_policy = "batch_common_complete",
+    fit_options = f$options, progress = FALSE), "below min_sample_retention")
+  expect_warning(legacy <- run_qtl2mr_batch(f$resources, f$pairs, fit_options = f$options, progress = FALSE,
+    sample_rule = list(mode = "batch_common_complete")), "deprecated")
+  expect_true(all(legacy$main_results$status == "ok"))
+  expect_identical(legacy$run_manifest$sample_retention_min, 0)
+  expect_error(suppressWarnings(run_qtl2mr_batch(f$resources, f$pairs, sample_policy = "pair_common_complete",
+    sample_rule = list(mode = "batch_common_complete"))), "not both")
+  # An unnamed value reaches ... only after every formal argument is supplied.
+  expect_error(run_qtl2mr_batch(f$resources, f$pairs, list(), "pair_common_complete", "fail", 0.85,
+    f$options, 1L, FALSE, FALSE, FALSE, NULL, FALSE, "extra"), "must be named")
+})
+
+test_that("sample_ids restrictions are applied in preflight, the gate and the exclusion ledger", {
+  f <- v050_batch_fixture()
+  keep <- paste0("s", 4:33)  # s1-s3 lack outcome v, so the batch-common set must exclude them
+  for (mode in c("common_complete", "batch_common_complete")) {
+    b <- suppressWarnings(run_qtl2mr_batch(f$resources, f$pairs, fit_options = f$options, progress = FALSE,
+      sample_rule = list(mode = mode, sample_ids = keep), min_sample_retention = 0.85))
+    expect_true(all(b$main_results$status == "ok"))
+    expect_true(all(b$main_results$n_x_median <= 30))
+    ledger <- b$sample_exclusions[b$sample_exclusions$reason == "not_in_sample_ids", ]
+    expect_true(all(ledger$n_excluded == 18L))
+  }
+  small <- suppressWarnings(run_qtl2mr_batch(f$resources, f$pairs, fit_options = list(min_samples = 40L),
+    progress = FALSE, sample_rule = list(mode = "common_complete", sample_ids = keep)))
+  expect_true(all(small$errors$stage == "preflight"))
+  expect_true(all(grepl("too_few_samples", small$errors$error_message)))
+})
+
+test_that("batch-common exclusions only count traits of valid pairs", {
+  f <- v050_batch_fixture()
+  f$resources$pheno$broken <- NA_real_
+  f$resources$pheno$broken[1:20] <- 1
+  f$pairs <- rbind(f$pairs, data.frame(exposure = "absent", outcome = "broken"))
+  b <- run_qtl2mr_batch(f$resources, f$pairs, sample_policy = "batch_common_complete",
+    fit_options = f$options, progress = FALSE)
+  expect_identical(b$main_results$status, c(rep("ok", 4L), "error"))
+  other <- b$sample_exclusions[b$sample_exclusions$reason == "nonfinite_other_batch_trait" &
+    b$sample_exclusions$pair_id == "x__to__y", ]
+  expect_identical(other$n_excluded, 3L)
+  expect_true(all(b$main_results$n_x_median[1:4] == 45))
+})
+
+test_that("only package-written tables are checksummed for resume", {
+  f <- v050_batch_fixture()
+  path <- tempfile("v050-user-files-")
+  first <- v050_run(f, path)
+  writeLines("a,b", file.path(path, "batch_user_notes.csv"))
+  expect_identical(v050_numbers(v050_run(f, path, resume = TRUE)), v050_numbers(first))
+  unlink(file.path(path, "batch_user_notes.csv"))
+  expect_identical(v050_numbers(v050_run(f, path, resume = TRUE)), v050_numbers(first))
+  record <- qtl2mr:::qtl2mr_read_pair_record(path, 1L, first$main_results$pair_id[[1L]],
+    readRDS(file.path(path, "batch_resume_state.rds"))$fingerprint)
+  expect_identical(record$main$theta, first$main_results$theta[[1L]])
+  expect_null(qtl2mr:::qtl2mr_read_pair_record(path, 1L, "another_pair", list()))
+})
+
+test_that("the resume fingerprint ignores probabilities at markers the run does not use", {
+  f <- v050_batch_fixture()
+  path <- tempfile("v050-unused-marker-")
+  first <- v050_run(f, path)
+  extra <- f
+  a <- extra$resources$allele_probs[["1"]]
+  b <- array(c(a, a[, , 1L]), c(dim(a)[1:2], 2L), list(dimnames(a)[[1L]], dimnames(a)[[2L]], c("m1", "unused")))
+  extra$resources$allele_probs[["1"]] <- b
+  expect_identical(qtl2mr:::qtl2mr_batch_fingerprint(f$resources, f$pairs, list(), markers = c("m1", "m2"))$data,
+    qtl2mr:::qtl2mr_batch_fingerprint(extra$resources, f$pairs, list(), markers = c("m1", "m2"))$data)
+})

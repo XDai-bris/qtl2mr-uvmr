@@ -709,3 +709,26 @@ test_that("n_workers splits work by exposure without changing results", {
   expect_length(list.files(file.path(out_dir, "batch_pair_records")), 3L)
   expect_true(file.exists(file.path(out_dir, "batch_main_results.csv")))
 })
+
+test_that("fail_fast publishes completed pairs and the failing pair before stopping", {
+  fixture <- make_nonestimable_batch_fixture(seed = 921L)
+  good_file <- tempfile("qtl2mr-good-locus-", fileext = ".csv")
+  utils::write.csv(fixture$selected[1L, ], good_file, row.names = FALSE)
+  pairs <- rbind(
+    data.frame(pair_id = "good", exposure = "x", outcome = "y", selected_loci_file = good_file),
+    data.frame(pair_id = "bad", exposure = "x", outcome = "y", selected_loci_file = fixture$pairs$selected_loci_file),
+    data.frame(pair_id = "later", exposure = "x", outcome = "y", selected_loci_file = good_file)
+  )
+  out_dir <- tempfile("qtl2mr-fail-fast-")
+  expect_error(run_qtl2mr_batch(fixture$resources, pairs, fit_options = list(diagnostic_bootstrap_B = 0L),
+    fail_fast = TRUE, output_dir = out_dir, progress = FALSE), "Pair bad failed \\(fail_fast = TRUE\\)")
+  partial <- utils::read.csv(file.path(out_dir, "batch_main_results.csv"), stringsAsFactors = FALSE)
+  expect_identical(partial$pair_id, c("good", "bad"))
+  expect_identical(partial$status, c("ok", "error"))
+  errors <- utils::read.csv(file.path(out_dir, "batch_errors.csv"), stringsAsFactors = FALSE)
+  expect_identical(errors$pair_id, "bad")
+  resumed <- run_qtl2mr_batch(fixture$resources, pairs, fit_options = list(diagnostic_bootstrap_B = 0L),
+    resume = TRUE, output_dir = out_dir, progress = FALSE)
+  expect_identical(resumed$main_results$status, c("ok", "error", "ok"))
+  expect_identical(resumed$run_manifest$n_pairs_resumed, 1L)
+})

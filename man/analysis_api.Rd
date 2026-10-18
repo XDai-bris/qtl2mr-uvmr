@@ -16,7 +16,7 @@ parts of the result.
 }
 \usage{
 run_qtl2mr_analysis(input, exposure = NULL, outcome = NULL,
-  output_dir = NULL, loci = NULL, overwrite = FALSE, make_html = TRUE,
+  adapter = NULL, output_dir = NULL, loci = NULL, overwrite = FALSE, make_html = TRUE,
   make_figures = TRUE, verbose = TRUE, diagnostic_bootstrap_B = 500L,
   diagnostic_bootstrap_seed = 1L,
   reported_estimator_policy = c("diagnostic_only", "strict_so", "auto_fallback"),
@@ -49,6 +49,8 @@ validate_qtl2_scan1coef(genoprobs, pheno, kinship = NULL,
 \item{input}{An object created by \code{\link{as_qtl2mr_prepared_input}()}.}
 \item{exposure, outcome}{Trait names; default to the names stored in
 \code{input}. They must differ.}
+\item{adapter}{Deprecated and ignored (with a warning) until 0.6.0. It keeps its
+0.4.x position so that positional calls still reach \code{output_dir}.}
 \item{output_dir}{Destination directory. If omitted, a new directory is created
 under \code{tempdir()}; set option \code{qtl2mr.output_root} or environment
 variable \code{QTL2MR_OUTPUT_ROOT} to use another root.}
@@ -84,8 +86,9 @@ left out at a time, and without the most influential leave-one-out loci.}
 messages and writes \code{logs/progress.log}; \code{"log"} only writes the log;
 \code{FALSE} disables both.}
 \item{...}{Advanced fit settings: \code{standardize_phenotypes} (default
-\code{TRUE}), \code{cross_cov_model} (default \code{"star"}) and \code{ridge}.
-The retired arguments \code{adapter}, \code{run_qtl2_validation},
+\code{TRUE}), \code{cross_cov_model} (default \code{"star"}) and \code{ridge};
+\code{engine}, \code{context_cache} and \code{fit_cache} are internal tuning
+hooks. The retired arguments \code{run_qtl2_validation},
 \code{run_heteroskedasticity} and \code{heteroskedasticity_B} are ignored with a
 warning until 0.6.0. Other names are an error.}
 \item{result}{A \code{qtl2mr_analysis_result}; for \code{report_qtl2mr_locus()}

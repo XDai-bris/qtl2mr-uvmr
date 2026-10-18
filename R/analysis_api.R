@@ -1749,6 +1749,7 @@ write_qtl2mr_results <- function(result,
 run_qtl2mr_analysis <- function(input,
                                 exposure = NULL,
                                 outcome = NULL,
+                                adapter = NULL,
                                 output_dir = NULL,
                                 loci = NULL,
                                 overwrite = FALSE,
@@ -1766,7 +1767,7 @@ run_qtl2mr_analysis <- function(input,
                                 progress = NULL,
                                 ...) {
   dots <- list(...)
-  retired <- c("adapter", "run_qtl2_validation", "run_heteroskedasticity", "heteroskedasticity_B")
+  retired <- c("run_qtl2_validation", "run_heteroskedasticity", "heteroskedasticity_B")
   allowed_dots <- c("standardize_phenotypes", "cross_cov_model", "ridge",
     "engine", "context_cache", "fit_cache")
   dot_names <- names(dots)
@@ -1776,7 +1777,9 @@ run_qtl2mr_analysis <- function(input,
     stop("Unknown, unnamed or duplicate analysis argument in ...; allowed: ",
       paste(allowed_dots, collapse = ", "), call. = FALSE)
   }
-  for (nm in intersect(dot_names, retired)) {
+  # adapter keeps its 0.4.x position so positional calls do not shift into output_dir.
+  ignored <- c(if (!is.null(adapter)) "adapter", intersect(dot_names, retired))
+  for (nm in ignored) {
     warning("run_qtl2mr_analysis(", nm, ") is deprecated in qtl2mr 0.5.0 and ignored; it will be removed in 0.6.0.",
       call. = FALSE)
   }

@@ -115,7 +115,7 @@ contiguous above-threshold region per chromosome). Each pair is fitted on the
 samples complete for both of its traits. If a run is interrupted, call it
 again with `resume = TRUE`: completed pairs are kept, the output folder may
 have been moved, and `n_workers` may differ. A resume is refused if the
-inputs, options or package version changed.
+inputs, options or qtl2mr code changed (for example after an upgrade).
 
 Batch defaults skip the Q simulation and bootstrap intervals; rerun pairs of
 interest with `run_qtl2mr_analysis()` for a full report.
@@ -194,11 +194,11 @@ per draw. On a laptop, the bundled 400-mouse, 40-locus example takes roughly
 | 0.4.x | 0.5.0 |
 |---|---|
 | `run_qtl2mr_batch(r, p)` | unchanged |
-| `run_qtl2mr_batch(r, p, sample_rule = list(mode = "batch_common_complete"))` | `run_qtl2mr_batch(r, p, sample_policy = "batch_common_complete")` |
+| `run_qtl2mr_batch(r, p, sample_rule = list(mode = "batch_common_complete"))` | `run_qtl2mr_batch(r, p, sample_policy = "batch_common_complete", min_sample_retention = 0)` (0.4.x had no retention gate here; the new default stops below 85% retention) |
 | `run_qtl2mr_batch_fast(r, p)` | `run_qtl2mr_batch(r, p, sample_policy = "batch_common_complete", on_nonestimable_locus = "drop")` |
 | `run_qtl2mr_batch_exact_grouped(r, p)` | `run_qtl2mr_batch(r, p)` |
 | `run_qtl2mr_batch_parallel_by_exposure(r, p, n_workers = k)` | `run_qtl2mr_batch(r, p, sample_policy = "batch_common_complete", on_nonestimable_locus = "drop", n_workers = k)` |
-| `run_qtl2mr_analysis(..., adapter = "prepared")` | drop `adapter` |
+| `run_qtl2mr_analysis(..., adapter = "prepared")` | drop `adapter` (still accepted with a warning) |
 
 The three old batch functions still work in 0.5.0 with a deprecation warning
 and give the same numbers; they will be removed in 0.6.0. Batch output folders

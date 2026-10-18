@@ -90,7 +90,10 @@ loss.}
 groups run in parallel with \code{parallel::mclapply()}, elsewhere they run
 sequentially. Results do not depend on \code{n_workers}.}
 \item{fail_fast}{Stop at the first failing pair instead of recording an error
-row and continuing.}
+row and continuing. Completed pairs and the failing pair are written to
+\code{output_dir} before the error is raised. With \code{n_workers > 1}, each
+worker stops at its first failure, but exposure groups already running in other
+workers finish first.}
 \item{resume}{Continue an earlier run in \code{output_dir}; see Details.}
 \item{force}{Replace existing batch outputs in \code{output_dir}. Only files
 written by \code{run_qtl2mr_batch()} are removed.}
@@ -98,7 +101,10 @@ written by \code{run_qtl2mr_batch()} are removed.}
 \item{progress}{Print one progress line per pair (or per exposure group when
 running in parallel).}
 \item{...}{Deprecated arguments \code{sample_rule} and \code{output_mode}, which
-are accepted with a warning until qtl2mr 0.6.0. Any other name is an error.}
+are accepted with a warning until qtl2mr 0.6.0. \code{sample_rule} cannot be
+combined with \code{sample_policy}; as in 0.4.x it applies no retention gate
+unless \code{min_sample_retention} is given, and its \code{sample_ids} restrict
+the samples of every pair. Any other name is an error.}
 }
 \details{
 \if{latex}{\out{\sloppy}}

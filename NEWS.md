@@ -10,17 +10,19 @@ errors, profile confidence intervals and Q statistics are unchanged from 0.4.x
 - `run_qtl2mr_batch()` is the single batch entry point. New arguments:
   `sample_policy` (`"pair_common_complete"`, default, or
   `"batch_common_complete"`), `on_nonestimable_locus` (`"fail"` or `"drop"`),
-  `min_sample_retention` (batch-common only), and `n_workers` (parallel by
-  exposure). `sample_rule`, `output_mode` and
+  `min_sample_retention` (batch-common only, default 0.85), and `n_workers`
+  (parallel by exposure). `sample_rule`, `output_mode` and
   `fit_options$drop_nonestimable_loci` are deprecated and mapped with a
-  warning.
+  warning; the deprecated `sample_rule` keeps the 0.4.x behaviour of no
+  retention gate unless `min_sample_retention` is supplied.
 - `run_qtl2mr_batch_fast()`, `run_qtl2mr_batch_exact_grouped()` and
   `run_qtl2mr_batch_parallel_by_exposure()` are deprecated thin wrappers that
   give the same numbers as before; they will be removed in 0.6.0. See the
   migration table in the README or `?run_qtl2mr_batch_fast`.
-- `run_qtl2mr_analysis()` no longer has `adapter`, `run_qtl2_validation`,
+- `run_qtl2mr_analysis()` no longer uses `adapter`, `run_qtl2_validation`,
   `run_heteroskedasticity` or `heteroskedasticity_B`; they had no effect and
-  are now ignored with a warning when supplied.
+  are now ignored with a warning when supplied. `adapter` keeps its position
+  so positional 0.4.x calls are unaffected.
 - No longer exported (internal or removed): `plan_qtl2mr_batch_exact_groups()`,
   `qtl2mr_subset_allele_probs_to_loci()`,
   `qtl2mr_make_common_complete_samples()`, `write_qtl2mr_batch_outputs()`,
@@ -34,8 +36,8 @@ errors, profile confidence intervals and Q statistics are unchanged from 0.4.x
 - Batch output layout: completed pairs are stored in `batch_pair_records/`; the
   exact-group planning tables and the per-exposure `by_exposure/` folders are
   no longer written. `batch_main_results.csv` drops the redundant
-  `sample_rule` column and ends with `sample_policy`. 0.4.x batch folders
-  cannot be resumed.
+  `sample_rule` column and ends with `sample_policy`. Block-cache files are
+  named with the pair index. 0.4.x batch folders cannot be resumed.
 - Single-analysis outputs no longer include the always-empty
   `qtl2_validation*.csv` and `heteroskedasticity_qc.csv`. Use
   `validate_qtl2_scan1coef()` for the optional qtl2 comparison.
@@ -48,7 +50,15 @@ errors, profile confidence intervals and Q statistics are unchanged from 0.4.x
   modified records or tables, are refused before anything is written. Pairs
   that failed are refitted on resume.
 - Invalid pairs become error rows under every sample policy; previously a
-  missing trait aborted a whole `batch_common_complete` run.
+  missing trait aborted a whole `batch_common_complete` run. The batch-common
+  sample set and `batch_sample_exclusions.csv` use only the valid pairs'
+  traits, and a `sample_ids` restriction is recorded as `not_in_sample_ids`.
+- With `fail_fast = TRUE` the completed pairs and the failing pair are written
+  before the error. If a parallel worker dies, the pairs it had finished are
+  kept and only its unfinished pairs are reported as errors.
+- The resume fingerprint covers founder probabilities only at the markers the
+  run uses, so starting a batch no longer serialises genome-wide probability
+  arrays; only package-written tables are checksummed.
 - The batch-common retention gate is checked before any output is written.
 - Exact-group planning was removed: shared fits were already reused through
   the fit cache, and planning saved about 5% of runtime in benchmarks, within
