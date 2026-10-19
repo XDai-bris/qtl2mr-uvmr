@@ -72,9 +72,14 @@ test_that("qtl2mr_example supports the public quick workflow and lite export", {
   expect_false(any(grepl("^/|^[A-Za-z]:[/\\\\]", manifest$path_relative)))
 
   warning_table <- qtl2mr_warnings(result)
-  expect_true("weak_block_first_stage" %in% warning_table$warning_id)
-  weak <- warning_table[warning_table$warning_id == "weak_block_first_stage", , drop = FALSE]
-  expect_false(any(grepl("Stock-Yogo", weak$message, fixed = TRUE)))
+  # Both example loci have block F_X above the guide value of 2.
+  expect_true(all(result$pilot$diagnostic_layer$per_locus$F_X_block >= 2))
+  expect_false("weak_block_first_stage" %in% warning_table$warning_id)
+  weak_result <- result$pilot
+  weak_result$diagnostic_layer$per_locus$F_X_block <- c(1.5, 3)
+  weak <- qtl2mr:::qtl2mr_warning_table(weak_result)
+  weak <- weak[weak$warning_id == "weak_block_first_stage", , drop = FALSE]
+  expect_identical(weak$message, "1 of 2 retained loci have block F_X < 2 (nominal p > 0.05 for the exposure).")
 
   lite_zip <- tempfile("qtl2mr-example-lite-", fileext = ".zip")
   lite <- export_qtl2mr_lite_result(result, dest_zip = lite_zip, max_file_mb = 10, include_rds = FALSE)

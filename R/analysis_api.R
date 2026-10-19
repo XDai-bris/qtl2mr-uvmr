@@ -702,7 +702,7 @@ qtl2mr_warning_catalog <- function() {
       "Exposure and outcome use their own complete samples; overlap is derived from harmonized sample IDs.",
       "Technical QC: raw-space candidate covariance is not used by the public estimator.",
       "The selected star-space covariance block may be numerically invalid and should be investigated before interpretation.",
-      "Founder-block denominator strength may be limited; this is a heuristic warning for multi-founder blocks.",
+      "Some loci have a weak founder-block first stage; weak blocks can make profile intervals too narrow.",
       "The theta-dependent second-order objective was not well bracketed or has an unbounded profile interval; the primary theta may be a weak-identification artifact.",
       "Leave-one-locus-out MR sensitivity did not complete for this run.",
       "Instrument-set sensitivity did not complete for this run.",
@@ -712,7 +712,7 @@ qtl2mr_warning_catalog <- function() {
       "Check data/overlap_qc.csv and logs/run.log to confirm overlap rates.",
       "Technical QC: raw-space candidate invalid; not used by primary estimator.",
       "Inspect PSD diagnostics and do not use invalid star-space blocks silently.",
-      "Weak denominator guide: all retained loci have block F below 10. This is a heuristic warning for founder-block denominators, not a Stock-Yogo calibrated failure. Interpret per-locus ratios and weak-instrument-sensitive diagnostics cautiously.",
+      "Inspect data/block_first_stage.csv and the instrument-set sensitivity. Block F_X is the joint Wald statistic of the 7 founder contrasts divided by 7; F_X < 2 means the locus does not reach nominal p = 0.05 for the exposure in this sample. It is a screening guide, not a calibrated coverage rule.",
       "Treat the primary second-order theta as unstable. Inspect Q(theta), profile CI, first-stage strength, and diagnostic comparators such as Two-step IVW before interpretation.",
       "Inspect logs/loo_mr_error.log; primary MR estimate may still be available.",
       "Inspect logs/instrument_sensitivity_error.log; primary MR estimate may still be available.",
@@ -1036,8 +1036,9 @@ qtl2mr_warning_table <- function(result, sample_policy = NULL) {
       "Some per-locus diagnostics are unavailable; inspect their status and note. Primary inference is not replaced by missing diagnostic estimates.")
   }
   if (!is.null(per_locus) && "F_X_block" %in% names(per_locus)) {
-    n_weak <- sum(per_locus$F_X_block < 10, na.rm = TRUE)
-    if (n_weak) add("weak_block_first_stage", "warning", sprintf("%d loci have block F_X < 10 heuristic threshold.", n_weak))
+    n_weak <- sum(per_locus$F_X_block < 2, na.rm = TRUE)
+    if (n_weak) add("weak_block_first_stage", "warning",
+      sprintf("%d of %d retained loci have block F_X < 2 (nominal p > 0.05 for the exposure).", n_weak, nrow(per_locus)))
   }
   if (!length(rows)) return(qtl2mr_enrich_warnings(NULL))
   qtl2mr_enrich_warnings(do.call(rbind, rows))
@@ -1165,6 +1166,18 @@ qtl2mr_hsq_line <- function(hsq) {
   }, character(1))
   sources <- unique(hsq$hsq_source)
   paste0(paste(parts[!is.na(parts)], collapse = "; "), " [", paste(sources, collapse = ", "), "; data/hsq.csv]")
+}
+
+# The report describes only the hsq sources actually used in this run.
+qtl2mr_hsq_report_note <- function(sources) {
+  notes <- c(
+    reml_null_model = "Values marked reml_null_model are estimated by REML under a null model with the intercept and covariates (no locus), using the kinship for that chromosome, and are then treated as fixed.",
+    user_supplied = "Values marked user_supplied were given by the user and are used as provided.",
+    no_kinship_ols = "Rows marked no_kinship_ols had no kinship, so the model is ordinary least squares and hsq is not used."
+  )
+  paste(c("hsq sets the kinship-based working covariance of each founder LMM.",
+    unname(notes[intersect(names(notes), sources)]),
+    "Per-chromosome values are in <code>data/hsq.csv</code>."), collapse = " ")
 }
 
 print.qtl2mr_analysis_result <- function(x, ...) {
@@ -1368,9 +1381,9 @@ write_qtl2mr_html_report <- function(result, file) {
     "<div class=\"primary\">", qtl2mr_html_table(primary_table, digits = 6), "</div>",
     paste0("<p class=\"section-note\">Numerical success does not establish 95% coverage or causal validity. Weak instruments, same-sample instrument selection and dependence between loci can invalidate nominal uncertainty. Other methods are diagnostic comparators, not automatic replacements.", raw_note, "</p>"),
     "<h2>QC and actionable warnings</h2>",
-    if (nrow(actionable)) c("<p class=\"section-note\">F&lt;10 is a heuristic for multi-founder block strength, not a calibrated Stock-Yogo cutoff.</p>", qtl2mr_html_table(actionable)) else "<p>No actionable warnings were recorded.</p>",
+    if (nrow(actionable)) c("<p class=\"section-note\">Block F_X is the joint Wald statistic of the 7 founder contrasts divided by 7; F_X &lt; 2 is nominal p &gt; 0.05 for the exposure. It is a screening guide, not a calibrated coverage rule.</p>", qtl2mr_html_table(actionable)) else "<p>No actionable warnings were recorded.</p>",
     if (nrow(hsq_view)) c("<h3>Polygenic background (null-model heritability)</h3>",
-      "<p class=\"section-note\">hsq sets the kinship-based working covariance of each founder LMM. It is estimated by REML under a null model with the intercept and covariates (no locus), using the kinship for that chromosome, and is then treated as fixed. Per-chromosome values are in <code>data/hsq.csv</code>.</p>",
+      paste0("<p class=\"section-note\">", qtl2mr_hsq_report_note(unique(hsq_view$source)), "</p>"),
       qtl2mr_html_table(hsq_view, digits = 4)) else "",
     if (nrow(method_table) || nrow(loo) || nrow(sensitivity)) c(
       "<h2>Methods and available sensitivities</h2>",
@@ -1613,7 +1626,7 @@ write_qtl2mr_results <- function(result,
     qtl2mr_write_figure_pair(file.path(figure_dir, "weak_denominator_dashboard"), {
       plot_block_first_stage_dashboard(block_first_stage)
     }, width = 2200, height = 1100, pdf_width = 11, pdf_height = 5.5)
-    add_fig("Weak-denominator dashboard", file.path(figure_dir, "weak_denominator_dashboard"), "Histogram and ranked view of block F_X heuristic diagnostics.")
+    add_fig("Weak-denominator dashboard", file.path(figure_dir, "weak_denominator_dashboard"), "Histogram and ranked view of block F_X with the F_X = 2 guide line.")
   }
   figure_manifest <- if (length(figure_rows)) do.call(rbind, figure_rows) else data.frame(label = character(), path = character(), format = character(), notes = character())
   if (nrow(figure_manifest)) {
@@ -1680,13 +1693,13 @@ write_qtl2mr_results <- function(result,
     main_result = "Primary overlap-aware second-order Founder GLS-IVW estimate",
     method_comparison = "Primary and diagnostic sensitivity/comparator estimates",
     per_locus_results = "Per-locus second-order diagnostic table",
-    block_first_stage = "Block first-stage heuristic diagnostics",
+    block_first_stage = "Per-locus block first-stage statistics (block F_X)",
     psd_qc = "Star-space and raw-space PSD diagnostics; raw-space is diagnostic only",
     overlap_qc = "Per-locus overlap counts, overlap fractions, and residual-correlation diagnostics",
     loo_mr = "Leave-one-locus-out MR sensitivity table",
     instrument_sensitivity = "Instrument-set sensitivity refit table",
     q_calibration = "Reported global Q heterogeneity p-value with chi-square and simulation-calibration fields",
-    first_stage_summary = "Summary of block F_X heuristic diagnostics",
+    first_stage_summary = "Summary of block F_X (guide threshold F_X = 2)",
     founder_residuals = "Descriptive founder residual localization diagnostics",
     founder_coordinate_ratios = "Diagnostic founder-coordinate Wald ratios",
     warnings = "Warnings with consequence and recommended action"

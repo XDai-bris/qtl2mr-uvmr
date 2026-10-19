@@ -608,12 +608,27 @@ qtl2mr_batch_owned_paths <- function(output_dir) {
   paths[file.exists(paths) | (!is.na(links) & nzchar(links))]
 }
 
+# Batch writes follow links, so a linked table or checkpoint could redirect a
+# write outside output_dir. Such folders are refused before anything is written.
+qtl2mr_batch_linked_paths <- function(output_dir) {
+  paths <- qtl2mr_batch_owned_paths(output_dir)
+  records <- qtl2mr_batch_records_dir(output_dir)
+  if (dir.exists(records)) paths <- c(paths, list.files(records, all.files = TRUE, no.. = TRUE, full.names = TRUE))
+  links <- Sys.readlink(paths)
+  paths[!is.na(links) & nzchar(links)]
+}
+
 qtl2mr_check_batch_destination <- function(output_dir, resume = FALSE, force = FALSE) {
   if (is.null(output_dir)) return(invisible(TRUE))
   if (!is.character(output_dir) || length(output_dir) != 1L || is.na(output_dir) || !nzchar(output_dir)) {
     stop("output_dir must be NULL or one directory path", call. = FALSE)
   }
   if (file.exists(output_dir) && !dir.exists(output_dir)) stop("output_dir exists and is not a directory", call. = FALSE)
+  linked <- qtl2mr_batch_linked_paths(output_dir)
+  if (length(linked)) {
+    stop("Batch output contains symbolic links (", paste(basename(linked), collapse = ", "),
+      "); qtl2mr does not write through links. Remove them or use a new output_dir.", call. = FALSE)
+  }
   occupied <- length(qtl2mr_batch_owned_paths(output_dir)) > 0L
   if (occupied && !isTRUE(resume) && !isTRUE(force)) {
     stop("Batch output already exists; use a new output_dir, resume = TRUE for the identical run, or force = TRUE to explicitly overwrite", call. = FALSE)

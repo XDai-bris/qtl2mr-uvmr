@@ -154,8 +154,8 @@ Only autosomal loci, continuous traits and additive covariates are supported.
   in `qtl2mr_method_comparison(result)` as diagnostics.
 - **`primary_reliable`.** A numerical check that the fit gave one bounded
   interval. It does not guarantee 95% coverage: with weak instruments
-  (block F below about 10, flagged as `weak_block_first_stage`) profile
-  intervals can be too narrow.
+  (see [Instrument strength](#instrument-strength)) profile intervals can be
+  too narrow.
 - **Heritability.** `data/hsq.csv` lists the null-model heritability used for
   each trait and chromosome. It sets how much the kinship term reweights the
   LMM; a value of 0 means kinship had no effect there.
@@ -163,6 +163,29 @@ Only autosomal loci, continuous traits and additive covariates are supported.
   recommended action.
 - **Overview.** `summary(result)` gives a one-row overview; `confidence_set_bounded`
   is `FALSE` when the confidence set reaches plus or minus infinity.
+
+## Instrument strength
+
+`F_X_block` is reported for every locus. It is the joint Wald statistic of the
+locus's seven founder contrasts on the exposure divided by its degrees of
+freedom, F = β̂ᵀΣ̂⁻¹β̂ / 7. When the locus has no effect on the exposure, 7·F
+is approximately chi-square with 7 degrees of freedom.
+
+- **F = 2** gives 7·F = 14, almost exactly the 5% critical value of χ²₇
+  (14.07): the founder effects on the exposure just reach nominal p ≈ 0.05.
+  This is a minimal signal, not the mark of a strong instrument. The warning
+  `weak_block_first_stage` lists how many retained loci have F_X < 2.
+- **Relation to LOD.** A LOD score converts to a likelihood-ratio chi-square
+  as 2·ln(10)·LOD ≈ 4.6·LOD, and in large samples this is close to the Wald
+  statistic, so F ≈ 4.6·LOD / 7 ≈ 0.66·LOD. A LOD threshold of 4 corresponds
+  to F ≈ 2.6, and F = 2 to LOD ≈ 3.0. This holds when the scan and the MR fit
+  use the same samples, covariates and kinship; otherwise it is only a rough
+  guide.
+- **Why not F > 10.** That rule comes from linear instrumental-variable
+  regression with one instrument and a chosen tolerance for bias. It was not
+  derived for a seven-degree-of-freedom founder block and is not calibrated
+  here. Weak blocks can make profile intervals too narrow; use the LOD
+  threshold and F to limit that risk, not as a coverage guarantee.
 
 ## Runtime
 

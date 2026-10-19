@@ -108,9 +108,10 @@ knitr::kable(actionable_warnings)
 The default `reported_estimator_policy = "diagnostic_only"` reports the
 Star-space second-order estimate only for a numerically acceptable, bounded
 fit. An unresolved or unbounded fit is left unreported; raw second-order and Two-step
-diagnostics remain inspectable. This fixture commonly shows
-`weak_block_first_stage`, a multi-founder heuristic rather than a
-Stock-Yogo-calibrated failure rule.
+diagnostics remain inspectable. Block F for each locus is in
+`data/block_first_stage.csv`; `weak_block_first_stage` is raised when a
+retained locus has F_X < 2, that is, its founder effects on the exposure do
+not reach nominal p = 0.05. Both loci here are above that guide.
 
 The default estimate is in **SD of outcome per SD of exposure**. A bounded
 fit does not guarantee 95% coverage: weak instruments, correlated loci and

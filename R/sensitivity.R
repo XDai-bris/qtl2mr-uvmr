@@ -213,7 +213,7 @@ qtl2mr_marker_metadata <- function(result) {
 
 qtl2mr_default_instrument_sets <- function(result,
                                           loo = NULL,
-                                          weak_f_threshold = 10,
+                                          weak_f_threshold = 2,
                                           top_n = c(10L, 25L, 50L),
                                           high_influence_n = 5L) {
   blocks <- qtl2mr_blocks_from_result(result)
@@ -249,7 +249,7 @@ qtl2mr_default_instrument_sets <- function(result,
 fit_instrument_set_sensitivity <- function(result,
                                            sets = NULL,
                                            loo = NULL,
-                                           weak_f_threshold = 10,
+                                           weak_f_threshold = 2,
                                            top_n = c(10L, 25L, 50L),
                                            allow_cross_cov = TRUE,
                                            ridge = 1e-10) {
@@ -326,7 +326,7 @@ plot_instrument_set_sensitivity <- function(sensitivity,
   invisible(d)
 }
 
-summarize_block_first_stage <- function(block_first_stage, threshold = 10) {
+summarize_block_first_stage <- function(block_first_stage, threshold = 2) {
   if (!is.data.frame(block_first_stage) || !"F_X_block" %in% names(block_first_stage)) {
     stop("block_first_stage must contain F_X_block", call. = FALSE)
   }
@@ -340,13 +340,13 @@ summarize_block_first_stage <- function(block_first_stage, threshold = 10) {
     median = stats::median(f, na.rm = TRUE),
     q75 = as.numeric(stats::quantile(f, 0.75, na.rm = TRUE)),
     max = max(f, na.rm = TRUE),
-    notes = "Threshold is heuristic for founder-block denominator strength.",
+    notes = "Block F_X is the joint Wald statistic of the 7 founder contrasts divided by 7; F_X < 2 is nominal p > 0.05 for the exposure.",
     stringsAsFactors = FALSE
   )
 }
 
 plot_block_first_stage_dashboard <- function(block_first_stage,
-                                             threshold = 10,
+                                             threshold = 2,
                                              main = "Block first-stage denominator dashboard",
                                              ...) {
   if (!is.data.frame(block_first_stage) || !"F_X_block" %in% names(block_first_stage)) {

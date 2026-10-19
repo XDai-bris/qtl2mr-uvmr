@@ -1,3 +1,27 @@
+# qtl2mr 0.6.0 (in development)
+
+## Fixes
+
+- `run_qtl2mr_batch()` refuses an output folder whose package-owned tables,
+  checkpoint or pair records are symbolic links, before writing anything.
+  Previously a resume or overwrite could write through such a link to a file
+  outside `output_dir`.
+- The weak-instrument guide is now block F_X < 2 instead of < 10. Block F_X is
+  the joint Wald statistic of the seven founder contrasts divided by 7, so
+  F_X = 2 is nominal p of about 0.05; the F > 10 rule was derived for single
+  instruments and is not calibrated for founder blocks. This changes when
+  `weak_block_first_stage` is raised, the `threshold` in
+  `first_stage_summary`, the dashboard guide line and the standard
+  instrument set, now `exclude_F_lt_2`. The warning now reads "k of m
+  retained loci have block F_X < 2". The README explains the scale and its
+  relation to LOD. The per-founder-coordinate ratio flag (one degree of
+  freedom) keeps its F < 10 rule.
+- The HTML report describes how hsq was obtained for the sources actually
+  used (REML null model, user supplied, or no kinship) instead of always
+  stating REML.
+- Continuous integration also runs on pull requests, and the optional qtl2
+  job now runs the from-qtl2 onboarding test.
+
 # qtl2mr 0.5.0
 
 This release slims the package to two workflows and folds in the unreleased

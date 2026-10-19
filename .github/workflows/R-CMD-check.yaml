@@ -1,8 +1,10 @@
 name: R-CMD-check
 
 on:
-  # Every pushed branch and tag is checked; manual runs remain available.
+  # Every pushed branch and tag and every pull request is checked; manual runs
+  # remain available.
   push:
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -57,6 +59,6 @@ jobs:
             any::testthat
             any::qtl2
           dependencies: '"hard"'
-      - name: Run optional qtl2 parity tests
+      - name: Run optional qtl2 parity and from-qtl2 onboarding tests
         shell: Rscript {0}
-        run: testthat::test_local(filter = "lmm-backend|qtl2-parity-kinship")
+        run: testthat::test_local(filter = "lmm-backend|qtl2-parity-kinship|v041-onboarding", stop_on_failure = TRUE)

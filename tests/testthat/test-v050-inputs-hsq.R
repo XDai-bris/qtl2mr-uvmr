@@ -76,7 +76,13 @@ test_that("boundary hsq estimates are flagged and written with the analysis", {
   expect_identical(written$role, c("exposure", "outcome"))
   expect_identical(written$hsq_source[[1L]], "user_supplied")
   expect_true(any(grepl("^Null-model hsq: ", readLines(file.path(out, "summary.md")))))
-  expect_true(any(grepl("Polygenic background", readLines(file.path(out, "report.html")))))
+  report <- paste(readLines(file.path(out, "report.html")), collapse = "\n")
+  expect_match(report, "Polygenic background")
+  expect_match(report, "Values marked user_supplied were given by the user", fixed = TRUE)
+  expect_match(report, "Values marked reml_null_model are estimated by REML", fixed = TRUE)
+  expect_false(grepl("no_kinship_ols had no kinship", report, fixed = TRUE))
+  expect_match(qtl2mr:::qtl2mr_hsq_report_note("no_kinship_ols"), "ordinary least squares")
+  expect_false(grepl("REML", qtl2mr:::qtl2mr_hsq_report_note("no_kinship_ols")))
 
   blocks <- result$pilot$locus_blocks
   blocks[[1]]$fit_y$hsq <- 0

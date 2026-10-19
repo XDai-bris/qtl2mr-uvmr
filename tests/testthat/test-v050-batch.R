@@ -263,3 +263,31 @@ test_that("the batch first-stage table matches the locus fits and error rows car
   expect_equal(first$F_X_block[first$pair_id == "x__to__y"],
     mr_block_first_stage_f(single$locus_blocks[[1L]]), tolerance = 1e-10)
 })
+
+test_that("linked batch outputs are refused before anything is written", {
+  skip_on_os("windows")
+  f <- v050_batch_fixture()
+  root <- tempfile("v050-links-")
+  path <- file.path(root, "run")
+  v050_run(f, path)
+  outside <- file.path(root, "outside.csv")
+  table <- file.path(path, "batch_main_results.csv")
+  expect_true(file.copy(table, outside))
+  expect_true(file.remove(table))
+  expect_true(file.symlink(outside, table))
+  before <- tools::md5sum(outside)
+  expect_error(v050_run(f, path, resume = TRUE), "symbolic links \\(batch_main_results.csv\\)")
+  expect_error(v050_run(f, path, force = TRUE), "symbolic links")
+  expect_identical(tools::md5sum(outside), before)
+  expect_identical(Sys.readlink(table), outside)
+
+  record_dir <- file.path(root, "records")
+  path2 <- file.path(root, "run2")
+  v050_run(f, path2)
+  record <- list.files(file.path(path2, "batch_pair_records"), full.names = TRUE)[[1L]]
+  dir.create(record_dir)
+  moved <- file.path(record_dir, basename(record))
+  expect_true(file.rename(record, moved))
+  expect_true(file.symlink(moved, record))
+  expect_error(v050_run(f, path2, resume = TRUE), basename(record), fixed = TRUE)
+})

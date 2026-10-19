@@ -13,7 +13,7 @@ refit_qtl2mr_subset(result, subset = NULL, reason = NULL,
   allow_cross_cov = TRUE, ridge = 1e-10, set_name = "custom")
 
 fit_instrument_set_sensitivity(result, sets = NULL, loo = NULL,
-  weak_f_threshold = 10, top_n = c(10L, 25L, 50L),
+  weak_f_threshold = 2, top_n = c(10L, 25L, 50L),
   allow_cross_cov = TRUE, ridge = 1e-10)
 }
 \arguments{
@@ -31,7 +31,9 @@ by \code{run_qtl2mr_analysis()} are built: the strongest loci by block F, loci
 with block F of at least \code{weak_f_threshold}, one chromosome left out at a
 time, and (when \code{loo} is given) without the most influential loci.}
 \item{loo}{Optional leave-one-locus-out table, \code{result$loo_mr}.}
-\item{weak_f_threshold}{Block F threshold used for the standard sets.}
+\item{weak_f_threshold}{Block F threshold used for the standard sets. Block F
+is the joint Wald statistic of the 7 founder contrasts divided by 7, so F = 2 is
+nominal p of about 0.05.}
 \item{top_n}{Sizes of the strongest-locus sets.}
 }
 \details{

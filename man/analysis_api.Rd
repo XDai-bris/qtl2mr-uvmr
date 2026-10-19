@@ -78,7 +78,7 @@ simulation for several loci. \code{"chisq"} avoids the simulation.}
 their seed. Each draw refits the model; see Details for runtime.}
 \item{run_loo_mr}{Run leave-one-locus-out refits.}
 \item{run_instrument_sensitivity}{Run refits on standard locus subsets: the
-strongest loci by block F, loci with block F of at least 10, one chromosome
+strongest loci by block F, loci with block F of at least 2, one chromosome
 left out at a time, and without the most influential leave-one-out loci.}
 \item{progress}{\code{NULL} follows \code{verbose}; \code{TRUE} prints progress
 messages and writes \code{logs/progress.log}; \code{"log"} only writes the log;
@@ -123,7 +123,7 @@ original units when both traits have one fitted SD.
 
 \code{primary_reliable = TRUE} means the numerical fit found a single bounded
 confidence interval. It does not guarantee coverage: with weak instruments
-(block F below about 10) profile intervals can be too narrow, and
+(block F_X below 2, nominal p > 0.05 for the exposure) profile intervals can be too narrow, and
 cross-locus dependence or selecting instruments in the same samples can also
 invalidate nominal uncertainty. When the confidence set is unbounded or has
 several pieces, the reported estimate is \code{NA} and the full set is in
