@@ -1,14 +1,15 @@
 test_that("analysis input must be prepared and retired arguments are rejected", {
   expect_error(run_qtl2mr_analysis(list(genoprobs = list()), exposure = "x", outcome = "y"),
-    "created by as_qtl2mr_prepared_input")
+    "created by as_qtl2mr_prepared_input\\(\\) or qtl2mr_pair_input")
   data("qtl2mr_example", package = "qtl2mr", envir = environment())
   ex <- qtl2mr_example
   input <- as_qtl2mr_prepared_input(ex$allele_probs, ex$pheno, ex$covar, ex$kinship,
     ex$marker_map, ex$selected_loci, ex$exposure, ex$outcome)
   for (retired in list(list(adapter = "prepared"), list(run_heteroskedasticity = FALSE),
-                       list(run_qtl2_validation = FALSE), list(heteroskedasticity_B = 10L))) {
+                       list(run_qtl2_validation = FALSE), list(heteroskedasticity_B = 10L),
+                       list(engine = "locus"), list(ridge = 0), list(context_cache = NULL))) {
     expect_error(do.call(run_qtl2mr_analysis, c(list(input, output_dir = tempfile()), retired)),
-      "Unknown, unnamed or duplicate")
+      "unused argument")
   }
   out <- tempfile("qtl2mr-positional-")
   result <- run_qtl2mr_analysis(input, "x", "y", out, loci = 1,

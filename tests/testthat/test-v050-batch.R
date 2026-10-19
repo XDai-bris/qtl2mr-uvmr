@@ -16,8 +16,9 @@ v050_batch_fixture <- function() {
   covar <- data.frame(z = rnorm(n), row.names = ids)
   map <- data.frame(marker = c("m1", "m2"), chr = c("1", "2"), pos = c(1, 1))
   scan <- matrix(c(6, 1, 1, 6), nrow = 2L, dimnames = list(c("m1", "m2"), c("x", "w")))
-  resources <- qtl2mr_prepare_resources(gp, NULL, pheno, covar, scan, map)
-  list(resources = resources,
+  resources <- qtl2mr_prepare_resources(gp, NULL, pheno, covar, map)
+  instruments <- qtl2mr_select_instruments(resources, scan, progress = FALSE)
+  list(resources = resources, instruments = instruments,
     pairs = data.frame(exposure = c("x", "x", "w", "w"), outcome = c("y", "v", "y", "v")),
     options = list(min_samples = 20L))
 }
@@ -36,31 +37,41 @@ v050_numbers <- function(batch) {
 }
 
 v050_run <- function(f, path, ...) {
-  run_qtl2mr_batch(f$resources, f$pairs, fit_options = f$options, output_dir = path,
-    progress = FALSE, ...)
+  do.call(run_qtl2mr_batch, c(list(f$resources, f$pairs, f$instruments, output_dir = path, progress = FALSE),
+    utils::modifyList(f$options, list(...))))
 }
 
 test_that("one batch entry point remains and retired arguments are rejected", {
   f <- v050_batch_fixture()
   ns <- getNamespaceExports("qtl2mr")
-  for (old in c("run_qtl2mr_batch_fast", "run_qtl2mr_batch_exact_grouped", "run_qtl2mr_batch_parallel_by_exposure")) {
+  for (old in c("run_qtl2mr_batch_fast", "run_qtl2mr_batch_exact_grouped", "run_qtl2mr_batch_parallel_by_exposure",
+                "qtl2mr_select_loci_from_scan", "qtl2mr_select_loci_for_traits")) {
     expect_false(old %in% ns)
   }
-  expect_error(run_qtl2mr_batch(f$resources, f$pairs, sample_rule = list(mode = "batch_common_complete")), "unused argument")
-  expect_error(run_qtl2mr_batch(f$resources, f$pairs, fit_options = list(drop_nonestimable_loci = TRUE)), "Unknown option")
-  pair_common <- run_qtl2mr_batch(f$resources, f$pairs, fit_options = f$options, progress = FALSE)
-  batch_common <- run_qtl2mr_batch(f$resources, f$pairs, sample_policy = "batch_common_complete",
-    fit_options = f$options, progress = FALSE)
-  expect_true(all(pair_common$main_results$status == "ok"))
-  expect_false(identical(v050_numbers(pair_common)$theta, v050_numbers(batch_common)$theta))
-  expect_true(all(pair_common$main_results$confidence_set_bounded))
-  expect_identical(utils::tail(names(pair_common$main_results), 2L), c("sample_policy", "confidence_set_bounded"))
+  expect_true(all(c("qtl2mr_select_instruments", "qtl2mr_pair_input") %in% ns))
+  expect_error(run_qtl2mr_batch(f$resources, f$pairs, f$instruments, sample_policy = "batch_common_complete"), "unused argument")
+  expect_error(run_qtl2mr_batch(f$resources, f$pairs, f$instruments, fit_options = list()), "unused argument")
+  expect_error(run_qtl2mr_batch(f$resources, f$pairs, f$instruments, force = TRUE), "unused argument")
+  expect_error(run_qtl2mr_batch(f$resources, f$pairs), "instruments is required")
+  for (column in c("instrument_trait", "lod_thresh", "exclude_chr", "max_loci", "selected_loci_file")) {
+    old_pairs <- f$pairs
+    old_pairs[[column]] <- "x"
+    expect_error(run_qtl2mr_batch(f$resources, old_pairs, f$instruments), "removed in qtl2mr 0.6.0")
+  }
+  scan <- matrix(1, 2, 1, dimnames = list(c("m1", "m2"), "x"))
+  expect_error(qtl2mr_prepare_resources(f$resources$allele_probs, NULL, f$resources$pheno, f$resources$covar, scan),
+    "qtl_scan is no longer part of resources")
+  batch <- run_qtl2mr_batch(f$resources, f$pairs, f$instruments, min_samples = 20L, progress = FALSE)
+  expect_true(all(batch$main_results$status == "ok"))
+  expect_true(all(batch$main_results$Q_p_method == "chisq"))
+  expect_true(all(batch$main_results$confidence_set_bounded))
+  expect_identical(utils::tail(names(batch$main_results), 2L), c("locus_fit_status", "runtime_sec"))
 })
 
 test_that("worker count does not change results", {
   f <- v050_batch_fixture()
-  serial <- run_qtl2mr_batch(f$resources, f$pairs, fit_options = f$options, progress = FALSE)
-  parallel <- run_qtl2mr_batch(f$resources, f$pairs, fit_options = f$options, n_workers = 2L, progress = FALSE)
+  serial <- run_qtl2mr_batch(f$resources, f$pairs, f$instruments, min_samples = 20L, progress = FALSE)
+  parallel <- run_qtl2mr_batch(f$resources, f$pairs, f$instruments, min_samples = 20L, n_workers = 2L, progress = FALSE)
   expect_identical(v050_numbers(parallel), v050_numbers(serial))
   if (identical(.Platform$OS.type, "unix")) expect_identical(parallel$run_manifest$parallel_backend, "parallel::mclapply")
 })
@@ -88,7 +99,7 @@ test_that("resume works in place, after moving the directory and with another wo
 
 test_that("interrupted runs resume from completed pair records", {
   f <- v050_batch_fixture()
-  reference <- v050_numbers(run_qtl2mr_batch(f$resources, f$pairs, fit_options = f$options, progress = FALSE))
+  reference <- v050_numbers(run_qtl2mr_batch(f$resources, f$pairs, f$instruments, min_samples = 20L, progress = FALSE))
   interrupt <- function(path, keep) {
     # Emulate a stop after `keep` pairs: tables were never published and the
     # checkpoint carries no table hashes, exactly as during a run.
@@ -134,7 +145,10 @@ test_that("changed inputs, options or files are refused without modifying the ch
   changed <- f
   changed$resources$pheno$x[1L] <- changed$resources$pheno$x[1L] + 0.01
   expect_error(v050_run(changed, path, resume = TRUE), "fingerprint changed")
-  expect_error(v050_run(f, path, resume = TRUE, sample_policy = "batch_common_complete"), "fingerprint changed")
+  expect_error(v050_run(f, path, resume = TRUE, heterogeneity_method = "none"), "fingerprint changed")
+  changed <- f
+  changed$instruments <- data.frame(exposure = c("x", "x", "w"), marker = c("m1", "m2", "m2"))
+  expect_error(v050_run(changed, path, resume = TRUE), "fingerprint changed")
   expect_error(v050_run(f, path), "already exists")
   expect_identical(v050_hashes(path), before)
 
@@ -164,56 +178,44 @@ test_that("changed inputs, options or files are refused without modifying the ch
   expect_error(v050_run(f, legacy, resume = TRUE), "fingerprint changed")
 })
 
-test_that("force replaces only package-owned batch outputs", {
+test_that("overwrite replaces only package-owned batch outputs", {
   f <- v050_batch_fixture()
-  path <- tempfile("v050-force-")
+  path <- tempfile("v050-overwrite-")
   v050_run(f, path)
   writeLines("keep me", file.path(path, "notes.txt"))
   dir.create(file.path(path, "by_exposure"))
   changed <- f
   changed$options$standardize_phenotypes <- FALSE
-  rerun <- v050_run(changed, path, force = TRUE)
+  rerun <- v050_run(changed, path, overwrite = TRUE)
   expect_true(all(rerun$main_results$status == "ok"))
   expect_identical(readLines(file.path(path, "notes.txt")), "keep me")
   expect_false(dir.exists(file.path(path, "by_exposure")))
   expect_identical(v050_numbers(v050_run(changed, path, resume = TRUE)), v050_numbers(rerun))
 })
 
-test_that("batch-common retention gate stops before writing any output", {
+test_that("invalid pairs become error rows", {
   f <- v050_batch_fixture()
-  path <- tempfile("v050-gate-")
-  expect_error(v050_run(f, path, sample_policy = "batch_common_complete", min_sample_retention = 0.99),
-    "min_sample_retention")
-  expect_false(dir.exists(path))
-  ok <- v050_run(f, path, sample_policy = "batch_common_complete", min_sample_retention = 0.9)
-  expect_identical(ok$sample_qc$sample_retention_gate_status, "pass")
-  expect_identical(unique(ok$main_results$sample_policy), "batch_common_complete")
-  expect_identical(ok$run_manifest$sample_retention_min, 0.9)
+  f$pairs <- rbind(f$pairs, data.frame(exposure = c("absent", "x", "y"), outcome = c("y", "x", "x")))
+  b <- run_qtl2mr_batch(f$resources, f$pairs, f$instruments, min_samples = 20L, progress = FALSE)
+  expect_identical(b$main_results$status, c(rep("ok", 4L), "error", "error", "error"))
+  expect_match(b$main_results$error_message[[5L]], "no_instruments")
+  expect_match(b$main_results$error_message[[6L]], "must be different traits")
+  expect_match(b$main_results$error_message[[7L]], "no_instruments: instruments has no selected loci for exposure y")
+  expect_identical(names(b$main_results), names(qtl2mr:::qtl2mr_empty_batch_table("main_results")))
 })
 
-test_that("invalid pairs become error rows in every sample policy", {
-  f <- v050_batch_fixture()
-  f$pairs <- rbind(f$pairs, data.frame(exposure = c("absent", "x"), outcome = c("y", "x")))
-  for (policy in c("pair_common_complete", "batch_common_complete")) {
-    b <- run_qtl2mr_batch(f$resources, f$pairs, sample_policy = policy, fit_options = f$options, progress = FALSE)
-    expect_identical(b$main_results$status, c(rep("ok", 4L), "error", "error"))
-    expect_match(b$main_results$error_message[[6L]], "must be different traits")
-    expect_identical(utils::tail(names(b$main_results), 2L), c("sample_policy", "confidence_set_bounded"))
-  }
-})
-
-test_that("batch-common exclusions only count traits of valid pairs", {
+test_that("sample exclusions are reported once per trait of the valid pairs", {
   f <- v050_batch_fixture()
   f$resources$pheno$broken <- NA_real_
   f$resources$pheno$broken[1:20] <- 1
   f$pairs <- rbind(f$pairs, data.frame(exposure = "absent", outcome = "broken"))
-  b <- run_qtl2mr_batch(f$resources, f$pairs, sample_policy = "batch_common_complete",
-    fit_options = f$options, progress = FALSE)
+  b <- run_qtl2mr_batch(f$resources, f$pairs, f$instruments, min_samples = 20L, progress = FALSE)
   expect_identical(b$main_results$status, c(rep("ok", 4L), "error"))
-  other <- b$sample_exclusions[b$sample_exclusions$reason == "nonfinite_other_batch_trait" &
-    b$sample_exclusions$pair_id == "x__to__y", ]
-  expect_identical(other$n_excluded, 3L)
-  expect_true(all(b$main_results$n_x_median[1:4] == 45))
+  expect_setequal(unique(b$sample_exclusions$trait), c("x", "w", "y", "v"))
+  v <- b$sample_exclusions[b$sample_exclusions$trait == "v" & b$sample_exclusions$reason == "nonfinite_value", ]
+  expect_identical(v$excluded_ids, "s1;s2;s3")
+  expect_equal(b$main_results$n_x_median, c(48, 48, 48, 48, NA))
+  expect_equal(b$main_results$n_y_median, c(48, 45, 48, 45, NA))
 })
 
 test_that("only package-written tables are checksummed for resume", {
@@ -238,30 +240,27 @@ test_that("the resume fingerprint ignores probabilities at markers the run does 
   a <- extra$resources$allele_probs[["1"]]
   b <- array(c(a, a[, , 1L]), c(dim(a)[1:2], 2L), list(dimnames(a)[[1L]], dimnames(a)[[2L]], c("m1", "unused")))
   extra$resources$allele_probs[["1"]] <- b
-  expect_identical(qtl2mr:::qtl2mr_batch_fingerprint(f$resources, f$pairs, list(), markers = c("m1", "m2"))$data,
-    qtl2mr:::qtl2mr_batch_fingerprint(extra$resources, f$pairs, list(), markers = c("m1", "m2"))$data)
+  instruments <- qtl2mr:::qtl2mr_normalize_instruments(f$instruments, f$resources)
+  expect_identical(qtl2mr:::qtl2mr_batch_fingerprint(f$resources, f$pairs, instruments, list(), markers = c("m1", "m2"))$data,
+    qtl2mr:::qtl2mr_batch_fingerprint(extra$resources, f$pairs, instruments, list(), markers = c("m1", "m2"))$data)
 })
 
-test_that("the batch first-stage table matches the locus fits and error rows carry NA bounds", {
+test_that("the batch locus table matches the locus fits and error rows carry NA bounds", {
   f <- v050_batch_fixture()
   f$pairs <- rbind(f$pairs, data.frame(exposure = "absent", outcome = "y"))
-  b <- run_qtl2mr_batch(f$resources, f$pairs, fit_options = f$options, progress = FALSE)
-  first <- b$first_stage_summary
-  expect_true(all(c("F_X_block", "F_Y_block", "partial_R2_X_block", "hsq_x", "hsq_y",
-    "hsq_status_x", "hsq_status_y") %in% names(first)))
-  expect_true(all(is.finite(first$F_X_block) & first$F_X_block > 0))
-  expect_true(all(first$partial_R2_X_block >= 0 & first$partial_R2_X_block <= 1))
-  expect_true(all(first$hsq_status_x == "not_applicable"))
+  b <- run_qtl2mr_batch(f$resources, f$pairs, f$instruments, min_samples = 20L, progress = FALSE)
+  loci <- b$locus_results
+  expect_identical(names(loci), names(qtl2mr:::qtl2mr_empty_batch_table("locus_results")))
+  expect_true(all(is.finite(loci$F_X_block) & loci$F_X_block > 0))
+  expect_true(all(loci$partial_R2_X_block >= 0 & loci$partial_R2_X_block <= 1))
+  expect_identical(loci$steiger_pass, loci$partial_R2_X_block >= loci$partial_R2_Y_block)
+  expect_true(all(is.na(loci$hsq_x)))
   expect_true(is.na(b$main_results$confidence_set_bounded[b$main_results$status == "error"]))
 
-  input <- as_qtl2mr_prepared_input(f$resources$allele_probs, f$resources$pheno, f$resources$covar,
-    marker_map = f$resources$marker_map, selected_loci = "m1", exposure = "x", outcome = "y",
-    exposure_samples = qtl2mr:::qtl2mr_make_common_complete_samples(f$resources, "x", "y", "1"),
-    outcome_samples = qtl2mr:::qtl2mr_make_common_complete_samples(f$resources, "x", "y", "1"))
-  single <- qtl2mr:::run_prepared_qtl2mr(input, "x", "y", verbose = FALSE,
-    heterogeneity_method = "none", diagnostic_bootstrap_B = 0L)
-  expect_equal(first$F_X_block[first$pair_id == "x__to__y"],
-    mr_block_first_stage_f(single$locus_blocks[[1L]]), tolerance = 1e-10)
+  single <- qtl2mr:::run_prepared_qtl2mr(qtl2mr_pair_input(f$resources, f$instruments, "x", "y"), "x", "y",
+    verbose = FALSE, heterogeneity_method = "none", diagnostic_bootstrap_B = 0L)
+  expect_identical(loci$F_X_block[loci$pair_id == "x__to__y"], mr_block_first_stage_f(single$locus_blocks[[1L]]))
+  expect_identical(loci$F_X_block[loci$pair_id == "x__to__y"], f$instruments$F_X_block[f$instruments$exposure == "x"])
 })
 
 test_that("linked batch outputs are refused before anything is written", {
@@ -277,7 +276,7 @@ test_that("linked batch outputs are refused before anything is written", {
   expect_true(file.symlink(outside, table))
   before <- tools::md5sum(outside)
   expect_error(v050_run(f, path, resume = TRUE), "symbolic links \\(batch_main_results.csv\\)")
-  expect_error(v050_run(f, path, force = TRUE), "symbolic links")
+  expect_error(v050_run(f, path, overwrite = TRUE), "symbolic links")
   expect_identical(tools::md5sum(outside), before)
   expect_identical(Sys.readlink(table), outside)
 
@@ -290,4 +289,15 @@ test_that("linked batch outputs are refused before anything is written", {
   expect_true(file.rename(record, moved))
   expect_true(file.symlink(moved, record))
   expect_error(v050_run(f, path2, resume = TRUE), basename(record), fixed = TRUE)
+})
+
+test_that("instruments of exposures outside the run do not block a resume", {
+  f <- v050_batch_fixture()
+  path <- tempfile("v050-unused-exposure-")
+  first <- v050_run(f, path)
+  unused <- f
+  unused$instruments <- data.frame(exposure = c("x", "w", "y"), marker = c("m1", "m2", "m1"))
+  again <- v050_run(unused, path, resume = TRUE)
+  expect_identical(again$run_manifest$n_pairs_resumed, 4L)
+  expect_identical(v050_numbers(again), v050_numbers(first))
 })

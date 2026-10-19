@@ -48,7 +48,8 @@ test_that("null-model hsq is reported per role and chromosome and appended to ou
   expect_identical(hsq$markers, c("m1;m2", "m1;m2"))
   expect_true(all(hsq$hsq_source == "reml_null_model"))
   expect_equal(hsq$hsq, c(fit$locus_blocks[[1]]$fit_x$hsq, fit$locus_blocks[[1]]$fit_y$hsq))
-  expect_identical(utils::tail(names(fit$summary), 2L), c("sample_policy", "confidence_set_bounded"))
+  expect_identical(utils::tail(names(fit$summary), 1L), "confidence_set_bounded")
+  expect_false(any(c("sample_policy", "theta_so", "se_so", "ci_lower_so", "ci_upper_so") %in% names(fit$summary)))
 
   user <- v050_input()
   user$hsq <- 0.3
@@ -103,15 +104,13 @@ test_that("samples without a covariate row are reported like non-finite covariat
   expect_true("incomplete_covariates" %in% qtl2mr:::qtl2mr_warning_table(fit)$warning_id)
 })
 
-test_that("batch warnings describe the shared batch sample policy", {
+test_that("warnings state that exposure and outcome use their own samples", {
   input <- do.call(as_qtl2mr_prepared_input, v050_input())
   fit <- qtl2mr:::run_prepared_qtl2mr(input, "x", "y", verbose = FALSE,
     diagnostic_bootstrap_B = 0L, heterogeneity_method = "none")
   single <- qtl2mr:::qtl2mr_warning_table(fit)
-  batch <- qtl2mr:::qtl2mr_warning_table(fit, sample_policy = "batch_common_complete")
   expect_true("prepared_overlap_engine" %in% single$warning_id)
-  expect_false("prepared_overlap_engine" %in% batch$warning_id)
-  expect_match(batch$message[batch$warning_id == "batch_shared_samples"], "batch_common_complete")
+  expect_false("batch_shared_samples" %in% qtl2mr:::qtl2mr_warning_catalog()$warning_id)
 })
 
 test_that("confidence_set_bounded reflects every confidence-set type", {

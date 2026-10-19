@@ -6,7 +6,7 @@ test_that("unknown analysis options fail before creating outputs", {
     exposure = "x", outcome = "y")
   dest <- tempfile("qtl2mr-typo-")
   expect_error(run_qtl2mr_analysis(input, output_dir = dest,
-    standardize_phenotpyes = FALSE), "Unknown")
+    standardize_phenotpyes = FALSE), "unused argument")
   expect_false(file.exists(dest))
 })
 

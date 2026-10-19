@@ -192,7 +192,6 @@ test_that("single prepared covariate exclusions are warned without changing samp
   input <- do.call(as_qtl2mr_prepared_input, raw)
   expect_warning(fit <- qtl2mr:::run_prepared_qtl2mr(input, "x", "y", verbose = FALSE,
     diagnostic_bootstrap_B = 0L, heterogeneity_method = "none"), "Missing covariate rows or non-finite covariate values")
-  expect_identical(fit$summary$sample_policy, "role_specific_complete")
   expect_true(all(fit$sample_alignment$n_incomplete_covar == 1L))
   expect_false(rownames(raw$covar)[2] %in% fit$locus_blocks[[1]]$fit_x$sample_ids)
   expect_false(rownames(raw$covar)[2] %in% fit$locus_blocks[[1]]$fit_y$sample_ids)

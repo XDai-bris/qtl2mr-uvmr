@@ -171,10 +171,10 @@ list, and harmonized chromosome-specific LOCO kinship. The companion
 explains which choices are yours. A missing selected-locus list no longer
 means "use every marker".
 The single-pair workflow uses separate usable samples for X and Y and models
-their overlap. For many pairs, `run_qtl2mr_batch()` fits each pair on the
-samples complete for both of its traits by default
-(`sample_policy = "pair_common_complete"`); restricting the single analysis to
-those samples reproduces the batch estimate exactly.
+their overlap. For many pairs, `qtl2mr_select_instruments()` builds one
+instrument set per exposure and `run_qtl2mr_batch()` fits every pair in the
+same way, so a batch row equals the single analysis of that pair with the same
+instruments and options.
 
 ```{r cleanup, include=FALSE}
 unlink(result_dir, recursive = TRUE, force = TRUE)

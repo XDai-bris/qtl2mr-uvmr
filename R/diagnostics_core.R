@@ -102,6 +102,52 @@ mr_block_first_stage_f <- function(block, ridge = 1e-10) {
   as.numeric(t(bx) %*% Sx_inv %*% bx) / length(bx)
 }
 
+# Per-locus first-stage strength of fitted MR blocks. Block F is the joint Wald
+# statistic of the founder contrasts divided by their number; partial R2 converts
+# it with the residual degrees of freedom of that role's fit. steiger_pass is TRUE
+# when the locus explains at least as much exposure as outcome variance.
+qtl2mr_locus_first_stage <- function(blocks, ridge = 1e-10) {
+  if (!length(blocks)) {
+    return(data.frame(marker = character(), chr = character(), F_X_block = numeric(),
+      F_Y_block = numeric(), partial_R2_X_block = numeric(), partial_R2_Y_block = numeric(),
+      steiger_pass = logical(), n_x = integer(), n_y = integer(), df_x = numeric(), df_y = numeric(),
+      hsq_x = numeric(), hsq_y = numeric(), stringsAsFactors = FALSE))
+  }
+  r2 <- function(F_value, k, df) {
+    if (!is.finite(F_value) || !is.finite(df) || df <= 0) return(NA_real_)
+    F_value * k / (F_value * k + df)
+  }
+  out <- do.call(rbind, lapply(seq_along(blocks), function(i) {
+    b <- blocks[[i]]
+    k <- length(b$beta_x)
+    F_x <- tryCatch(mr_block_first_stage_f(b, ridge = ridge), error = function(e) NA_real_)
+    F_y <- tryCatch(mr_block_first_stage_f(list(beta_x = b$beta_y, Sigma_x = b$Sigma_y), ridge = ridge),
+      error = function(e) NA_real_)
+    df_x <- as.numeric(b$fit_x$df %||% NA_real_)
+    df_y <- as.numeric(b$fit_y$df %||% NA_real_)
+    r2_x <- r2(F_x, k, df_x)
+    r2_y <- r2(F_y, k, df_y)
+    data.frame(
+      marker = b$marker %||% names(blocks)[[i]],
+      chr = as.character(b$chr %||% NA_character_),
+      F_X_block = F_x,
+      F_Y_block = F_y,
+      partial_R2_X_block = r2_x,
+      partial_R2_Y_block = r2_y,
+      steiger_pass = if (is.finite(r2_x) && is.finite(r2_y)) r2_x >= r2_y else NA,
+      n_x = as.integer(b$O_xy_summary$n_x %||% b$fit_x$n %||% NA_integer_),
+      n_y = as.integer(b$O_xy_summary$n_y %||% b$fit_y$n %||% NA_integer_),
+      df_x = df_x,
+      df_y = df_y,
+      hsq_x = as.numeric(b$fit_x$hsq %||% NA_real_),
+      hsq_y = as.numeric(b$fit_y$hsq %||% NA_real_),
+      stringsAsFactors = FALSE
+    )
+  }))
+  rownames(out) <- NULL
+  out
+}
+
 mr_block_so_diagnostics <- function(block,
                                     theta = NULL,
                                     H = NULL,

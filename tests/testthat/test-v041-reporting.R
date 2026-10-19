@@ -20,7 +20,7 @@ test_that("reports distinguish the Q statistic, p-value and reference", {
   s <- qtl2mr_primary_result(result)
   txt <- paste(readLines(file.path(result$output_dir, "summary.md")), collapse = "\n")
   html <- paste(readLines(file.path(result$output_dir, "report.html")), collapse = "\n")
-  for (label in c("Q statistic", "Q p-value", "Q reference", "Sample policy")) {
+  for (label in c("Q statistic", "Q p-value", "Q reference")) {
     expect_match(txt, label, fixed = TRUE)
     expect_match(html, label, fixed = TRUE)
   }
@@ -28,7 +28,6 @@ test_that("reports distinguish the Q statistic, p-value and reference", {
   expect_match(txt, paste0("Q statistic: ", qtl2mr:::qtl2mr_fmt_num(s$Q, 6)), fixed = TRUE)
   expect_match(txt, paste0("Q p-value: ", qtl2mr:::qtl2mr_fmt_num(s$Q_p_reported, 6)), fixed = TRUE)
   expect_match(html, "chi-square; df=", fixed = TRUE)
-  expect_identical(s$sample_policy, "role_specific_complete")
   expect_false("diagnostic_unavailable" %in% qtl2mr_warnings(result)$warning_id)
 })
 

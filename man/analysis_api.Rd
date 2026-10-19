@@ -161,14 +161,15 @@ every file.
 \code{theta_reported}, \code{se_reported}, \code{reported_ci_lower},
 \code{reported_ci_upper}, \code{reported_estimator} and
 \code{reported_estimator_reason} (the reported result);
-\code{theta_so}, \code{se_so} and \code{profile_ci_lower}/\code{upper} (the raw
+\code{theta}, \code{se} and \code{profile_ci_lower}/\code{upper} (the raw
 second-order fit); \code{primary_reliable}, \code{confidence_set_type},
 \code{confidence_set_bounded} and \code{inference_status}; \code{effect_units} and \code{theta_raw_units};
 \code{n_loci}, \code{n_x_median}, \code{n_y_median} and
 \code{n_overlap_median}; \code{Q}, \code{Q_p_reported} and \code{Q_p_method};
 comparator estimates (\code{theta_two_step_ivw},
 \code{theta_weighted_median}, \code{theta_weighted_mode},
-\code{theta_independence}); and \code{sample_policy}.
+\code{theta_independence}); and \code{n_loci_steiger_fail}, the number of loci
+whose exposure partial R2 is below the outcome partial R2.
 
 \code{summary()} returns a one-row overview with \code{exposure},
 \code{outcome}, \code{n_samples}, \code{n_loci}, the reported \code{estimate},
@@ -177,8 +178,7 @@ comparator estimates (\code{theta_two_step_ivw},
 \code{effect_units}, \code{reported_estimator}, \code{primary_reliable},
 \code{confidence_set_type} and \code{confidence_set_bounded} (which describe
 the second-order profile set), \code{Q}, \code{Q_p}, \code{Q_p_method},
-\code{sample_policy} and \code{warnings} (IDs of warnings shown in the
-report).
+and \code{warnings} (IDs of warnings shown in the report).
 \code{qtl2mr_warnings()}, \code{qtl2mr_method_comparison()} and
 \code{qtl2mr_output_paths()} return data frames. \code{report_qtl2mr_locus()}
 invisibly returns the locus report directory, \code{export_qtl2mr_lite_result()}

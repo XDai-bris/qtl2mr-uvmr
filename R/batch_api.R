@@ -11,13 +11,16 @@ qtl2mr_prepare_resources <- function(allele_probs,
                                      kinship,
                                      pheno,
                                      covar,
-                                     qtl_scan = NULL,
                                      marker_map = NULL,
                                      metadata = list(),
                                      probability_policy = c("normalize_rounding", "strict")) {
   probability_policy <- match.arg(probability_policy)
   if (!is.list(allele_probs) || !length(allele_probs)) {
     stop("allele_probs must be a non-empty qtl2-style list", call. = FALSE)
+  }
+  # Before 0.6.0 the fifth argument was the QTL scan.
+  if (is.matrix(marker_map) && is.numeric(marker_map)) {
+    stop("qtl_scan is no longer part of resources; pass the scan to qtl2mr_select_instruments()", call. = FALSE)
   }
   if (is.null(marker_map)) marker_map <- qtl2mr_marker_map_from_genoprobs(allele_probs)
   qtl2mr_validate_ids(rownames(pheno), "pheno row names")
@@ -44,7 +47,6 @@ qtl2mr_prepare_resources <- function(allele_probs,
     kinship = kinship,
     pheno = pheno,
     covar = covar,
-    qtl_scan = qtl_scan,
     marker_map = marker_map,
     sample_ids = gp_ids,
     metadata = metadata,
@@ -66,27 +68,25 @@ qtl2mr_validate_lod_thresh <- function(lod_thresh) {
   as.numeric(lod_thresh)
 }
 
-qtl2mr_pair_lod_thresh <- function(pair, default) {
-  if (!"lod_thresh" %in% names(pair)) return(qtl2mr_validate_lod_thresh(default))
-  value <- pair$lod_thresh
-  # An absent per-pair value inherits the validated batch default. Any supplied
-  # non-missing value is validated rather than silently coerced or ignored.
-  if (length(value) == 1L && is.na(value) && (!is.numeric(value) || !is.nan(value))) {
-    return(qtl2mr_validate_lod_thresh(default))
+qtl2mr_check_count <- function(x, name, allow_null = FALSE) {
+  if (allow_null && is.null(x)) return(NULL)
+  if (!is.numeric(x) || length(x) != 1L || !is.finite(x) || x < 1 || x != as.integer(x)) {
+    stop(name, " must be a positive integer", call. = FALSE)
   }
-  qtl2mr_validate_lod_thresh(value)
+  as.integer(x)
 }
 
-qtl2mr_pair_max_loci <- function(pair, default) {
-  value <- if ("max_loci" %in% names(pair)) pair$max_loci else NULL
-  if (is.null(value) || (length(value) == 1L && is.na(value) && !is.nan(value))) return(default)
-  if (!is.numeric(value) || length(value) != 1L || !is.finite(value) || value < 1 || value != as.integer(value)) stop("max_loci must be a positive integer", call. = FALSE)
-  as.integer(value)
+qtl2mr_scan_traits <- function(qtl_scan) {
+  traits <- if (is.list(qtl_scan) && !is.data.frame(qtl_scan)) names(qtl_scan) else colnames(qtl_scan)
+  if (is.null(traits) || !length(traits) || anyNA(traits) || any(!nzchar(traits))) {
+    stop("qtl_scan has no trait names; pass exposures explicitly", call. = FALSE)
+  }
+  traits
 }
 
-qtl2mr_lod_vector_from_scan <- function(qtl_scan, instrument_trait) {
-  if (length(instrument_trait) != 1L || is.na(instrument_trait) || !nzchar(instrument_trait)) {
-    stop("instrument_trait must be one non-empty trait name", call. = FALSE)
+qtl2mr_lod_vector_from_scan <- function(qtl_scan, trait) {
+  if (length(trait) != 1L || is.na(trait) || !nzchar(trait)) {
+    stop("trait must be one non-empty trait name", call. = FALSE)
   }
   scan <- qtl_scan
   trait_validated_by_list <- FALSE
@@ -95,9 +95,9 @@ qtl2mr_lod_vector_from_scan <- function(qtl_scan, instrument_trait) {
     if (is.null(scan_names) || any(is.na(scan_names) | !nzchar(scan_names))) {
       stop("named-list qtl_scan must use non-empty trait names", call. = FALSE)
     }
-    idx <- which(scan_names == instrument_trait)
-    if (!length(idx)) stop("qtl_scan is missing instrument trait: ", instrument_trait, call. = FALSE)
-    if (length(idx) > 1L) stop("qtl_scan has duplicated instrument trait: ", instrument_trait, call. = FALSE)
+    idx <- which(scan_names == trait)
+    if (!length(idx)) stop("qtl_scan is missing trait: ", trait, call. = FALSE)
+    if (length(idx) > 1L) stop("qtl_scan has duplicated trait: ", trait, call. = FALSE)
     scan <- qtl_scan[[idx[[1L]]]]
     trait_validated_by_list <- TRUE
   }
@@ -117,17 +117,17 @@ qtl2mr_lod_vector_from_scan <- function(qtl_scan, instrument_trait) {
       if (anyDuplicated(trait_names)) {
         stop("multi-column qtl_scan has duplicated trait column names", call. = FALSE)
       }
-      idx <- match(instrument_trait, trait_names)
-      if (is.na(idx)) stop("qtl_scan is missing instrument trait: ", instrument_trait, call. = FALSE)
+      idx <- match(trait, trait_names)
+      if (is.na(idx)) stop("qtl_scan is missing trait: ", trait, call. = FALSE)
       lod <- as.numeric(scan[, idx])
     } else {
       if (!is.null(trait_names) && length(trait_names) && !is.na(trait_names[[1L]]) && nzchar(trait_names[[1L]])) {
-        if (!isTRUE(trait_validated_by_list) && !identical(trait_names[[1L]], instrument_trait)) {
-          stop("single-column qtl_scan trait name does not match instrument_trait: ", instrument_trait, call. = FALSE)
+        if (!isTRUE(trait_validated_by_list) && !identical(trait_names[[1L]], trait)) {
+          stop("single-column qtl_scan trait name does not match the requested trait: ", trait, call. = FALSE)
         }
       } else {
         warning(
-          "single-column qtl_scan has no trait column name; instrument_trait could not be validated",
+          "single-column qtl_scan has no trait column name; the trait could not be validated",
           call. = FALSE
         )
       }
@@ -146,240 +146,326 @@ qtl2mr_lod_vector_from_scan <- function(qtl_scan, instrument_trait) {
   lod
 }
 
-qtl2mr_select_loci_from_scan <- function(qtl_scan,
-                                         marker_map,
-                                         instrument_trait,
-                                         lod_thresh = 4,
-                                         exclude_chr = "X",
-                                         max_loci = NULL) {
-  lod_thresh <- qtl2mr_validate_lod_thresh(lod_thresh)
-  lod <- qtl2mr_lod_vector_from_scan(qtl_scan, instrument_trait)
-  mm <- qtl2mr_marker_map_table(marker_map)
+# LOD peaks of one trait: the maximum of each contiguous above-threshold region,
+# defined in map order within a chromosome, never across a chromosome boundary.
+qtl2mr_scan_candidates <- function(qtl_scan, marker_map, trait, lod_thresh, exclude_chr) {
+  lod <- qtl2mr_lod_vector_from_scan(qtl_scan, trait)
+  mm <- marker_map
   map_idx <- match(names(lod), mm$marker)
   if (anyNA(map_idx)) stop("marker_map is missing qtl_scan markers", call. = FALSE)
-  if (!is.null(max_loci) && (length(max_loci) != 1L || !is.numeric(max_loci) || !is.finite(max_loci) || max_loci < 1 || max_loci != as.integer(max_loci))) stop("max_loci must be a positive integer", call. = FALSE)
-  # Islands are defined in map order within a chromosome, never across a
-  # boundary in the concatenated scan matrix.
   peak_idx <- unlist(lapply(unique(mm$chr[map_idx]), function(chr) {
     idx <- which(mm$chr[map_idx] == chr)
     pos <- mm$pos[map_idx[idx]]
     if (all(is.finite(pos))) idx <- idx[order(pos, map_idx[idx])]
     idx[qtl2mr_get_tophits(lod[idx], lod_thresh = lod_thresh)]
   }), use.names = FALSE)
-  if (!length(peak_idx)) {
-    return(data.frame(instrument_trait = character(), marker = character(), chr = character(), pos = numeric(),
-                      exposure_lod = numeric(), locus_rank = integer(),
-                      selected_by = character(), lod_thresh = numeric(),
-                      excluded_chr_rule = character(), stringsAsFactors = FALSE))
-  }
   idx <- match(names(lod)[peak_idx], mm$marker)
-  selected <- data.frame(
-    marker = names(lod)[peak_idx],
-    chr = mm$chr[idx],
-    pos = if ("pos" %in% names(mm)) mm$pos[idx] else peak_idx,
-    exposure_lod = as.numeric(lod[peak_idx]),
-    stringsAsFactors = FALSE
-  )
-  selected <- selected[!is.na(selected$chr), , drop = FALSE]
-  if (!is.null(exclude_chr) && length(exclude_chr)) {
-    selected <- selected[!selected$chr %in% as.character(exclude_chr), , drop = FALSE]
-  }
-  selected <- selected[order(selected$exposure_lod, decreasing = TRUE), , drop = FALSE]
-  if (!is.null(max_loci)) selected <- utils::head(selected, as.integer(max_loci))
-  selected$locus_rank <- seq_len(nrow(selected))
-  selected$instrument_trait <- instrument_trait
-  selected$selected_by <- "contiguous_lod_island_max"
-  selected$lod_thresh <- lod_thresh
-  selected$excluded_chr_rule <- paste(exclude_chr %||% character(), collapse = ",")
-  rownames(selected) <- NULL
-  selected[, c("instrument_trait", setdiff(names(selected), "instrument_trait")), drop = FALSE]
-}
-
-qtl2mr_select_loci_for_traits <- function(qtl_scan,
-                                          marker_map,
-                                          instrument_traits,
-                                          lod_thresh = 4,
-                                          exclude_chr = "X",
-                                          max_loci = NULL) {
-  if (is.null(instrument_traits) || !length(instrument_traits)) {
-    stop("instrument_traits must contain at least one trait name", call. = FALSE)
-  }
-  rows <- lapply(as.character(instrument_traits), function(trait) {
-    selected <- qtl2mr_select_loci_from_scan(
-      qtl_scan = qtl_scan,
-      marker_map = marker_map,
-      instrument_trait = trait,
-      lod_thresh = lod_thresh,
-      exclude_chr = exclude_chr,
-      max_loci = max_loci
-    )
-    if (!nrow(selected)) {
-      selected$instrument_trait <- character()
-      return(selected)
-    }
-    if (!"instrument_trait" %in% names(selected)) selected$instrument_trait <- trait
-    selected[, c("instrument_trait", setdiff(names(selected), "instrument_trait")), drop = FALSE]
-  })
-  out <- do.call(rbind, rows)
+  out <- data.frame(exposure = rep(trait, length(peak_idx)), marker = names(lod)[peak_idx],
+    chr = as.character(mm$chr[idx]), pos = mm$pos[idx], lod = as.numeric(lod[peak_idx]),
+    stringsAsFactors = FALSE)
+  out <- out[!out$chr %in% exclude_chr, , drop = FALSE]
+  out <- out[order(out$lod, decreasing = TRUE), , drop = FALSE]
   rownames(out) <- NULL
   out
 }
 
-qtl2mr_make_common_complete_samples <- function(resources,
-                                                exposure,
-                                                outcome,
-                                                selected_chr = NULL) {
-  pheno <- resources$pheno
-  covar <- resources$covar
-  ids <- Reduce(intersect, list(resources$sample_ids, rownames(pheno), if (is.null(covar)) resources$sample_ids else rownames(covar)))
-  if (!exposure %in% names(pheno)) stop("Exposure trait not found in pheno: ", exposure, call. = FALSE)
-  if (!outcome %in% names(pheno)) stop("Outcome trait not found in pheno: ", outcome, call. = FALSE)
-  if (!is.numeric(pheno[[exposure]]) || !is.numeric(pheno[[outcome]])) stop("Exposure and outcome phenotypes must be numeric", call. = FALSE)
-  if (!is.null(resources$kinship)) {
-    if (is.list(resources$kinship) && !is.matrix(resources$kinship) && !is.data.frame(resources$kinship)) {
-      for (chr in unique(as.character(selected_chr))) {
-        K <- resources$kinship[[chr]]
-        if (is.null(K)) stop("kinship list is missing selected chromosome: ", chr, call. = FALSE)
-        ids <- ids[ids %in% rownames(as.matrix(K)) & ids %in% colnames(as.matrix(K))]
-      }
-    } else {
-      K <- as.matrix(resources$kinship)
-      ids <- ids[ids %in% rownames(K) & ids %in% colnames(K)]
-    }
-  }
-  keep <- is.finite(pheno[ids, exposure]) & is.finite(pheno[ids, outcome])
-  if (!is.null(covar) && ncol(covar)) keep <- keep & qtl2mr_complete_rows(covar[ids, , drop = FALSE])
-  ids[keep]
+qtl2mr_is_autosome <- function(chr) {
+  !toupper(sub("^chr", "", as.character(chr), ignore.case = TRUE)) %in% c("X", "Y", "M", "MT")
 }
 
-qtl2mr_make_batch_common_complete_samples <- function(resources,
-                                                      traits,
-                                                      selected_chr = NULL) {
+# Prepared input built from resources, shared by instrument selection, batch
+# pairs and qtl2mr_pair_input() so that every route fits the same samples.
+qtl2mr_resources_input <- function(resources, selected_loci, exposure = NULL, outcome = NULL,
+                                   metadata = resources$metadata) {
+  as_qtl2mr_prepared_input(
+    allele_probs = resources$allele_probs, pheno = resources$pheno, covar = resources$covar,
+    kinship = resources$kinship, marker_map = resources$marker_map, selected_loci = selected_loci,
+    exposure = exposure, outcome = outcome, metadata = metadata %||% list(),
+    probability_policy = resources$probability_policy %||% "strict"
+  )
+}
+
+# Exposure founder LMM at each candidate locus, fitted exactly as in the MR stage
+# (same samples, covariates, LOCO kinship and null-model hsq), so F_X_block here
+# equals the block F_X of any pair using this exposure.
+qtl2mr_exposure_first_stage <- function(input, exposure, candidates, ridge = 1e-10) {
+  out <- qtl2mr_empty_first_stage(nrow(candidates))
+  if (!nrow(candidates)) return(out)
+  x <- qtl2mr_as_named_numeric(qtl2mr_prepared_trait(input, exposure), "exposure")
+  covar <- qtl2mr_prepared_covar(input)
+  ids <- qtl2mr_prepared_role_filter(input, "exposure")
+  contrasts <- make_founder_contrasts(dimnames(input$allele_probs[[1L]])[[2L]])
+  kinship <- input$kinship
+  for (chr in unique(candidates$chr)) {
+    rows <- which(candidates$chr == chr)
+    K <- if (is.list(kinship) && !is.matrix(kinship) && !is.data.frame(kinship)) kinship[[chr]] else kinship
+    fits <- tryCatch({
+      ctx <- qtl2mr_prepare_lmm_context_cached(pheno = x, kinship = K, addcovar = covar,
+        hsq = qtl2mr_prepared_hsq(input, chr, "exposure", exposure), sample_ids = ids,
+        standardize_pheno = TRUE, reml = TRUE, trait_name = exposure, chr = chr)
+      fit_founder_lmm_blocks_batch(input$allele_probs[[chr]], candidates$marker[rows], ctx, contrasts,
+        fallback_genoprobs = input$allele_probs, allow_marker_errors = TRUE, role = "exposure")
+    }, error = function(e) e)
+    for (j in seq_along(rows)) {
+      fit <- if (inherits(fits, "error")) {
+        qtl2mr_lmm_marker_error(candidates$marker[[rows[[j]]]], chr, "exposure", fits)
+      } else fits[[j]]
+      if (qtl2mr_is_lmm_marker_error(fit)) {
+        out$fit_error[[rows[[j]]]] <- if (identical(qtl2mr_marker_drop_reason(fit), "nonestimable_founder_contrast")) {
+          "nonestimable_x"
+        } else "x_fit_error"
+        next
+      }
+      out$F_X_block[[rows[[j]]]] <- mr_block_first_stage_f(list(beta_x = fit$beta_fc,
+        Sigma_x = qtl2mr_sym(fit$vcov_fc)), ridge = ridge)
+      out$n_x[[rows[[j]]]] <- as.integer(fit$n)
+      out$hsq_x[[rows[[j]]]] <- as.numeric(fit$hsq)
+    }
+  }
+  out
+}
+
+qtl2mr_empty_first_stage <- function(n) {
+  data.frame(F_X_block = rep(NA_real_, n), n_x = rep(NA_integer_, n), hsq_x = rep(NA_real_, n),
+    fit_error = rep("", n), stringsAsFactors = FALSE)
+}
+
+qtl2mr_empty_instruments <- function() {
+  data.frame(exposure = character(), marker = character(), chr = character(), pos = numeric(),
+    lod = numeric(), F_X_block = numeric(), n_x = integer(), hsq_x = numeric(), selected = logical(),
+    drop_reason = character(), locus_rank = integer(), selected_by = character(),
+    stringsAsFactors = FALSE)
+}
+
+# Candidates arrive sorted by LOD. Non-autosomal and non-estimable loci can never
+# be used; the F rule and then max_loci decide among the rest.
+qtl2mr_instrument_rows <- function(candidates, first_stage, F_X_min, max_loci) {
+  if (!nrow(candidates)) return(qtl2mr_empty_instruments())
+  reason <- rep("", nrow(candidates))
+  reason[!qtl2mr_is_autosome(candidates$chr)] <- "non_autosomal"
+  open <- !nzchar(reason) & nzchar(first_stage$fit_error)
+  reason[open] <- first_stage$fit_error[open]
+  if (!is.null(F_X_min)) {
+    weak <- !nzchar(reason) & !(is.finite(first_stage$F_X_block) & first_stage$F_X_block >= F_X_min)
+    reason[weak] <- "F"
+  }
+  passing <- which(!nzchar(reason))
+  if (!is.null(max_loci) && length(passing) > max_loci) reason[passing[-seq_len(max_loci)]] <- "max_loci"
+  selected <- !nzchar(reason)
+  data.frame(candidates, F_X_block = first_stage$F_X_block, n_x = first_stage$n_x,
+    hsq_x = first_stage$hsq_x, selected = selected, drop_reason = reason,
+    locus_rank = ifelse(selected, cumsum(selected), NA_integer_),
+    selected_by = rep("contiguous_lod_island_max", nrow(candidates)), stringsAsFactors = FALSE)
+}
+
+qtl2mr_select_instruments <- function(resources,
+                                      qtl_scan,
+                                      exposures = NULL,
+                                      lod_thresh = 4,
+                                      exclude_chr = "X",
+                                      max_loci = NULL,
+                                      F_X_min = NULL,
+                                      n_workers = 1L,
+                                      progress = TRUE) {
+  if (!inherits(resources, "qtl2mr_resources")) stop("resources must come from qtl2mr_prepare_resources()", call. = FALSE)
+  lod_thresh <- qtl2mr_validate_lod_thresh(lod_thresh)
+  max_loci <- qtl2mr_check_count(max_loci, "max_loci", allow_null = TRUE)
+  if (!is.null(F_X_min) && (!is.numeric(F_X_min) || length(F_X_min) != 1L || !is.finite(F_X_min) || F_X_min < 0)) {
+    stop("F_X_min must be NULL or one non-negative number", call. = FALSE)
+  }
+  n_workers <- qtl2mr_check_count(n_workers, "n_workers")
+  progress <- qtl2mr_check_flag(progress, "progress")
+  exclude_chr <- as.character(exclude_chr %||% character())
+  exposures <- if (is.null(exposures)) qtl2mr_scan_traits(qtl_scan) else as.character(exposures)
+  if (!length(exposures) || anyNA(exposures) || any(!nzchar(exposures)) || anyDuplicated(exposures)) {
+    stop("exposures must be unique, non-empty trait names", call. = FALSE)
+  }
+  missing <- setdiff(exposures, names(resources$pheno))
+  if (length(missing)) stop("pheno is missing exposure(s): ", paste(missing, collapse = ", "), call. = FALSE)
+  candidates <- lapply(exposures, function(trait) {
+    qtl2mr_scan_candidates(qtl_scan, resources$marker_map, trait, lod_thresh, exclude_chr)
+  })
+  markers <- unique(unlist(lapply(candidates, function(d) d$marker[qtl2mr_is_autosome(d$chr)]), use.names = FALSE))
+  input <- NULL
+  if (length(markers)) {
+    input <- qtl2mr_resources_input(resources, markers)
+    input <- qtl2mr_prepared_probability_copy(input, markers)
+  }
+  select_one <- function(i) {
+    cand <- candidates[[i]]
+    if (progress) message(sprintf("[qtl2mr select] %d/%d %s: %d candidate loci", i, length(exposures),
+      exposures[[i]], nrow(cand)))
+    first_stage <- qtl2mr_empty_first_stage(nrow(cand))
+    auto <- qtl2mr_is_autosome(cand$chr)
+    if (any(auto)) {
+      first_stage[auto, ] <- qtl2mr_exposure_first_stage(input, exposures[[i]], cand[auto, , drop = FALSE])
+    }
+    qtl2mr_instrument_rows(cand, first_stage, F_X_min, max_loci)
+  }
+  index <- seq_along(exposures)
+  if (n_workers > 1L && length(exposures) > 1L && identical(.Platform$OS.type, "unix")) {
+    chunks <- split(index, (index - 1L) %% min(n_workers, length(exposures)))
+    out <- parallel::mclapply(chunks, function(idx) lapply(idx, select_one),
+      mc.cores = length(chunks), mc.preschedule = FALSE)
+    failed <- !vapply(out, is.list, logical(1))
+    if (any(failed)) {
+      stop("qtl2mr_select_instruments() worker failed: ", as.character(out[failed][[1L]]), call. = FALSE)
+    }
+    rows <- unlist(out, recursive = FALSE)[order(unlist(chunks, use.names = FALSE))]
+  } else {
+    rows <- lapply(index, select_one)
+  }
+  out <- do.call(rbind, c(list(qtl2mr_empty_instruments()), rows))
+  out$lod_thresh <- rep(lod_thresh, nrow(out))
+  out$F_X_min <- rep(F_X_min %||% NA_real_, nrow(out))
+  out$max_loci <- rep(max_loci %||% NA_integer_, nrow(out))
+  out$exclude_chr <- rep(paste(exclude_chr, collapse = ","), nrow(out))
+  rownames(out) <- NULL
+  out
+}
+
+# Instrument tables are keyed by exposure. Rows with selected = FALSE are kept
+# only as a record; markers must exist in marker_map and allele_probs.
+qtl2mr_normalize_instruments <- function(instruments, resources) {
+  if (is.character(instruments) && length(instruments) == 1L && !is.na(instruments)) {
+    if (!file.exists(instruments) || dir.exists(instruments)) {
+      stop("instruments file does not exist: ", instruments, call. = FALSE)
+    }
+    instruments <- utils::read.csv(instruments, stringsAsFactors = FALSE)
+  }
+  if (!is.data.frame(instruments)) {
+    stop("instruments must be a data frame or CSV path with exposure and marker columns, for example from qtl2mr_select_instruments()", call. = FALSE)
+  }
+  missing <- setdiff(c("exposure", "marker"), names(instruments))
+  if (length(missing)) stop("instruments must contain column(s): ", paste(missing, collapse = ", "), call. = FALSE)
+  if ("selected" %in% names(instruments)) {
+    keep <- instruments$selected
+    if (!is.logical(keep) || anyNA(keep)) stop("instruments$selected must be TRUE or FALSE", call. = FALSE)
+    instruments <- instruments[keep, , drop = FALSE]
+  }
+  exposure <- as.character(instruments$exposure)
+  marker <- as.character(instruments$marker)
+  if (anyNA(exposure) || anyNA(marker) || any(!nzchar(exposure)) || any(!nzchar(marker))) {
+    stop("instruments contains missing or blank exposure or marker values", call. = FALSE)
+  }
+  dup <- duplicated(paste(exposure, marker, sep = "\r"))
+  if (any(dup)) {
+    stop("instruments lists marker ", marker[dup][[1L]], " more than once for exposure ", exposure[dup][[1L]], call. = FALSE)
+  }
+  map <- resources$marker_map
+  idx <- match(marker, map$marker)
+  if (anyNA(idx)) {
+    stop("instruments markers are not in marker_map: ", paste(utils::head(unique(marker[is.na(idx)]), 5L), collapse = ", "), call. = FALSE)
+  }
+  chr <- as.character(map$chr[idx])
+  if ("chr" %in% names(instruments)) {
+    given <- as.character(instruments$chr)
+    bad <- !is.na(given) & given != chr
+    if (any(bad)) {
+      stop("instruments chr does not match marker_map for marker(s): ", paste(utils::head(unique(marker[bad]), 5L), collapse = ", "), call. = FALSE)
+    }
+  }
+  in_probs <- mapply(function(m, c) {
+    a <- resources$allele_probs[[c]]
+    !is.null(a) && m %in% dimnames(a)[[3L]]
+  }, marker, chr)
+  if (!all(in_probs)) {
+    stop("instruments markers are not in allele_probs: ", paste(utils::head(unique(marker[!in_probs]), 5L), collapse = ", "), call. = FALSE)
+  }
+  data.frame(exposure = exposure, marker = marker, chr = chr, pos = map$pos[idx], stringsAsFactors = FALSE)
+}
+
+qtl2mr_exposure_instruments <- function(instruments, exposure) {
+  rows <- instruments[instruments$exposure == exposure, , drop = FALSE]
+  if (!nrow(rows)) stop("no_instruments: instruments has no selected loci for exposure ", exposure, call. = FALSE)
+  rows
+}
+
+qtl2mr_pair_prepared <- function(resources, rows, exposure, outcome, metadata = resources$metadata) {
+  qtl2mr_resources_input(resources, data.frame(marker = rows$marker, chr = rows$chr, stringsAsFactors = FALSE),
+    exposure = exposure, outcome = outcome, metadata = metadata)
+}
+
+qtl2mr_pair_input <- function(resources, instruments, exposure, outcome) {
+  if (!inherits(resources, "qtl2mr_resources")) stop("resources must come from qtl2mr_prepare_resources()", call. = FALSE)
+  for (name in c("exposure", "outcome")) {
+    if (!qtl2mr_nonempty_string(get(name))) stop(name, " must be one non-empty trait name", call. = FALSE)
+  }
+  rows <- qtl2mr_exposure_instruments(qtl2mr_normalize_instruments(instruments, resources), exposure)
+  qtl2mr_pair_prepared(resources, rows, exposure, outcome)
+}
+
+qtl2mr_resources_kinship <- function(kinship, chr) {
+  if (is.null(kinship)) return(NULL)
+  if (is.list(kinship) && !is.matrix(kinship) && !is.data.frame(kinship)) {
+    K <- kinship[[as.character(chr)]]
+    if (is.null(K)) stop("kinship list is missing selected chromosome: ", chr, call. = FALSE)
+    return(as.matrix(K))
+  }
+  as.matrix(kinship)
+}
+
+# Samples with finite values for every listed trait, complete covariates, and
+# genotype probabilities and kinship rows on every selected chromosome.
+qtl2mr_complete_samples <- function(resources, traits, selected_chr = NULL) {
   pheno <- resources$pheno
   covar <- resources$covar
-  traits <- unique(as.character(traits))
-  missing <- setdiff(traits, colnames(pheno))
-  if (length(missing)) stop("pheno is missing batch traits: ", paste(missing, collapse = ", "), call. = FALSE)
-  if (any(!vapply(pheno[traits], is.numeric, logical(1)))) stop("Batch phenotypes must be numeric", call. = FALSE)
-  ids <- Reduce(intersect, list(resources$sample_ids, rownames(pheno), if (is.null(covar)) resources$sample_ids else rownames(covar)))
-  if (length(selected_chr)) {
-    selected_chr <- unique(as.character(selected_chr))
-    for (chr in selected_chr) {
-      gp <- resources$allele_probs[[chr]]
-      if (is.null(gp)) stop("allele_probs is missing selected chromosome: ", chr, call. = FALSE)
-      ids <- ids[ids %in% dimnames(gp)[[1L]]]
-    }
-    if (is.list(resources$kinship) && !is.matrix(resources$kinship) && !is.data.frame(resources$kinship)) {
-      for (chr in selected_chr) {
-        K <- resources$kinship[[chr]]
-        if (is.null(K)) stop("kinship list is missing selected chromosome: ", chr, call. = FALSE)
-        ids <- ids[ids %in% rownames(K) & ids %in% colnames(K)]
-      }
-    } else if (!is.null(resources$kinship)) {
-      K <- as.matrix(resources$kinship)
-      ids <- ids[ids %in% rownames(K) & ids %in% colnames(K)]
-    }
+  ids <- Reduce(intersect, list(resources$sample_ids, rownames(pheno),
+    if (is.null(covar)) resources$sample_ids else rownames(covar)))
+  for (chr in unique(as.character(selected_chr))) {
+    gp <- resources$allele_probs[[chr]]
+    if (is.null(gp)) stop("allele_probs is missing selected chromosome: ", chr, call. = FALSE)
+    ids <- ids[ids %in% dimnames(gp)[[1L]]]
+    K <- qtl2mr_resources_kinship(resources$kinship, chr)
+    if (!is.null(K)) ids <- ids[ids %in% rownames(K) & ids %in% colnames(K)]
   }
   keep <- qtl2mr_complete_rows(pheno[ids, traits, drop = FALSE])
   if (!is.null(covar) && ncol(covar)) keep <- keep & qtl2mr_complete_rows(covar[ids, , drop = FALSE])
   ids[keep]
 }
 
-qtl2mr_make_batch_eligible_samples <- function(resources, selected_chr = NULL) {
+# One row per trait and exclusion reason. Each trait is fitted on its own
+# complete samples; reasons can overlap.
+qtl2mr_batch_sample_exclusions <- function(resources, pairs, instruments) {
+  if (!nrow(pairs)) return(qtl2mr_empty_batch_table("sample_exclusions"))
+  pheno <- resources$pheno
   covar <- resources$covar
-  ids <- if (is.null(covar)) resources$sample_ids else intersect(resources$sample_ids, rownames(covar))
-  if (length(selected_chr)) {
-    selected_chr <- unique(as.character(selected_chr))
-    for (chr in selected_chr) {
-      gp <- resources$allele_probs[[chr]]
-      if (is.null(gp)) stop("allele_probs is missing selected chromosome: ", chr, call. = FALSE)
-      ids <- ids[ids %in% dimnames(gp)[[1L]]]
-    }
-    if (is.list(resources$kinship) && !is.matrix(resources$kinship) && !is.data.frame(resources$kinship)) {
-      for (chr in selected_chr) {
-        K <- resources$kinship[[chr]]
-        if (is.null(K)) stop("kinship list is missing selected chromosome: ", chr, call. = FALSE)
-        ids <- ids[ids %in% rownames(K) & ids %in% colnames(K)]
+  genotyped <- resources$sample_ids
+  ids <- union(genotyped, rownames(pheno))
+  in_pheno <- ids %in% rownames(pheno)
+  missing_covar <- if (is.null(covar)) rep(FALSE, length(ids)) else !ids %in% rownames(covar)
+  incomplete_covar <- rep(FALSE, length(ids))
+  if (!is.null(covar) && ncol(covar)) {
+    matched <- which(!missing_covar)
+    incomplete_covar[matched] <- !qtl2mr_complete_rows(covar[ids[matched], , drop = FALSE])
+  }
+  traits <- unique(c(pairs$exposure, pairs$outcome))
+  do.call(rbind, lapply(traits, function(trait) {
+    value <- rep(NA_real_, length(ids))
+    value[in_pheno] <- as.numeric(pheno[ids[in_pheno], trait])
+    exposures <- pairs$exposure[pairs$exposure == trait | pairs$outcome == trait]
+    missing_kinship <- rep(FALSE, length(ids))
+    if (!is.null(resources$kinship)) {
+      for (chr in unique(instruments$chr[instruments$exposure %in% exposures])) {
+        K <- qtl2mr_resources_kinship(resources$kinship, chr)
+        missing_kinship <- missing_kinship | !(ids %in% rownames(K) & ids %in% colnames(K))
       }
-    } else if (!is.null(resources$kinship)) {
-      K <- as.matrix(resources$kinship)
-      ids <- ids[ids %in% rownames(K) & ids %in% colnames(K)]
     }
-  }
-  if (!is.null(covar) && ncol(covar)) ids <- ids[qtl2mr_complete_rows(covar[ids, , drop = FALSE])]
-  ids
-}
-
-qtl2mr_selected_loci_for_pairs <- function(resources, pairs, instrument_rule) {
-  out <- lapply(seq_len(nrow(pairs)), function(i) {
-    pair <- pairs[i, , drop = FALSE]
-    lod_thresh <- qtl2mr_pair_lod_thresh(pair, instrument_rule$lod_thresh)
-    exclude_chr <- if ("exclude_chr" %in% names(pair) && qtl2mr_nonempty_string(pair$exclude_chr)) strsplit(pair$exclude_chr, ",")[[1L]] else instrument_rule$exclude_chr
-    max_loci <- qtl2mr_pair_max_loci(pair, instrument_rule$max_loci)
-    if ("selected_loci_file" %in% names(pair) &&
-        qtl2mr_nonempty_string(pair$selected_loci_file)) {
-      selected <- qtl2mr_read_selected_loci_file(pair$selected_loci_file)
-    } else {
-      selected <- qtl2mr_select_loci_from_scan(
-        resources$qtl_scan,
-        resources$marker_map,
-        instrument_trait = pair$instrument_trait,
-        lod_thresh = lod_thresh,
-        exclude_chr = exclude_chr,
-        max_loci = max_loci
-      )
-    }
-    if (!nrow(selected)) return(data.frame())
-    cbind(pair_id = pair$pair_id, exposure = pair$exposure, outcome = pair$outcome,
-          instrument_trait = pair$instrument_trait, selected)
-  })
-  columns <- unique(unlist(lapply(out, names), use.names = FALSE))
-  out <- lapply(out, function(x) {
-    for (nm in setdiff(columns, names(x))) x[[nm]] <- rep(NA, nrow(x))
-    x[columns]
-  })
-  out <- do.call(rbind, out)
-  if (is.null(out)) out <- data.frame()
-  rownames(out) <- NULL
-  out
-}
-
-qtl2mr_resolve_instrument_request <- function(pair, instrument_rule) {
-  lod_thresh <- qtl2mr_pair_lod_thresh(pair, instrument_rule$lod_thresh)
-  exclude_chr <- if ("exclude_chr" %in% names(pair) && qtl2mr_nonempty_string(pair$exclude_chr)) {
-    strsplit(pair$exclude_chr, ",")[[1L]]
-  } else {
-    instrument_rule$exclude_chr
-  }
-  max_loci <- qtl2mr_pair_max_loci(pair, instrument_rule$max_loci)
-  selected_loci_file <- if ("selected_loci_file" %in% names(pair) &&
-                            qtl2mr_nonempty_string(pair$selected_loci_file)) {
-    as.character(pair$selected_loci_file)
-  } else {
-    NA_character_
-  }
-  list(
-    instrument_trait = as.character(pair$instrument_trait),
-    lod_thresh = lod_thresh,
-    exclude_chr = as.character(exclude_chr %||% character()),
-    max_loci = max_loci,
-    selected_loci_file = selected_loci_file
-  )
-}
-
-qtl2mr_select_loci_for_request <- function(resources, request) {
-  if (!is.na(request$selected_loci_file)) {
-    qtl2mr_read_selected_loci_file(request$selected_loci_file)
-  } else {
-    qtl2mr_select_loci_from_scan(
-      resources$qtl_scan,
-      resources$marker_map,
-      instrument_trait = request$instrument_trait,
-      lod_thresh = request$lod_thresh,
-      exclude_chr = request$exclude_chr,
-      max_loci = request$max_loci
+    reasons <- list(
+      missing_genoprob_id = !ids %in% genotyped,
+      missing_phenotype_id = !in_pheno,
+      nonfinite_value = in_pheno & !is.finite(value),
+      missing_covar_id = missing_covar,
+      incomplete_covar = incomplete_covar,
+      missing_kinship_id = missing_kinship
     )
-  }
+    do.call(rbind, lapply(names(reasons), function(reason) data.frame(
+      trait = trait, reason = reason, n_input_samples = length(ids),
+      n_excluded = sum(reasons[[reason]]),
+      excluded_ids = paste(ids[reasons[[reason]]], collapse = ";"),
+      stringsAsFactors = FALSE
+    )))
+  }))
 }
 
 qtl2mr_pair_id <- function(exposure, outcome) {
@@ -394,12 +480,16 @@ qtl2mr_normalize_pairs <- function(pairs) {
   if (!all(c("exposure", "outcome") %in% names(pairs))) {
     stop("pairs must contain exposure and outcome columns", call. = FALSE)
   }
+  retired <- intersect(c("instrument_trait", "lod_thresh", "exclude_chr", "max_loci", "selected_loci_file"), names(pairs))
+  if (length(retired)) {
+    stop("pairs column(s) ", paste(retired, collapse = ", "), " were removed in qtl2mr 0.6.0. ",
+      "Select instruments with qtl2mr_select_instruments() and pass the table as `instruments`.", call. = FALSE)
+  }
   if (!"pair_id" %in% names(pairs)) {
     pairs$pair_id <- mapply(qtl2mr_pair_id, pairs$exposure, pairs$outcome, USE.NAMES = FALSE)
   }
-  if (!"instrument_trait" %in% names(pairs)) pairs$instrument_trait <- pairs$exposure
   if (!nrow(pairs)) stop("pairs must contain at least one pair", call. = FALSE)
-  for (nm in c("pair_id", "exposure", "outcome", "instrument_trait")) {
+  for (nm in c("pair_id", "exposure", "outcome")) {
     pairs[[nm]] <- as.character(pairs[[nm]])
     if (anyNA(pairs[[nm]]) || any(!nzchar(pairs[[nm]]))) stop("pairs contains missing or blank ", nm, call. = FALSE)
   }
@@ -408,105 +498,7 @@ qtl2mr_normalize_pairs <- function(pairs) {
 }
 
 qtl2mr_nonempty_string <- function(x) {
-  length(x) == 1L && !is.na(x) && nzchar(x)
-}
-
-qtl2mr_read_selected_loci_file <- function(path) {
-  if (!qtl2mr_nonempty_string(path) || !file.exists(path) || dir.exists(path)) stop("selected_loci_file does not exist or is not a file: ", path, call. = FALSE)
-  d <- utils::read.csv(path, stringsAsFactors = FALSE)
-  if (!all(c("marker", "chr") %in% names(d))) {
-    stop("selected_loci_file must contain marker and chr columns", call. = FALSE)
-  }
-  if (!"locus_rank" %in% names(d)) d$locus_rank <- seq_len(nrow(d))
-  d
-}
-
-qtl2mr_batch_defaults <- function(x, defaults) {
-  if (is.null(x)) return(defaults)
-  if (!is.list(x) || (length(x) && (is.null(names(x)) || any(!nzchar(names(x))) || anyDuplicated(names(x))))) stop("Options must be a uniquely named list", call. = FALSE)
-  unknown <- setdiff(names(x), names(defaults))
-  if (length(unknown)) stop("Unknown option(s): ", paste(unknown, collapse = ", "), call. = FALSE)
-  if ("source" %in% names(x) && !identical(x$source, "exposure_qtl_scan")) stop("Unsupported instrument_rule source", call. = FALSE)
-  if ("peak_method" %in% names(x) && !identical(x$peak_method, "contiguous_lod_island_max")) stop("Unsupported peak_method", call. = FALSE)
-  utils::modifyList(defaults, x, keep.null = TRUE)
-}
-
-qtl2mr_batch_fit_options <- function(options) {
-  qtl2mr_batch_defaults(options, list(
-    standardize_phenotypes = TRUE, cross_cov_model = "star",
-    heterogeneity_method = "none", q_sim_n = 0L, q_sim_seed = 1L,
-    diagnostic_bootstrap_B = 0L, diagnostic_bootstrap_seed = 1L,
-    reported_estimator_policy = "diagnostic_only", min_samples = 50L,
-    min_loci = 1L, engine = "batch",
-    cache_contexts = TRUE, cache_lmm_fits = TRUE, verbose = FALSE
-  ))
-}
-
-qtl2mr_batch_sample_policy <- function(policy = NULL) {
-  if (identical(policy, "batch_common_complete")) "batch_common_complete" else "pair_common_complete"
-}
-
-qtl2mr_batch_sample_exclusions <- function(resources, pairs, sample_policy = NULL,
-                                           batch_traits = NULL) {
-  if (!nrow(pairs)) return(qtl2mr_empty_batch_table("sample_exclusions"))
-  ids <- resources$sample_ids
-  pheno <- resources$pheno
-  covar <- resources$covar
-  policy <- qtl2mr_batch_sample_policy(sample_policy)
-  missing_pheno <- !ids %in% rownames(pheno)
-  missing_covar <- if (is.null(covar)) rep(FALSE, length(ids)) else !ids %in% rownames(covar)
-  incomplete_covar <- rep(FALSE, length(ids))
-  if (!is.null(covar) && ncol(covar)) {
-    matched <- which(!missing_covar)
-    incomplete_covar[matched] <- !qtl2mr_complete_rows(covar[ids[matched], , drop = FALSE])
-  }
-  nonfinite_trait <- function(trait) {
-    bad <- rep(FALSE, length(ids))
-    if (trait %in% names(pheno) && is.numeric(pheno[[trait]])) {
-      matched <- which(!missing_pheno)
-      bad[matched] <- !is.finite(pheno[ids[matched], trait])
-    }
-    bad
-  }
-  batch_traits <- batch_traits %||% unique(c(pairs$exposure, pairs$outcome))
-  rows <- lapply(seq_len(nrow(pairs)), function(i) {
-    pair <- pairs[i, , drop = FALSE]
-    reasons <- list(
-      missing_phenotype_id = missing_pheno,
-      nonfinite_exposure = nonfinite_trait(pair$exposure),
-      nonfinite_outcome = nonfinite_trait(pair$outcome),
-      missing_covar_id = missing_covar,
-      incomplete_covar = incomplete_covar
-    )
-    if (identical(policy, "batch_common_complete")) {
-      other_traits <- setdiff(batch_traits, c(pair$exposure, pair$outcome))
-      reasons$nonfinite_other_batch_trait <- Reduce(`|`, lapply(other_traits, nonfinite_trait),
-        init = rep(FALSE, length(ids)))
-    }
-    do.call(rbind, lapply(names(reasons), function(reason) data.frame(
-      pair_id = pair$pair_id, exposure = pair$exposure, outcome = pair$outcome,
-      sample_policy = policy, reason = reason, n_input_samples = length(ids),
-      n_excluded = sum(reasons[[reason]]),
-      excluded_ids = paste(ids[reasons[[reason]]], collapse = ";"),
-      counts_overlap = TRUE, stringsAsFactors = FALSE
-    )))
-  })
-  do.call(rbind, rows)
-}
-
-qtl2mr_batch_covariate_warnings <- function(exclusions) {
-  rows <- exclusions[exclusions$reason %in% c("missing_covar_id", "incomplete_covar") &
-    exclusions$n_excluded > 0L, , drop = FALSE]
-  if (!nrow(rows)) return(qtl2mr_empty_batch_table("warnings"))
-  do.call(rbind, lapply(unique(rows$pair_id), function(id) {
-    d <- rows[rows$pair_id == id, , drop = FALSE]
-    data.frame(pair_id = id, warning_id = "batch_covariate_sample_exclusions",
-      severity = "warning",
-      message = sprintf("%d input samples are ineligible for this pair because covariate IDs or finite covariate values are missing.", sum(d$n_excluded)),
-      consequence = "The fitted cohort excludes these samples; exclusion reasons can overlap phenotype exclusions.",
-      recommended_action = "Review batch_sample_exclusions.csv and fitted sample counts; no imputation is performed.",
-      shown_in_main_report = TRUE, stringsAsFactors = FALSE)
-  }))
+  is.character(x) && length(x) == 1L && !is.na(x) && nzchar(x)
 }
 
 qtl2mr_batch_probability_table <- function(pair, pilot) {
@@ -515,20 +507,26 @@ qtl2mr_batch_probability_table <- function(pair, pilot) {
   cbind(pair_id = pair$pair_id, adjustments, stringsAsFactors = FALSE)
 }
 
-qtl2mr_batch_preflight <- function(resources, pairs, instrument_rule, fit_options, fail_fast) {
-  rule <- qtl2mr_batch_defaults(instrument_rule, list(source = "exposure_qtl_scan", lod_thresh = 4,
-    peak_method = "contiguous_lod_island_max", exclude_chr = "X", max_loci = NULL))
+qtl2mr_batch_preflight <- function(resources, pairs, instruments, min_loci, min_samples, fail_fast) {
   errors <- lapply(seq_len(nrow(pairs)), function(i) {
     pair <- pairs[i, , drop = FALSE]
     tryCatch({
-      selected <- qtl2mr_select_loci_for_request(resources, qtl2mr_resolve_instrument_request(pair, rule))
-      if (nrow(selected) < fit_options$min_loci) stop("no_selected_loci: selected loci below min_loci", call. = FALSE)
+      rows <- qtl2mr_exposure_instruments(instruments, pair$exposure)
+      if (nrow(rows) < min_loci) {
+        stop(sprintf("too_few_loci: %d instruments for exposure %s, below min_loci = %d",
+          nrow(rows), pair$exposure, min_loci), call. = FALSE)
+      }
       probe <- resources
-      probe$selected_loci <- selected
+      probe$selected_loci <- rows$marker
       validate_qtl2mr_input(probe, exposure = pair$exposure, outcome = pair$outcome, require_selected_loci = TRUE)
-      samples <- qtl2mr_make_common_complete_samples(resources, pair$exposure, pair$outcome, selected$chr)
-      if (length(samples) < fit_options$min_samples) stop("too_few_samples: complete samples below min_samples", call. = FALSE)
-      as.character(selected$marker)
+      n <- vapply(c(pair$exposure, pair$outcome), function(trait) {
+        length(qtl2mr_complete_samples(resources, trait, rows$chr))
+      }, integer(1))
+      if (any(n < min_samples)) {
+        stop(sprintf("too_few_samples: %d complete samples for the exposure and %d for the outcome, below min_samples = %d",
+          n[[1L]], n[[2L]], min_samples), call. = FALSE)
+      }
+      rows$marker
     }, error = function(e) {
       if (isTRUE(fail_fast)) stop(e)
       qtl2mr_error_row(pair, "preflight", e)
@@ -547,11 +545,7 @@ qtl2mr_append_preflight_errors <- function(batch, preflight) {
       if ("pair_id" %in% names(batch[[nm]])) batch[[nm]] <- batch[[nm]][!batch[[nm]]$pair_id %in% errors$pair_id, , drop = FALSE]
     }
     pairs <- preflight$pairs[match(errors$pair_id, preflight$pairs$pair_id), , drop = FALSE]
-    main <- data.frame(pair_id = pairs$pair_id, exposure = pairs$exposure, outcome = pairs$outcome,
-      instrument_trait = pairs$instrument_trait, status = "error", error_message = errors$error_message,
-      runtime_sec = NA_real_, sample_policy = qtl2mr_batch_sample_policy(batch$config$sample_policy),
-      stringsAsFactors = FALSE)
-    batch <- qtl2mr_batch_append(batch, "main_results", main)
+    batch <- qtl2mr_batch_append(batch, "main_results", qtl2mr_batch_error_main(pairs, errors$error_message))
     batch <- qtl2mr_batch_append(batch, "errors", errors)
   }
   batch$pairs <- preflight$pairs
@@ -565,13 +559,15 @@ qtl2mr_fingerprint_object <- function(object) {
   unname(tools::md5sum(path))
 }
 
-qtl2mr_batch_fingerprint <- function(resources, pairs, config, markers = NULL) {
+qtl2mr_batch_fingerprint <- function(resources, pairs, instruments, config, markers = NULL) {
   config$created_at <- NULL
   if (!is.null(markers)) {
     resources$allele_probs <- lapply(resources$allele_probs, function(a) {
       a[, , dimnames(a)[[3L]] %in% markers, drop = FALSE]
     })
   }
+  instruments <- instruments[instruments$exposure %in% pairs$exposure, , drop = FALSE]
+  rownames(instruments) <- NULL
   env <- environment(qtl2mr_batch_fingerprint)
   fn <- sort(ls(env, all.names = TRUE))
   fn <- fn[vapply(fn, function(nm) is.function(get(nm, env, inherits = FALSE)), logical(1))]
@@ -580,12 +576,8 @@ qtl2mr_batch_fingerprint <- function(resources, pairs, config, markers = NULL) {
   implementation <- lapply(fn, function(nm) {
     c(nm, deparse(get(nm, env, inherits = FALSE), control = c("keepInteger", "keepNA")))
   })
-  selected_files <- if ("selected_loci_file" %in% names(pairs)) lapply(pairs$selected_loci_file, function(path) {
-    if (!qtl2mr_nonempty_string(path) || !file.exists(path)) return(list(path = path, missing = TRUE))
-    list(path = path, hash = unname(tools::md5sum(path)))
-  }) else NULL
-  list(schema = "qtl2mr-batch-v050-1", data = qtl2mr_fingerprint_object(resources),
-       request = qtl2mr_fingerprint_object(list(pairs, config, selected_files)),
+  list(schema = "qtl2mr-batch-v060-1", data = qtl2mr_fingerprint_object(resources),
+       request = qtl2mr_fingerprint_object(list(pairs, instruments, config)),
        implementation = qtl2mr_fingerprint_object(implementation))
 }
 
@@ -594,14 +586,14 @@ qtl2mr_resume_abort <- function(message) {
     class = c("qtl2mr_resume_error", "error", "condition")))
 }
 
-# Paths written by run_qtl2mr_batch(). Names used only by 0.4.x (exact-group
-# tables, block caches, by_exposure/) are kept so force = TRUE can clear old folders.
+# Paths written by run_qtl2mr_batch(). Names used only by earlier versions are
+# kept so overwrite = TRUE can clear old folders.
 qtl2mr_batch_owned_paths <- function(output_dir) {
   if (is.null(output_dir)) return(character())
-  tables <- c("main_results", "method_comparison", "selected_loci", "overlap_qc",
-    "first_stage_summary", "first_stage_filter_results", "mr_block_cache_manifest",
-    "warnings", "errors", "run_manifest", "sample_qc", "sample_exclusions", "probability_normalization", "input_alignment",
-    "exact_group_plan", "sample_groups", "selected_loci_summary", "workload_summary")
+  tables <- c("main_results", "method_comparison", "locus_results", "overlap_qc", "warnings", "errors",
+    "run_manifest", "sample_exclusions", "probability_normalization", "input_alignment",
+    "selected_loci", "first_stage_summary", "sample_qc", "first_stage_filter_results",
+    "mr_block_cache_manifest", "exact_group_plan", "sample_groups", "selected_loci_summary", "workload_summary")
   paths <- file.path(output_dir, c(paste0("batch_", tables, ".csv"),
     "batch_config.json", "batch_resume_state.rds", "batch_pair_records", "mr_block_cache", "by_exposure"))
   links <- Sys.readlink(paths)
@@ -618,7 +610,7 @@ qtl2mr_batch_linked_paths <- function(output_dir) {
   paths[!is.na(links) & nzchar(links)]
 }
 
-qtl2mr_check_batch_destination <- function(output_dir, resume = FALSE, force = FALSE) {
+qtl2mr_check_batch_destination <- function(output_dir, resume = FALSE, overwrite = FALSE) {
   if (is.null(output_dir)) return(invisible(TRUE))
   if (!is.character(output_dir) || length(output_dir) != 1L || is.na(output_dir) || !nzchar(output_dir)) {
     stop("output_dir must be NULL or one directory path", call. = FALSE)
@@ -630,8 +622,8 @@ qtl2mr_check_batch_destination <- function(output_dir, resume = FALSE, force = F
       "); qtl2mr does not write through links. Remove them or use a new output_dir.", call. = FALSE)
   }
   occupied <- length(qtl2mr_batch_owned_paths(output_dir)) > 0L
-  if (occupied && !isTRUE(resume) && !isTRUE(force)) {
-    stop("Batch output already exists; use a new output_dir, resume = TRUE for the identical run, or force = TRUE to explicitly overwrite", call. = FALSE)
+  if (occupied && !isTRUE(resume) && !isTRUE(overwrite)) {
+    stop("Batch output already exists; use a new output_dir, resume = TRUE for the identical run, or overwrite = TRUE to replace it", call. = FALSE)
   }
   invisible(TRUE)
 }
@@ -641,48 +633,42 @@ qtl2mr_empty_dataframe <- function(columns) {
   as.data.frame(out, stringsAsFactors = FALSE, check.names = FALSE)
 }
 
+# Main-result columns shared with the single-pair main_result table: same names,
+# same values for the same pair, instruments and settings.
+qtl2mr_batch_summary_columns <- c(
+  "exposure", "outcome", "lmm_backend", "n_loci", "n_loci_selected", "n_loci_dropped_nonestimable",
+  "n_loci_steiger_fail", "n_x_median", "n_y_median", "n_overlap_median",
+  "theta_reported", "se_reported", "reported_ci_lower", "reported_ci_upper", "reported_ci_type",
+  "reported_estimator", "reported_estimator_source", "reported_estimator_policy", "reported_estimator_reason",
+  "theta", "se", "profile_ci_lower", "profile_ci_upper", "profile_p",
+  "confidence_set_type", "confidence_set_bounded", "primary_optimizer_status", "primary_bracket_status",
+  "primary_bracket_n_expand", "primary_profile_ci_finite", "primary_reliable", "numerical_ok",
+  "inference_status", "effect_units", "exposure_sd", "outcome_sd", "raw_conversion_available",
+  "theta_raw_units", "se_raw_units", "first_order_theta", "first_order_se",
+  "theta_independence", "theta_overlap_delta", "theta_two_step_ivw", "theta_weighted_median",
+  "theta_weighted_mode", "Q", "Q_chisq_df", "Q_p_chisq", "Q_p_reported", "Q_p_method",
+  "cross_cov_model", "standardize_phenotypes"
+)
+
 qtl2mr_empty_batch_table <- function(name) {
   columns <- switch(
     name,
-    main_results = c(
-      "pair_id", "exposure", "outcome", "instrument_trait", "status", "error_message",
-      "lmm_backend", "locus_fit_status",
-      "n_loci", "n_loci_selected", "n_loci_dropped_nonestimable",
-      "n_x_median", "n_y_median", "n_overlap_median",
-      "theta_so", "se_so", "ci_lower_so", "ci_upper_so",
-      "theta_reported", "se_reported", "reported_ci_lower", "reported_ci_upper",
-      "reported_ci_type", "reported_estimator", "reported_estimator_source",
-      "reported_estimator_policy", "reported_estimator_reason",
-      "theta", "se", "profile_ci_lower", "profile_ci_upper", "profile_p",
-      "primary_optimizer_status", "primary_bracket_status",
-      "primary_bracket_n_expand", "primary_profile_ci_finite", "primary_reliable",
-      "numerical_ok", "confidence_set_type", "inference_status", "effect_units",
-      "exposure_sd", "outcome_sd", "raw_conversion_available", "theta_raw_units", "se_raw_units",
-      "first_order_theta", "first_order_se", "theta_independence",
-      "theta_overlap_delta", "theta_two_step_ivw", "theta_weighted_median",
-      "theta_weighted_mode", "Q", "Q_chisq_df", "Q_p_chisq", "Q_p_reported",
-      "Q_p_method", "cross_cov_model", "standardize_phenotypes", "lod_thresh",
-      "exclude_chr", "runtime_sec", "sample_policy", "confidence_set_bounded"
-    ),
+    main_results = c("pair_id", "exposure", "outcome", "status", "error_message",
+      setdiff(qtl2mr_batch_summary_columns, c("exposure", "outcome")), "locus_fit_status", "runtime_sec"),
     method_comparison = c(
-      "pair_id", "exposure", "outcome", "method", "estimate", "se",
-      "ci_lower", "ci_upper", "ci_type", "source", "note"
+      "pair_id", "exposure", "outcome", "method", "estimate", "se", "ci_lower", "ci_upper", "ci_type",
+      "source", "note", "ci_level", "bootstrap_B", "bootstrap_seed", "bootstrap_complete_B",
+      "bootstrap_failed_B"
     ),
-    selected_loci = c(
-      "pair_id", "exposure", "outcome", "instrument_trait", "marker", "chr",
-      "pos", "exposure_lod", "selected_by", "lod_thresh", "excluded_chr_rule",
-      "locus_rank", "locus_status", "drop_roles", "drop_reason",
-      "error_class", "error_message"
+    locus_results = c(
+      "pair_id", "exposure", "outcome", "marker", "chr", "pos", "kept", "drop_reason",
+      "F_X_block", "F_Y_block", "partial_R2_X_block", "partial_R2_Y_block", "steiger_pass",
+      "n_x", "n_y", "hsq_x", "hsq_y"
     ),
     overlap_qc = c(
-      "pair_id", "marker", "chr", "n_x", "n_y", "n_overlap", "overlap_frac_x",
-      "overlap_frac_y", "overlap_jaccard", "rho_xy", "rho_xy_star"
-    ),
-    first_stage_summary = c(
-      "pair_id", "marker", "chr", "F_X_block", "F_Y_block",
-      "partial_R2_X_block", "partial_R2_Y_block",
-      "n_x", "n_y", "df_x", "df_y", "theta", "se", "Q_min", "weight",
-      "hsq_x", "hsq_y", "hsq_status_x", "hsq_status_y"
+      "pair_id", "locus_index", "marker", "chr", "n_x", "n_y", "n_overlap",
+      "exposure_overlap_fraction", "outcome_overlap_fraction", "jaccard_overlap_fraction",
+      "complete_overlap", "independent_samples"
     ),
     warnings = c(
       "pair_id", "warning_id", "severity", "message", "consequence",
@@ -694,214 +680,43 @@ qtl2mr_empty_batch_table <- function(name) {
     ),
     run_manifest = c(
       "run_id", "created_at", "n_pairs_requested", "n_pairs_ok", "n_pairs_error",
-      "n_pairs_resumed", "sample_policy", "batch_common_n", "sample_retention_ratio",
-      "sample_retention_min", "sample_retention_gate_status", "nonestimable_locus_policy",
-      "n_loci_dropped_nonestimable", "parallel_backend", "n_workers",
-      "context_cache_enabled", "context_cache_hits", "context_cache_misses",
-      "lmm_fit_cache_enabled", "lmm_fit_cache_hits", "lmm_fit_cache_misses",
-      "wall_sec",
-      "mean_wall_sec_per_pair", "lmm_backend"
+      "n_pairs_resumed", "nonestimable_locus_policy", "n_loci_dropped_nonestimable",
+      "parallel_backend", "n_workers", "context_cache_hits", "context_cache_misses",
+      "lmm_fit_cache_hits", "lmm_fit_cache_misses", "wall_sec", "mean_wall_sec_per_pair", "lmm_backend"
     ),
-    sample_exclusions = c("pair_id", "exposure", "outcome", "sample_policy", "reason",
-      "n_input_samples", "n_excluded", "excluded_ids", "counts_overlap"),
+    sample_exclusions = c("trait", "reason", "n_input_samples", "n_excluded", "excluded_ids"),
     probability_normalization = c("pair_id", "chr", "marker", "n_normalized", "max_abs_sum_deviation"),
-    sample_qc = c(
-      "n_total_eligible", "n_batch_common", "sample_retention_ratio",
-      "sample_retention_min", "sample_retention_gate_status",
-      "n_traits", "n_pairs", "n_selected_rows", "n_selected_chr"
-    ),
     character()
   )
   qtl2mr_empty_dataframe(columns)
 }
 
-qtl2mr_empty_batch <- function(resources, pairs, config) {
-  config$sample_policy <- qtl2mr_batch_sample_policy(config$sample_policy)
+qtl2mr_batch_tables <- c("main_results", "method_comparison", "locus_results", "overlap_qc", "warnings",
+  "errors", "run_manifest", "sample_exclusions", "probability_normalization")
+
+qtl2mr_empty_batch <- function(resources, pairs, instruments, config) {
   config$probability_policy <- resources$probability_policy %||% "strict"
-  exclusions <- qtl2mr_batch_sample_exclusions(resources, pairs, config$sample_policy,
-    batch_traits = config$batch_traits)
-  out <- list(
-    main_results = qtl2mr_empty_batch_table("main_results"),
-    method_comparison = qtl2mr_empty_batch_table("method_comparison"),
-    selected_loci = qtl2mr_empty_batch_table("selected_loci"),
-    overlap_qc = qtl2mr_empty_batch_table("overlap_qc"),
-    first_stage_summary = qtl2mr_empty_batch_table("first_stage_summary"),
-    warnings = qtl2mr_batch_covariate_warnings(exclusions),
-    errors = qtl2mr_empty_batch_table("errors"),
-    run_manifest = qtl2mr_empty_batch_table("run_manifest"),
-    sample_qc = qtl2mr_empty_batch_table("sample_qc"),
-    sample_exclusions = exclusions,
-    probability_normalization = qtl2mr_empty_batch_table("probability_normalization"),
-    input_alignment = resources$sample_alignment %||% qtl2mr_input_alignment(resources),
-    config = config,
-    resources_metadata = resources$metadata,
-    pairs = pairs
-  )
+  out <- stats::setNames(lapply(qtl2mr_batch_tables, qtl2mr_empty_batch_table), qtl2mr_batch_tables)
+  out$sample_exclusions <- qtl2mr_batch_sample_exclusions(resources, pairs, instruments)
+  out$input_alignment <- resources$sample_alignment %||% qtl2mr_input_alignment(resources)
+  out$config <- config
+  out$resources_metadata <- resources$metadata
+  out$pairs <- pairs
   class(out) <- c("qtl2mr_batch_result", "list")
-  out
-}
-
-qtl2mr_block_wald_f <- function(beta, Sigma, ridge = 1e-10) {
-  beta <- matrix(as.numeric(beta), ncol = 1L)
-  k <- nrow(beta)
-  if (!k) return(NA_real_)
-  out <- tryCatch({
-    Sinv <- qtl2mr_mat_inv(as.matrix(Sigma), ridge = ridge)
-    as.numeric(t(beta) %*% Sinv %*% beta) / k
-  }, error = function(e) NA_real_)
-  if (is.finite(out)) out else NA_real_
-}
-
-qtl2mr_partial_r2_from_block_f <- function(F_value, k, df) {
-  if (!is.finite(F_value) || !is.finite(k) || !is.finite(df) || k <= 0 || df <= 0) {
-    return(NA_real_)
-  }
-  stat <- F_value * k
-  stat / (stat + df)
-}
-
-qtl2mr_strip_locus_block <- function(block,
-                                     per_locus_row = NULL,
-                                     selected_row = NULL,
-                                     ridge = 1e-10) {
-  if (is.null(block$beta_x) || is.null(block$beta_y) ||
-      is.null(block$Sigma_x) || is.null(block$Sigma_y) || is.null(block$Sigma_xy)) {
-    stop("Cannot strip locus block: beta/covariance fields are missing", call. = FALSE)
-  }
-  k <- length(block$beta_x)
-  df_x <- block$fit_x$df %||% NA_real_
-  df_y <- block$fit_y$df %||% NA_real_
-  F_x <- per_locus_row$F_X_block %||% NA_real_
-  if (!is.finite(F_x)) F_x <- qtl2mr_block_wald_f(block$beta_x, block$Sigma_x, ridge = ridge)
-  F_y <- qtl2mr_block_wald_f(block$beta_y, block$Sigma_y, ridge = ridge)
-  marker <- block$marker %||% selected_row$marker %||% NA_character_
-  chr <- block$chr %||% selected_row$chr %||% NA_character_
-  out <- list(
-    marker = marker,
-    chr = chr,
-    pos = selected_row$pos %||% NA_real_,
-    exposure_lod = selected_row$exposure_lod %||% NA_real_,
-    locus_rank = selected_row$locus_rank %||% NA_integer_,
-    beta_x = block$beta_x,
-    beta_y = block$beta_y,
-    Sigma_x = block$Sigma_x,
-    Sigma_y = block$Sigma_y,
-    Sigma_xy = block$Sigma_xy,
-    n_overlap = block$n_overlap %||% NA_integer_,
-    O_xy_summary = block$O_xy_summary %||% list(),
-    cross_cov_model = block$cross_cov_model %||% NA_character_,
-    rho_xy = block$rho_xy %||% NA_real_,
-    rho_xy_raw = block$rho_xy_raw %||% NA_real_,
-    rho_xy_star = block$rho_xy_star %||% NA_real_,
-    joint_psd_valid = block$joint_psd_valid %||% NA,
-    joint_psd_status = block$joint_psd_status %||% NA_character_,
-    joint_max_cross_singular_value = block$joint_max_cross_singular_value %||% NA_real_,
-    raw_space_psd_valid = block$raw_space_psd_valid %||% NA,
-    raw_space_psd_status = block$raw_space_psd_status %||% NA_character_,
-    raw_space_max_cross_singular_value = block$raw_space_max_cross_singular_value %||% NA_real_,
-    star_space_psd_valid = block$star_space_psd_valid %||% NA,
-    star_space_psd_status = block$star_space_psd_status %||% NA_character_,
-    star_space_max_cross_singular_value = block$star_space_max_cross_singular_value %||% NA_real_,
-    founders = block$founders %||% rownames(block$founder_H) %||% NULL,
-    contrasts = block$contrasts %||% NULL,
-    founder_H = block$founder_H %||% NULL,
-    hsq_x = block$hsq_x %||% block$fit_x$hsq %||% NA_real_,
-    hsq_y = block$hsq_y %||% block$fit_y$hsq %||% NA_real_,
-    hsq_status_x = block$fit_x$hsq_status %||% NA_character_,
-    hsq_status_y = block$fit_y$hsq_status %||% NA_character_,
-    fit_x = list(
-      n = block$fit_x$n %||% block$O_xy_summary$n_x %||% NA_integer_,
-      df = df_x,
-      sigma2 = block$fit_x$sigma2 %||% NA_real_,
-      phenotype_mean = block$fit_x$phenotype_mean %||% NA_real_,
-      phenotype_sd = block$fit_x$phenotype_sd %||% NA_real_
-    ),
-    fit_y = list(
-      n = block$fit_y$n %||% block$O_xy_summary$n_y %||% NA_integer_,
-      df = df_y,
-      sigma2 = block$fit_y$sigma2 %||% NA_real_,
-      phenotype_mean = block$fit_y$phenotype_mean %||% NA_real_,
-      phenotype_sd = block$fit_y$phenotype_sd %||% NA_real_
-    ),
-    F_X_block = F_x,
-    F_Y_block = F_y,
-    partial_R2_X_block = qtl2mr_partial_r2_from_block_f(F_x, k, df_x),
-    partial_R2_Y_block = qtl2mr_partial_r2_from_block_f(F_y, k, df_y),
-    local_theta = per_locus_row$theta %||% NA_real_,
-    local_se = per_locus_row$se %||% NA_real_,
-    local_Q_min = per_locus_row$Q_min %||% NA_real_,
-    local_weight = per_locus_row$weight %||% NA_real_
-  )
-  class(out) <- c("qtl2mr_stripped_locus_block", "list")
-  out
-}
-
-# Per-locus first-stage table (block F, partial R2, hsq) for batch results.
-qtl2mr_pair_first_stage_table <- function(pilot, ridge = 1e-10) {
-  blocks <- pilot$locus_blocks
-  if (!is.list(blocks) || !length(blocks)) stop("pilot does not contain locus_blocks", call. = FALSE)
-  per_locus <- pilot$diagnostic_layer$per_locus %||% data.frame()
-  selected <- pilot$selected_loci %||% data.frame()
-  stripped <- lapply(seq_along(blocks), function(i) {
-    block <- blocks[[i]]
-    marker <- block$marker %||% names(blocks)[[i]] %||% NA_character_
-    per_row <- if (nrow(per_locus) && "marker" %in% names(per_locus)) {
-      per_locus[match(marker, per_locus$marker), , drop = FALSE]
-    } else {
-      data.frame()
-    }
-    if (nrow(per_row) != 1L || is.na(per_row$marker[[1L]])) per_row <- data.frame()
-    selected_row <- if (nrow(selected) && "marker" %in% names(selected)) {
-      selected[match(marker, selected$marker), , drop = FALSE]
-    } else {
-      data.frame()
-    }
-    if (nrow(selected_row) != 1L || is.na(selected_row$marker[[1L]])) selected_row <- data.frame()
-    qtl2mr_strip_locus_block(block, per_locus_row = per_row, selected_row = selected_row, ridge = ridge)
-  })
-  names(stripped) <- vapply(stripped, function(x) as.character(x$marker %||% NA_character_), character(1))
-  if (anyNA(names(stripped)) || any(!nzchar(names(stripped)))) names(stripped) <- paste0("locus_", seq_along(stripped))
-  qtl2mr_first_stage_table(stripped)
-}
-
-qtl2mr_first_stage_table <- function(blocks) {
-  if (!is.list(blocks) || !length(blocks)) return(qtl2mr_empty_batch_table("first_stage_summary"))
-  rows <- lapply(seq_along(blocks), function(i) {
-    b <- blocks[[i]]
-    data.frame(
-      marker = b$marker %||% names(blocks)[[i]] %||% paste0("locus_", i),
-      chr = b$chr %||% NA_character_,
-      F_X_block = b$F_X_block %||% NA_real_,
-      F_Y_block = b$F_Y_block %||% NA_real_,
-      partial_R2_X_block = b$partial_R2_X_block %||% NA_real_,
-      partial_R2_Y_block = b$partial_R2_Y_block %||% NA_real_,
-      n_x = b$O_xy_summary$n_x %||% b$fit_x$n %||% NA_integer_,
-      n_y = b$O_xy_summary$n_y %||% b$fit_y$n %||% NA_integer_,
-      df_x = b$fit_x$df %||% NA_real_,
-      df_y = b$fit_y$df %||% NA_real_,
-      theta = b$local_theta %||% NA_real_,
-      se = b$local_se %||% NA_real_,
-      Q_min = b$local_Q_min %||% NA_real_,
-      weight = b$local_weight %||% NA_real_,
-      hsq_x = as.numeric(b$hsq_x %||% NA_real_),
-      hsq_y = as.numeric(b$hsq_y %||% NA_real_),
-      hsq_status_x = b$hsq_status_x %||% NA_character_,
-      hsq_status_y = b$hsq_status_y %||% NA_character_,
-      stringsAsFactors = FALSE
-    )
-  })
-  out <- do.call(rbind, rows)
-  rownames(out) <- NULL
   out
 }
 
 qtl2mr_batch_append <- function(batch, name, rows) {
   if (is.null(rows) || !nrow(rows)) return(batch)
+  # Point single-analysis file references in warnings to the batch tables.
   if (identical(name, "warnings") && "warning_id" %in% names(rows)) {
     normalized <- rows$warning_id == "probability_rounding_normalized"
+    covariates <- rows$warning_id == "incomplete_covariates"
     for (column in intersect(c("message", "recommended_action"), names(rows))) {
       rows[[column]][normalized] <- gsub("data/probability_normalization.csv",
         "batch_probability_normalization.csv", rows[[column]][normalized], fixed = TRUE)
+      rows[[column]][covariates] <- gsub("Per-locus, per-role counts and sample IDs are recorded in data/sample_alignment.csv; counts across loci are not additive.",
+        "Per-trait counts and sample IDs are recorded in batch_sample_exclusions.csv.", rows[[column]][covariates], fixed = TRUE)
     }
   }
   batch[[name]] <- if (nrow(batch[[name]])) {
@@ -915,111 +730,53 @@ qtl2mr_batch_append <- function(batch, name, rows) {
   batch
 }
 
-qtl2mr_batch_locus_audit <- function(pair, pilot) {
-  original <- pilot$selected_loci_original %||% pilot$selected_loci %||% data.frame()
-  if (!nrow(original)) return(qtl2mr_empty_batch_table("selected_loci"))
-  retained <- as.character((pilot$selected_loci %||% data.frame())$marker %||% character())
+# Every instrument of the pair with its first-stage statistics; loci dropped as
+# non-estimable keep their row with kept = FALSE and the failing role.
+qtl2mr_batch_locus_results <- function(pair, pilot) {
+  original <- pilot$selected_loci_original %||% data.frame()
+  if (!nrow(original)) return(qtl2mr_empty_batch_table("locus_results"))
+  first <- pilot$locus_first_stage %||% qtl2mr_locus_first_stage(pilot$locus_blocks)
   dropped <- pilot$dropped_loci %||% data.frame()
-  collapse_for_marker <- function(marker, column) {
-    if (!nrow(dropped) || !column %in% names(dropped)) return("")
-    values <- unique(as.character(dropped[dropped$marker == marker, column, drop = TRUE]))
-    values <- values[!is.na(values) & nzchar(values)]
-    paste(values, collapse = ";")
-  }
-  original$locus_status <- ifelse(
-    original$marker %in% retained,
-    "retained",
-    "dropped_nonestimable"
-  )
-  original$drop_roles <- vapply(original$marker, collapse_for_marker, character(1), column = "role")
-  original$drop_reason <- vapply(original$marker, collapse_for_marker, character(1), column = "drop_reason")
-  original$error_class <- vapply(original$marker, collapse_for_marker, character(1), column = "error_class")
-  original$error_message <- vapply(original$marker, collapse_for_marker, character(1), column = "error_message")
-  cbind(
-    pair_id = pair$pair_id,
-    exposure = pair$exposure,
-    outcome = pair$outcome,
-    instrument_trait = pair$instrument_trait,
-    original,
+  idx <- match(original$marker, first$marker)
+  reason <- vapply(original$marker, function(marker) {
+    d <- if (nrow(dropped)) dropped[dropped$marker == marker, , drop = FALSE] else dropped
+    if (!nrow(d)) return("")
+    kind <- ifelse(d$drop_reason == "nonestimable_founder_contrast", "nonestimable_", "fit_error_")
+    paste(unique(paste0(kind, d$role)), collapse = ";")
+  }, character(1), USE.NAMES = FALSE)
+  data.frame(
+    pair_id = pair$pair_id, exposure = pair$exposure, outcome = pair$outcome,
+    marker = original$marker, chr = as.character(original$chr),
+    pos = if ("pos" %in% names(original)) original$pos else NA_real_,
+    kept = !is.na(idx), drop_reason = reason,
+    F_X_block = first$F_X_block[idx], F_Y_block = first$F_Y_block[idx],
+    partial_R2_X_block = first$partial_R2_X_block[idx], partial_R2_Y_block = first$partial_R2_Y_block[idx],
+    steiger_pass = first$steiger_pass[idx], n_x = first$n_x[idx], n_y = first$n_y[idx],
+    hsq_x = first$hsq_x[idx], hsq_y = first$hsq_y[idx],
     stringsAsFactors = FALSE
   )
 }
 
-qtl2mr_compact_main_row <- function(pair, pilot, status, error_message, runtime_sec,
-                                    instrument_rule, sample_policy) {
+qtl2mr_batch_main_row <- function(pair, pilot, runtime_sec) {
   s <- pilot$summary
-  data.frame(
-    pair_id = pair$pair_id,
-    exposure = pair$exposure,
-    outcome = pair$outcome,
-    instrument_trait = pair$instrument_trait,
-    status = status,
-    error_message = error_message %||% "",
-    lmm_backend = s$lmm_backend %||% "not_available",
-    locus_fit_status = if (isTRUE((s$n_loci_dropped_nonestimable %||% 0L) > 0L)) {
-      "ok_with_dropped_nonestimable_loci"
-    } else {
-      "ok"
-    },
-    n_loci = s$n_loci[[1L]],
-    n_loci_selected = s$n_loci_selected %||% s$n_loci[[1L]],
-    n_loci_dropped_nonestimable = s$n_loci_dropped_nonestimable %||% 0L,
-    n_x_median = s$n_x_median %||% NA_real_,
-    n_y_median = s$n_y_median %||% NA_real_,
-    n_overlap_median = s$n_overlap_median %||% NA_real_,
-    theta_so = s$theta_so %||% s$theta[[1L]],
-    se_so = s$se_so %||% s$se[[1L]],
-    ci_lower_so = s$ci_lower_so %||% s$profile_ci_lower[[1L]],
-    ci_upper_so = s$ci_upper_so %||% s$profile_ci_upper[[1L]],
-    theta_reported = s$theta_reported %||% s$theta[[1L]],
-    se_reported = s$se_reported %||% s$se[[1L]],
-    reported_ci_lower = s$reported_ci_lower %||% s$profile_ci_lower[[1L]],
-    reported_ci_upper = s$reported_ci_upper %||% s$profile_ci_upper[[1L]],
-    reported_ci_type = s$reported_ci_type %||% "profile",
-    reported_estimator = s$reported_estimator %||% "Star-space qtl2mr",
-    reported_estimator_source = s$reported_estimator_source %||% "primary",
-    reported_estimator_policy = s$reported_estimator_policy %||% "diagnostic_only",
-    reported_estimator_reason = s$reported_estimator_reason %||% "",
-    theta = s$theta[[1L]],
-    se = s$se[[1L]],
-    profile_ci_lower = s$profile_ci_lower[[1L]],
-    profile_ci_upper = s$profile_ci_upper[[1L]],
-    profile_p = s$profile_p[[1L]],
-    primary_optimizer_status = s$primary_optimizer_status %||% NA_character_,
-    primary_bracket_status = s$primary_bracket_status %||% NA_character_,
-    primary_bracket_n_expand = s$primary_bracket_n_expand %||% NA_integer_,
-    primary_profile_ci_finite = s$primary_profile_ci_finite %||% NA,
-    primary_reliable = s$primary_reliable %||% NA,
-    numerical_ok = s$numerical_ok %||% NA,
-    confidence_set_type = s$confidence_set_type %||% "unresolved",
-    inference_status = s$inference_status %||% "not_calibrated",
-    effect_units = s$effect_units %||% NA_character_,
-    exposure_sd = s$exposure_sd %||% NA_real_,
-    outcome_sd = s$outcome_sd %||% NA_real_,
-    raw_conversion_available = s$raw_conversion_available %||% FALSE,
-    theta_raw_units = s$theta_raw_units %||% NA_real_,
-    se_raw_units = s$se_raw_units %||% NA_real_,
-    first_order_theta = s$first_order_theta %||% NA_real_,
-    first_order_se = s$first_order_se %||% NA_real_,
-    theta_independence = s$theta_independence[[1L]],
-    theta_overlap_delta = s$theta_overlap_delta[[1L]],
-    theta_two_step_ivw = s$theta_two_step_ivw[[1L]],
-    theta_weighted_median = s$theta_weighted_median[[1L]],
-    theta_weighted_mode = s$theta_weighted_mode[[1L]],
-    Q = s$Q[[1L]],
-    Q_chisq_df = s$Q_chisq_df[[1L]],
-    Q_p_chisq = s$Q_p_chisq[[1L]],
-    Q_p_reported = s$Q_p_reported[[1L]],
-    Q_p_method = s$Q_p_method[[1L]],
-    cross_cov_model = s$cross_cov_model[[1L]],
-    standardize_phenotypes = s$standardize_phenotypes[[1L]],
-    lod_thresh = instrument_rule$lod_thresh,
-    exclude_chr = paste(instrument_rule$exclude_chr %||% character(), collapse = ","),
-    runtime_sec = runtime_sec,
-    sample_policy = qtl2mr_batch_sample_policy(sample_policy),
-    confidence_set_bounded = s$confidence_set_bounded %||% NA,
-    stringsAsFactors = FALSE
+  missing <- setdiff(qtl2mr_batch_summary_columns, names(s))
+  if (length(missing)) stop("Internal error: summary is missing ", paste(missing, collapse = ", "), call. = FALSE)
+  row <- s[1L, qtl2mr_batch_summary_columns, drop = FALSE]
+  rownames(row) <- NULL
+  cbind(
+    data.frame(pair_id = pair$pair_id, stringsAsFactors = FALSE),
+    row,
+    data.frame(
+      status = "ok", error_message = "",
+      locus_fit_status = if (isTRUE((s$n_loci_dropped_nonestimable %||% 0L) > 0L)) "ok_with_dropped_nonestimable_loci" else "ok",
+      runtime_sec = runtime_sec, stringsAsFactors = FALSE
+    )
   )
+}
+
+qtl2mr_batch_error_main <- function(pairs, message, runtime_sec = NA_real_) {
+  data.frame(pair_id = pairs$pair_id, exposure = pairs$exposure, outcome = pairs$outcome,
+    status = "error", error_message = message, runtime_sec = runtime_sec, stringsAsFactors = FALSE)
 }
 
 qtl2mr_error_row <- function(pair, stage, error, runtime_sec = NA_real_) {
@@ -1061,25 +818,11 @@ qtl2mr_json_value <- function(x) {
 
 write_qtl2mr_batch_outputs <- function(batch, output_dir) {
   dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
-  utils::write.csv(batch$main_results, file.path(output_dir, "batch_main_results.csv"), row.names = FALSE)
-  utils::write.csv(batch$method_comparison, file.path(output_dir, "batch_method_comparison.csv"), row.names = FALSE)
-  utils::write.csv(batch$selected_loci, file.path(output_dir, "batch_selected_loci.csv"), row.names = FALSE)
-  utils::write.csv(batch$overlap_qc, file.path(output_dir, "batch_overlap_qc.csv"), row.names = FALSE)
-  utils::write.csv(batch$first_stage_summary, file.path(output_dir, "batch_first_stage_summary.csv"), row.names = FALSE)
-  utils::write.csv(batch$warnings, file.path(output_dir, "batch_warnings.csv"), row.names = FALSE)
-  utils::write.csv(batch$errors, file.path(output_dir, "batch_errors.csv"), row.names = FALSE)
-  utils::write.csv(batch$run_manifest, file.path(output_dir, "batch_run_manifest.csv"), row.names = FALSE)
-  utils::write.csv(batch$sample_qc, file.path(output_dir, "batch_sample_qc.csv"), row.names = FALSE)
-  utils::write.csv(batch$sample_exclusions %||% qtl2mr_empty_batch_table("sample_exclusions"),
-    file.path(output_dir, "batch_sample_exclusions.csv"), row.names = FALSE)
-  utils::write.csv(batch$probability_normalization %||% qtl2mr_empty_batch_table("probability_normalization"),
-    file.path(output_dir, "batch_probability_normalization.csv"), row.names = FALSE)
-  if (!is.null(batch$input_alignment)) utils::write.csv(batch$input_alignment, file.path(output_dir, "batch_input_alignment.csv"), row.names = FALSE)
+  tables <- c(qtl2mr_batch_tables, if (!is.null(batch$input_alignment)) "input_alignment")
+  for (name in tables) {
+    utils::write.csv(batch[[name]], file.path(output_dir, paste0("batch_", name, ".csv")), row.names = FALSE)
+  }
   writeLines(qtl2mr_json_value(batch$config), file.path(output_dir, "batch_config.json"))
-  tables <- c("main_results", "method_comparison", "selected_loci", "overlap_qc", "first_stage_summary",
-    "warnings", "errors", "run_manifest",
-    "sample_qc", "sample_exclusions", "probability_normalization",
-    if (!is.null(batch$input_alignment)) "input_alignment")
   invisible(c(paste0("batch_", tables, ".csv"), "batch_config.json"))
 }
 
@@ -1099,7 +842,7 @@ qtl2mr_atomic_save_rds <- function(object, path) {
 }
 
 qtl2mr_write_resume_state <- function(output_dir, fingerprint, table_hashes = NULL) {
-  qtl2mr_atomic_save_rds(list(schema = "qtl2mr-batch-v050", fingerprint = fingerprint,
+  qtl2mr_atomic_save_rds(list(schema = "qtl2mr-batch-v060", fingerprint = fingerprint,
     tables = table_hashes), file.path(output_dir, "batch_resume_state.rds"))
 }
 
@@ -1109,7 +852,7 @@ qtl2mr_pair_record_path <- function(output_dir, pair_index) {
 
 qtl2mr_write_pair_record <- function(output_dir, pair_index, pair_id, fingerprint, payload) {
   qtl2mr_atomic_save_rds(list(
-    schema = "qtl2mr-batch-pair-v050", pair_index = as.integer(pair_index), pair_id = pair_id,
+    schema = "qtl2mr-batch-pair-v060", pair_index = as.integer(pair_index), pair_id = pair_id,
     fingerprint = fingerprint, payload = payload, payload_md5 = qtl2mr_fingerprint_object(payload)
   ), qtl2mr_pair_record_path(output_dir, pair_index))
 }
@@ -1126,8 +869,8 @@ qtl2mr_load_resume_records <- function(output_dir, fingerprint, pairs) {
   state <- tryCatch(readRDS(state_path), error = function(e) {
     qtl2mr_resume_abort(paste("Cannot resume: unreadable checkpoint:", conditionMessage(e)))
   })
-  if (!is.list(state) || !identical(state$schema, "qtl2mr-batch-v050") || !identical(state$fingerprint, fingerprint)) {
-    qtl2mr_resume_abort("Cannot resume: input, parameters, selected loci or implementation fingerprint changed")
+  if (!is.list(state) || !identical(state$schema, "qtl2mr-batch-v060") || !identical(state$fingerprint, fingerprint)) {
+    qtl2mr_resume_abort("Cannot resume: input, parameters, instruments or implementation fingerprint changed")
   }
   if (length(state$tables)) {
     files <- file.path(output_dir, names(state$tables))
@@ -1139,10 +882,10 @@ qtl2mr_load_resume_records <- function(output_dir, fingerprint, pairs) {
   records <- lapply(files, function(path) {
     record <- tryCatch(readRDS(path), error = function(e) {
       qtl2mr_resume_abort(paste0("Cannot resume: unreadable pair record ", basename(path),
-        "; remove it or use force = TRUE"))
+        "; remove it or use overwrite = TRUE"))
     })
     index <- record$pair_index %||% NA_integer_
-    valid <- is.list(record) && identical(record$schema, "qtl2mr-batch-pair-v050") &&
+    valid <- is.list(record) && identical(record$schema, "qtl2mr-batch-pair-v060") &&
       identical(record$fingerprint, fingerprint) && length(index) == 1L && !is.na(index) &&
       index >= 1L && index <= nrow(pairs) && identical(record$pair_id, pairs$pair_id[[index]]) &&
       identical(qtl2mr_fingerprint_object(record$payload), record$payload_md5)
@@ -1175,81 +918,53 @@ qtl2mr_clear_batch_outputs <- function(output_dir) {
 qtl2mr_batch_append_pair <- function(batch, result) {
   batch <- qtl2mr_batch_append(batch, "main_results", result$main)
   batch <- qtl2mr_batch_append(batch, "method_comparison", result$methods)
-  batch <- qtl2mr_batch_append(batch, "selected_loci", result$selected)
+  batch <- qtl2mr_batch_append(batch, "locus_results", result$loci)
   batch <- qtl2mr_batch_append(batch, "overlap_qc", result$overlap)
-  batch <- qtl2mr_batch_append(batch, "first_stage_summary", result$first)
   batch <- qtl2mr_batch_append(batch, "warnings", result$warnings)
   batch <- qtl2mr_batch_append(batch, "errors", result$error)
   qtl2mr_batch_append(batch, "probability_normalization", result$probability)
 }
 
-qtl2mr_batch_select_for_pair <- function(resources, pair, instrument_rule) {
-  qtl2mr_select_loci_for_request(resources, qtl2mr_resolve_instrument_request(pair, instrument_rule))
-}
-
-# Fit one exposure-outcome pair. Errors are returned as error rows; the caller
-# applies fail_fast.
-qtl2mr_batch_fit_pair <- function(resources, pair, instrument_rule, sample_policy,
-                                  on_nonestimable_locus, fit_options, batch_samples,
-                                  context_cache, fit_cache) {
+# Fit one exposure-outcome pair exactly as run_qtl2mr_analysis() would fit
+# qtl2mr_pair_input(resources, instruments, exposure, outcome). Errors are
+# returned as error rows; the caller applies fail_fast.
+qtl2mr_batch_fit_pair <- function(resources, pair, instruments, settings, context_cache, fit_cache) {
   t0 <- proc.time()[["elapsed"]]
   tryCatch({
-    selected <- qtl2mr_batch_select_for_pair(resources, pair, instrument_rule)
-    if (nrow(selected) < fit_options$min_loci) stop("no_selected_loci: selected loci below min_loci", call. = FALSE)
-    samples <- if (identical(sample_policy, "batch_common_complete")) batch_samples else
-      qtl2mr_make_common_complete_samples(resources, exposure = pair$exposure, outcome = pair$outcome,
-        selected_chr = selected$chr)
-    if (length(samples) < fit_options$min_samples) stop("too_few_samples: common complete samples below min_samples", call. = FALSE)
-    prepared <- as_qtl2mr_prepared_input(
-      allele_probs = resources$allele_probs, pheno = resources$pheno, covar = resources$covar,
-      kinship = resources$kinship, marker_map = resources$marker_map, selected_loci = selected,
-      exposure = pair$exposure, outcome = pair$outcome,
-      exposure_samples = samples, outcome_samples = samples,
-      probability_policy = resources$probability_policy %||% "strict",
-      metadata = c(resources$metadata, list(pair_id = pair$pair_id))
-    )
-    pilot <- run_prepared_qtl2mr(
-      prepared, exposure = pair$exposure, outcome = pair$outcome, loci = NULL, write_outputs = FALSE,
-      verbose = isTRUE(fit_options$verbose),
-      standardize_phenotypes = isTRUE(fit_options$standardize_phenotypes),
-      cross_cov_model = fit_options$cross_cov_model,
-      heterogeneity_method = fit_options$heterogeneity_method,
-      q_sim_n = fit_options$q_sim_n, q_sim_seed = fit_options$q_sim_seed,
-      diagnostic_bootstrap_B = fit_options$diagnostic_bootstrap_B,
-      diagnostic_bootstrap_seed = fit_options$diagnostic_bootstrap_seed,
-      reported_estimator_policy = fit_options$reported_estimator_policy,
-      engine = fit_options$engine, context_cache = context_cache, fit_cache = fit_cache,
-      drop_nonestimable_loci = identical(on_nonestimable_locus, "drop")
-    )
+    rows <- qtl2mr_exposure_instruments(instruments, pair$exposure)
+    prepared <- qtl2mr_pair_prepared(resources, rows, pair$exposure, pair$outcome,
+      metadata = c(resources$metadata, list(pair_id = pair$pair_id)))
+    pilot <- qtl2mr_fit_prepared(prepared, pair$exposure, pair$outcome, settings, verbose = FALSE,
+      context_cache = context_cache, fit_cache = fit_cache)
+    if (pilot$summary$n_loci[[1L]] < settings$min_loci) {
+      stop(sprintf("too_few_loci: %d loci remain after dropping non-estimable loci, below min_loci = %d",
+        pilot$summary$n_loci[[1L]], settings$min_loci), call. = FALSE)
+    }
     runtime <- proc.time()[["elapsed"]] - t0
-    main <- qtl2mr_compact_main_row(pair, pilot, "ok", "", runtime, instrument_rule, sample_policy)
-    methods <- cbind(pair_id = pair$pair_id, exposure = pair$exposure, outcome = pair$outcome,
-      qtl2mr_method_comparison_table(pilot))
-    warn <- qtl2mr_warning_table(pilot, sample_policy = sample_policy)
+    warn <- qtl2mr_warning_table(pilot)
     if (nrow(warn)) warn <- cbind(pair_id = pair$pair_id, warn)
+    overlap <- pilot$overlap_summary
     list(
-      main = main, methods = methods, selected = qtl2mr_batch_locus_audit(pair, pilot),
-      overlap = cbind(pair_id = pair$pair_id, pilot$overlap_summary),
-      first = cbind(pair_id = pair$pair_id, qtl2mr_pair_first_stage_table(pilot)),
+      main = qtl2mr_batch_main_row(pair, pilot, runtime),
+      methods = cbind(pair_id = pair$pair_id, exposure = pair$exposure, outcome = pair$outcome,
+        qtl2mr_method_comparison_table(pilot)),
+      loci = qtl2mr_batch_locus_results(pair, pilot),
+      overlap = if (nrow(overlap)) cbind(pair_id = pair$pair_id, overlap) else NULL,
       warnings = warn,
       probability = qtl2mr_batch_probability_table(pair, pilot), error = NULL
     )
   }, error = function(e) {
     runtime <- proc.time()[["elapsed"]] - t0
     list(
-      main = data.frame(pair_id = pair$pair_id, exposure = pair$exposure, outcome = pair$outcome,
-        instrument_trait = pair$instrument_trait, status = "error", error_message = conditionMessage(e),
-        runtime_sec = runtime, sample_policy = sample_policy, stringsAsFactors = FALSE),
+      main = qtl2mr_batch_error_main(pair, conditionMessage(e), runtime),
       error = qtl2mr_error_row(pair, "pair", e, runtime_sec = runtime)
     )
   })
 }
 
-qtl2mr_batch_worker_failure_rows <- function(pairs, message, sample_policy) {
+qtl2mr_batch_worker_failure_rows <- function(pairs, message) {
   list(
-    main = data.frame(pair_id = pairs$pair_id, exposure = pairs$exposure, outcome = pairs$outcome,
-      instrument_trait = pairs$instrument_trait, status = "error", error_message = message,
-      runtime_sec = NA_real_, sample_policy = sample_policy, stringsAsFactors = FALSE),
+    main = qtl2mr_batch_error_main(pairs, message),
     error = data.frame(pair_id = pairs$pair_id, exposure = pairs$exposure, outcome = pairs$outcome,
       stage = "parallel_worker", error_class = "qtl2mr_worker_failure", error_message = message,
       traceback_available = FALSE, runtime_sec = NA_real_, stringsAsFactors = FALSE)
@@ -1261,7 +976,7 @@ qtl2mr_batch_assemble <- function(batch, records, results, todo, pairs, prefligh
   by_id <- c(lapply(records, function(r) r$payload), stats::setNames(results, todo$pair_id))
   for (id in pairs$pair_id) if (!is.null(by_id[[id]])) batch <- qtl2mr_batch_append_pair(batch, by_id[[id]])
   batch <- qtl2mr_append_preflight_errors(batch, preflight)
-  qtl2mr_batch_finalize_main(batch, pairs)
+  qtl2mr_batch_finalize(batch, pairs)
 }
 
 # On a fail_fast stop, completed pairs are published so the user can inspect them;
@@ -1278,11 +993,18 @@ qtl2mr_batch_publish_partial <- function(output_dir, records, results, todo, bat
   invisible(output_dir)
 }
 
-qtl2mr_batch_finalize_main <- function(batch, pairs) {
+# Every table gets its documented columns first, in a fixed order, whether or
+# not it has rows; main results follow the order of pairs.
+qtl2mr_batch_finalize <- function(batch, pairs) {
+  for (name in setdiff(qtl2mr_batch_tables, "run_manifest")) {
+    table <- batch[[name]]
+    canonical <- names(qtl2mr_empty_batch_table(name))
+    for (nm in setdiff(canonical, names(table))) table[[nm]] <- rep(NA, nrow(table))
+    table <- table[, c(canonical, setdiff(names(table), canonical)), drop = FALSE]
+    rownames(table) <- NULL
+    batch[[name]] <- table
+  }
   main <- batch$main_results
-  canonical <- names(qtl2mr_empty_batch_table("main_results"))
-  for (nm in setdiff(canonical, names(main))) main[[nm]] <- rep(NA, nrow(main))
-  main <- main[, c(canonical, setdiff(names(main), canonical)), drop = FALSE]
   if (nrow(main)) main <- main[order(match(main$pair_id, pairs$pair_id), na.last = TRUE), , drop = FALSE]
   rownames(main) <- NULL
   batch$main_results <- main
@@ -1291,87 +1013,64 @@ qtl2mr_batch_finalize_main <- function(batch, pairs) {
 
 run_qtl2mr_batch <- function(resources,
                              pairs,
-                             instrument_rule = list(),
-                             sample_policy = c("pair_common_complete", "batch_common_complete"),
+                             instruments,
                              on_nonestimable_locus = c("fail", "drop"),
-                             min_sample_retention = 0.85,
-                             fit_options = list(),
+                             reported_estimator_policy = c("diagnostic_only", "strict_so", "auto_fallback"),
+                             heterogeneity_method = c("chisq", "simulation", "auto", "none"),
+                             heterogeneity_nsim = 1000L,
+                             heterogeneity_seed = 1L,
+                             diagnostic_bootstrap_B = 0L,
+                             diagnostic_bootstrap_seed = 1L,
+                             standardize_phenotypes = TRUE,
+                             cross_cov_model = c("star", "raw", "zero"),
+                             min_samples = 50L,
+                             min_loci = 1L,
                              n_workers = 1L,
                              fail_fast = FALSE,
                              resume = FALSE,
-                             force = FALSE,
+                             overwrite = FALSE,
                              output_dir = NULL,
                              progress = TRUE) {
   if (!inherits(resources, "qtl2mr_resources")) stop("resources must come from qtl2mr_prepare_resources()", call. = FALSE)
-  sample_policy <- match.arg(sample_policy)
-  on_nonestimable_locus <- match.arg(on_nonestimable_locus)
+  if (missing(instruments)) {
+    stop("instruments is required; select them with qtl2mr_select_instruments() or supply a table with exposure and marker columns", call. = FALSE)
+  }
   fail_fast <- qtl2mr_check_flag(fail_fast, "fail_fast")
   resume <- qtl2mr_check_flag(resume, "resume")
-  force <- qtl2mr_check_flag(force, "force")
+  overwrite <- qtl2mr_check_flag(overwrite, "overwrite")
   progress <- qtl2mr_check_flag(progress, "progress")
-  if (!is.numeric(min_sample_retention) || length(min_sample_retention) != 1L || !is.finite(min_sample_retention) ||
-      min_sample_retention < 0 || min_sample_retention > 1) {
-    stop("min_sample_retention must be one number between 0 and 1", call. = FALSE)
-  }
-  if (!is.numeric(n_workers) || length(n_workers) != 1L || !is.finite(n_workers) || n_workers < 1 ||
-      n_workers != as.integer(n_workers)) {
-    stop("n_workers must be a positive integer", call. = FALSE)
-  }
-  n_workers <- as.integer(n_workers)
-  pairs <- qtl2mr_normalize_pairs(pairs)
-  instrument_rule <- qtl2mr_batch_defaults(instrument_rule, list(
-    source = "exposure_qtl_scan", lod_thresh = 4, peak_method = "contiguous_lod_island_max",
-    exclude_chr = "X", max_loci = NULL))
-  fit_options <- qtl2mr_batch_fit_options(fit_options)
-  config <- list(
-    instrument_rule = instrument_rule,
-    sample_policy = sample_policy,
-    on_nonestimable_locus = on_nonestimable_locus,
-    min_sample_retention = if (identical(sample_policy, "batch_common_complete")) min_sample_retention else NA_real_,
-    fit_options = fit_options
+  n_workers <- qtl2mr_check_count(n_workers, "n_workers")
+  settings <- qtl2mr_fit_settings(
+    on_nonestimable_locus = match.arg(on_nonestimable_locus),
+    reported_estimator_policy = match.arg(reported_estimator_policy),
+    heterogeneity_method = match.arg(heterogeneity_method),
+    heterogeneity_nsim = heterogeneity_nsim, heterogeneity_seed = heterogeneity_seed,
+    diagnostic_bootstrap_B = diagnostic_bootstrap_B, diagnostic_bootstrap_seed = diagnostic_bootstrap_seed,
+    standardize_phenotypes = standardize_phenotypes, cross_cov_model = match.arg(cross_cov_model)
   )
+  settings$min_samples <- qtl2mr_check_count(min_samples, "min_samples")
+  settings$min_loci <- qtl2mr_check_count(min_loci, "min_loci")
+  pairs <- qtl2mr_normalize_pairs(pairs)
+  instruments <- qtl2mr_normalize_instruments(instruments, resources)
+  config <- settings
 
-  # Destination, pair preflight, the sample-retention gate and the checkpoint are
-  # all checked before anything in output_dir is written or removed.
-  qtl2mr_check_batch_destination(output_dir, resume, force)
-  preflight <- qtl2mr_batch_preflight(resources, pairs, instrument_rule, fit_options, fail_fast)
+  # Destination, pair preflight and the checkpoint are all checked before
+  # anything in output_dir is written or removed.
+  qtl2mr_check_batch_destination(output_dir, resume, overwrite)
+  preflight <- qtl2mr_batch_preflight(resources, pairs, instruments, settings$min_loci,
+    settings$min_samples, fail_fast)
   valid <- preflight$valid
-  batch <- qtl2mr_empty_batch(resources, pairs, c(config, list(
+  batch <- qtl2mr_empty_batch(resources, valid, instruments, c(config, list(
     batch_traits = unique(c(valid$exposure, valid$outcome)), created_at = as.character(Sys.time()))))
   run_id <- format(Sys.time(), "%Y%m%d_%H%M%S")
   t_run <- proc.time()[["elapsed"]]
 
-  batch_samples <- NULL
-  if (identical(sample_policy, "batch_common_complete") && nrow(valid)) {
-    selected <- qtl2mr_selected_loci_for_pairs(resources, valid, instrument_rule)
-    selected_chr <- unique(as.character(selected$chr))
-    traits <- unique(c(valid$exposure, valid$outcome))
-    eligible <- qtl2mr_make_batch_eligible_samples(resources, selected_chr = selected_chr)
-    batch_samples <- qtl2mr_make_batch_common_complete_samples(resources, traits = traits, selected_chr = selected_chr)
-    ratio <- if (length(eligible)) length(batch_samples) / length(eligible) else NA_real_
-    gate <- if (is.finite(ratio) && ratio >= min_sample_retention) "pass" else "fail"
-    batch$sample_qc <- data.frame(
-      n_total_eligible = length(eligible), n_batch_common = length(batch_samples),
-      sample_retention_ratio = ratio, sample_retention_min = min_sample_retention,
-      sample_retention_gate_status = gate, n_traits = length(traits), n_pairs = nrow(valid),
-      n_selected_rows = nrow(selected), n_selected_chr = length(selected_chr), stringsAsFactors = FALSE)
-    if (identical(gate, "fail")) {
-      stop(sprintf(paste0("batch_common_complete keeps %d of %d eligible samples (retention %.3f), below ",
-        "min_sample_retention = %.3f. Use sample_policy = \"pair_common_complete\", or lower ",
-        "min_sample_retention to accept the sample loss."), length(batch_samples), length(eligible),
-        ratio, min_sample_retention), call. = FALSE)
-    }
-    if (length(batch_samples) < fit_options$min_samples) {
-      stop("too_few_samples: batch common complete samples below min_samples", call. = FALSE)
-    }
-  }
-
   fingerprint <- if (is.null(output_dir)) NULL else
-    qtl2mr_batch_fingerprint(resources, pairs, config, markers = preflight$markers)
+    qtl2mr_batch_fingerprint(resources, pairs, instruments, config, markers = preflight$markers)
   occupied <- !is.null(output_dir) && length(qtl2mr_batch_owned_paths(output_dir)) > 0L
   records <- list()
-  if (occupied && resume && !force) records <- qtl2mr_load_resume_records(output_dir, fingerprint, pairs)
-  if (occupied && force) qtl2mr_clear_batch_outputs(output_dir)
+  if (occupied && resume && !overwrite) records <- qtl2mr_load_resume_records(output_dir, fingerprint, pairs)
+  if (occupied && overwrite) qtl2mr_clear_batch_outputs(output_dir)
   if (!is.null(output_dir)) {
     dir.create(qtl2mr_batch_records_dir(output_dir), recursive = TRUE, showWarnings = FALSE)
     qtl2mr_write_resume_state(output_dir, fingerprint)
@@ -1380,14 +1079,12 @@ run_qtl2mr_batch <- function(resources,
   pair_index <- match(todo$pair_id, pairs$pair_id)
   fit_one <- function(i, context_cache, fit_cache) {
     pair <- todo[i, , drop = FALSE]
-    result <- qtl2mr_batch_fit_pair(resources, pair, instrument_rule, sample_policy, on_nonestimable_locus,
-      fit_options, batch_samples, context_cache, fit_cache)
+    result <- qtl2mr_batch_fit_pair(resources, pair, instruments, settings, context_cache, fit_cache)
     if (!is.null(output_dir) && is.null(result$error)) {
       qtl2mr_write_pair_record(output_dir, pair_index[[i]], pair$pair_id, fingerprint, result)
     }
     result
   }
-  new_cache <- function(enabled) if (isTRUE(enabled)) qtl2mr_context_cache_new() else NULL
   results <- vector("list", nrow(todo))
   cache_stats <- list()
   first_failure <- NULL
@@ -1399,8 +1096,8 @@ run_qtl2mr_batch <- function(resources,
     # Each exposure group runs in one worker. With fail_fast, a worker stops at
     # its first failing pair; groups already running elsewhere finish first.
     run_group <- function(idx) {
-      context_cache <- new_cache(fit_options$cache_contexts)
-      fit_cache <- new_cache(fit_options$cache_lmm_fits)
+      context_cache <- qtl2mr_context_cache_new()
+      fit_cache <- qtl2mr_context_cache_new()
       if (progress) message(sprintf("[qtl2mr batch] exposure %s: %d pairs", todo$exposure[[idx[[1L]]]], length(idx)))
       out <- vector("list", length(idx))
       for (k in seq_along(idx)) {
@@ -1424,7 +1121,7 @@ run_qtl2mr_batch <- function(resources,
       message_text <- if (inherits(value, "condition")) conditionMessage(value) else
         if (inherits(value, "try-error")) as.character(value) else "parallel worker returned no result"
       failure <- qtl2mr_batch_worker_failure_rows(todo[idx, , drop = FALSE],
-        paste("parallel worker failed:", message_text), sample_policy)
+        paste("parallel worker failed:", message_text))
       for (k in seq_along(idx)) {
         saved <- qtl2mr_read_pair_record(output_dir, pair_index[[idx[[k]]]], todo$pair_id[[idx[[k]]]], fingerprint)
         results[[idx[[k]]]] <- saved %||% list(main = failure$main[k, , drop = FALSE], error = failure$error[k, , drop = FALSE])
@@ -1435,8 +1132,8 @@ run_qtl2mr_batch <- function(resources,
       if (length(failed)) first_failure <- results[[failed[[1L]]]]$error
     }
   } else {
-    context_cache <- new_cache(fit_options$cache_contexts)
-    fit_cache <- new_cache(fit_options$cache_lmm_fits)
+    context_cache <- qtl2mr_context_cache_new()
+    fit_cache <- qtl2mr_context_cache_new()
     for (i in seq_len(nrow(todo))) {
       if (progress) message(sprintf("[qtl2mr batch] %d/%d %s: %s -> %s", i, nrow(todo), todo$pair_id[[i]],
         todo$exposure[[i]], todo$outcome[[i]]))
@@ -1463,17 +1160,10 @@ run_qtl2mr_batch <- function(resources,
     n_pairs_ok = sum(batch$main_results$status == "ok", na.rm = TRUE),
     n_pairs_error = sum(batch$main_results$status == "error", na.rm = TRUE),
     n_pairs_resumed = length(records),
-    sample_policy = sample_policy,
-    batch_common_n = length(batch_samples %||% character()),
-    sample_retention_ratio = batch$sample_qc$sample_retention_ratio[1L] %||% NA_real_,
-    sample_retention_min = config$min_sample_retention,
-    sample_retention_gate_status = if (identical(sample_policy, "batch_common_complete")) batch$sample_qc$sample_retention_gate_status[1L] %||% NA_character_ else "not_applicable",
-    nonestimable_locus_policy = if (identical(on_nonestimable_locus, "drop")) "drop_audited" else "fail_closed",
+    nonestimable_locus_policy = if (identical(settings$on_nonestimable_locus, "drop")) "drop_audited" else "fail_closed",
     n_loci_dropped_nonestimable = sum(batch$main_results$n_loci_dropped_nonestimable %||% 0L, na.rm = TRUE),
     parallel_backend = backend, n_workers = n_workers,
-    context_cache_enabled = isTRUE(fit_options$cache_contexts),
     context_cache_hits = stat_sum(1L, "hits"), context_cache_misses = stat_sum(1L, "misses"),
-    lmm_fit_cache_enabled = isTRUE(fit_options$cache_lmm_fits),
     lmm_fit_cache_hits = stat_sum(2L, "hits"), lmm_fit_cache_misses = stat_sum(2L, "misses"),
     wall_sec = wall_sec, mean_wall_sec_per_pair = wall_sec / max(nrow(todo), 1L),
     lmm_backend = qtl2mr_backend_label(batch$main_results$lmm_backend[batch$main_results$status == "ok"]),
@@ -1487,4 +1177,3 @@ run_qtl2mr_batch <- function(resources,
   }
   batch
 }
-

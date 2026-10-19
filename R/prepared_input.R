@@ -889,6 +889,7 @@ run_prepared_qtl2mr <- function(input,
   common_sd <- function(z) length(z) && all(is.finite(z)) && all(abs(z - z[[1L]]) <= 1e-10 * max(abs(z)))
   raw_conversion_available <- !isTRUE(standardize_phenotypes) || (common_sd(sd_x) && common_sd(sd_y))
   raw_multiplier <- if (!isTRUE(standardize_phenotypes)) 1 else if (raw_conversion_available) sd_y[[1L]] / sd_x[[1L]] else NA_real_
+  locus_first_stage <- qtl2mr_locus_first_stage(blocks, ridge = ridge)
   summary <- data.frame(
     exposure = exposure,
     outcome = outcome,
@@ -896,10 +897,7 @@ run_prepared_qtl2mr <- function(input,
     n_loci = length(blocks),
     n_loci_selected = n_loci_selected,
     n_loci_dropped_nonestimable = n_loci_dropped,
-    theta_so = fit$theta,
-    se_so = fit$se,
-    ci_lower_so = fit$profile_ci_lower,
-    ci_upper_so = fit$profile_ci_upper,
+    n_loci_steiger_fail = sum(locus_first_stage$steiger_pass %in% FALSE),
     theta = fit$theta,
     se = fit$se,
     profile_ci_lower = fit$profile_ci_lower,
@@ -994,7 +992,6 @@ run_prepared_qtl2mr <- function(input,
     summary$n_loci_independent_samples <- sum(overlap_summary$independent_samples, na.rm = TRUE)
     summary$n_loci_complete_overlap <- sum(overlap_summary$complete_overlap, na.rm = TRUE)
   }
-  summary$sample_policy <- "role_specific_complete"
   summary$confidence_set_bounded <- qtl2mr_confidence_set_bounded(fit)
   hsq_table <- qtl2mr_hsq_table(blocks, exposure = exposure, outcome = outcome)
   founder_residuals <- do.call(rbind, lapply(blocks, founder_residual_scores, theta = fit$theta))
@@ -1006,6 +1003,7 @@ run_prepared_qtl2mr <- function(input,
 	    selected_loci = selected_retained,
 	    selected_loci_original = selected,
 	    dropped_loci = dropped_loci,
+	    locus_first_stage = locus_first_stage,
 	    locus_diagnostics = fit$locus_diagnostics,
     diagnostic_layer = diagnostic_layer,
     overlap_summary = overlap_summary,
@@ -1034,6 +1032,47 @@ run_prepared_qtl2mr <- function(input,
     saveRDS(fit, file.path(output_dir, "prepared_multilocus_founder_mr.rds"))
   }
   out
+}
+
+# Statistical settings shared by run_qtl2mr_analysis() and run_qtl2mr_batch();
+# both entry points fit a pair through qtl2mr_fit_prepared() with them.
+qtl2mr_fit_settings <- function(on_nonestimable_locus,
+                                reported_estimator_policy,
+                                heterogeneity_method,
+                                heterogeneity_nsim,
+                                heterogeneity_seed,
+                                diagnostic_bootstrap_B,
+                                diagnostic_bootstrap_seed,
+                                standardize_phenotypes,
+                                cross_cov_model) {
+  list(
+    on_nonestimable_locus = on_nonestimable_locus,
+    reported_estimator_policy = reported_estimator_policy,
+    heterogeneity_method = heterogeneity_method,
+    heterogeneity_nsim = heterogeneity_nsim,
+    heterogeneity_seed = heterogeneity_seed,
+    diagnostic_bootstrap_B = diagnostic_bootstrap_B,
+    diagnostic_bootstrap_seed = diagnostic_bootstrap_seed,
+    standardize_phenotypes = qtl2mr_check_flag(standardize_phenotypes, "standardize_phenotypes"),
+    cross_cov_model = cross_cov_model
+  )
+}
+
+qtl2mr_fit_prepared <- function(input, exposure, outcome, settings, loci = NULL, verbose = FALSE,
+                                output_dir = NULL, write_outputs = FALSE, progress_callback = NULL,
+                                context_cache = NULL, fit_cache = NULL) {
+  run_prepared_qtl2mr(
+    input, exposure = exposure, outcome = outcome, loci = loci, output_dir = output_dir,
+    write_outputs = write_outputs, verbose = verbose,
+    standardize_phenotypes = settings$standardize_phenotypes, cross_cov_model = settings$cross_cov_model,
+    progress_callback = progress_callback, heterogeneity_method = settings$heterogeneity_method,
+    q_sim_n = settings$heterogeneity_nsim, q_sim_seed = settings$heterogeneity_seed,
+    diagnostic_bootstrap_B = settings$diagnostic_bootstrap_B,
+    diagnostic_bootstrap_seed = settings$diagnostic_bootstrap_seed,
+    reported_estimator_policy = settings$reported_estimator_policy,
+    context_cache = context_cache, fit_cache = fit_cache,
+    drop_nonestimable_loci = identical(settings$on_nonestimable_locus, "drop")
+  )
 }
 
 fit_mr_locus_block_overlap <- function(genoprobs,

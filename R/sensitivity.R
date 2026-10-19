@@ -191,6 +191,47 @@ refit_qtl2mr_subset <- function(result,
   )
 }
 
+# Steiger direction check: repeat the multilocus fit without loci whose founder
+# effects explain more outcome than exposure variance. Only the combination is
+# refitted; when no locus fails, the primary fit is reported unchanged.
+qtl2mr_steiger_sensitivity <- function(pilot, ridge = 1e-10) {
+  first <- pilot$locus_first_stage %||% qtl2mr_locus_first_stage(pilot$locus_blocks, ridge = ridge)
+  s <- pilot$summary
+  markers <- names(pilot$locus_blocks)
+  removed <- intersect(first$marker[first$steiger_pass %in% FALSE], markers)
+  keep <- setdiff(markers, removed)
+  reason <- "drop loci with partial R2_X < partial R2_Y"
+  empty_row <- function(status, notes) data.frame(set_name = "steiger_filtered", n_loci = length(keep),
+    theta = NA_real_, se = NA_real_, profile_ci_lower = NA_real_, profile_ci_upper = NA_real_,
+    Qmin = NA_real_, overlap_delta = NA_real_, status = status, reason = reason, notes = notes,
+    stringsAsFactors = FALSE)
+  row <- if (!length(removed)) {
+    data.frame(set_name = "steiger_filtered", n_loci = length(markers), theta = s$theta[[1L]],
+      se = s$se[[1L]], profile_ci_lower = s$profile_ci_lower[[1L]], profile_ci_upper = s$profile_ci_upper[[1L]],
+      Qmin = s$Q[[1L]], overlap_delta = s$theta_overlap_delta[[1L]], status = "no_loci_removed",
+      reason = reason, notes = "Every locus has partial R2_X >= partial R2_Y; the primary fit is shown.",
+      stringsAsFactors = FALSE)
+  } else if (!length(keep)) {
+    empty_row("no_loci_left", "Every locus has partial R2_X < partial R2_Y.")
+  } else {
+    tryCatch(refit_qtl2mr_subset(structure(list(pilot = pilot), class = c("qtl2mr_analysis_result", "list")),
+      subset = keep, reason = reason, ridge = ridge, set_name = "steiger_filtered"),
+      error = function(e) empty_row("failed", conditionMessage(e)))
+  }
+  lower <- s$profile_ci_lower[[1L]]
+  upper <- s$profile_ci_upper[[1L]]
+  width <- upper - lower
+  comparison <- data.frame(
+    n_loci = length(markers), n_loci_removed = length(removed), removed_markers = paste(removed, collapse = ";"),
+    theta_primary = s$theta[[1L]], ci_lower_primary = lower, ci_upper_primary = upper,
+    theta_steiger = row$theta, ci_lower_steiger = row$profile_ci_lower, ci_upper_steiger = row$profile_ci_upper,
+    shift_in_primary_ci_widths = if (is.finite(width) && width > 0) (row$theta - s$theta[[1L]]) / width else NA_real_,
+    outside_primary_ci = if (is.finite(row$theta) && !is.na(lower) && !is.na(upper)) row$theta < lower || row$theta > upper else NA,
+    status = row$status, stringsAsFactors = FALSE
+  )
+  list(row = row, comparison = comparison)
+}
+
 qtl2mr_marker_metadata <- function(result) {
   if (inherits(result, "qtl2mr_analysis_result")) {
     selected <- result$pilot$selected_loci %||% data.frame()

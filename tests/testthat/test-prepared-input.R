@@ -186,7 +186,7 @@ test_that("prepared input runs a tiny high-level smoke", {
   expect_identical(res$pilot$backend_provenance$backend, "ordinary_least_squares")
   expect_equal(qtl2mr_primary_result(res)$reported_estimator_policy, "diagnostic_only")
   expect_equal(qtl2mr_primary_result(res)$reported_estimator, "Star-space qtl2mr")
-  expect_equal(qtl2mr_primary_result(res)$theta_reported, qtl2mr_primary_result(res)$theta_so)
+  expect_equal(qtl2mr_primary_result(res)$theta_reported, qtl2mr_primary_result(res)$theta)
   expect_true(is.finite(qtl2mr_primary_result(res)$theta))
   expect_true(is.finite(qtl2mr_primary_result(res)$profile_ci_lower))
   expect_true(is.finite(qtl2mr_primary_result(res)$profile_ci_upper))
@@ -223,7 +223,7 @@ test_that("public prepared analysis suppresses unreliable SO unless fallback is 
   expect_true(all(is.na(unlist(reported[c(
     "theta_reported", "se_reported", "reported_ci_lower", "reported_ci_upper"
   )]))))
-  expect_true(is.finite(reported$theta_so[[1L]]))
+  expect_true(is.finite(reported$theta[[1L]]))
   expect_true(is.finite(reported$theta_two_step_ivw[[1L]]))
   expect_true("primary_so_unbounded" %in% diagnostic$warnings$warning_id)
   expect_true(file.exists(file.path(diagnostic_dir, "report.html")))

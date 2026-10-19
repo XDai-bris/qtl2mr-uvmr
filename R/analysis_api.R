@@ -716,29 +716,29 @@ qtl2mr_warning_catalog <- function() {
       "Treat the primary second-order theta as unstable. Inspect Q(theta), profile CI, first-stage strength, and diagnostic comparators such as Two-step IVW before interpretation.",
       "Inspect logs/loo_mr_error.log; primary MR estimate may still be available.",
       "Inspect logs/instrument_sensitivity_error.log; primary MR estimate may still be available.",
-      "Inspect dropped_loci output. This usually means one founder has no information at that marker within the pair-specific sample set; do not impute artificial founder probability."
+      "Inspect dropped_loci output. This usually means one founder has no information at that marker within the exposure or outcome sample set; do not impute artificial founder probability."
     ),
     stringsAsFactors = FALSE
   )
   rbind(catalog, data.frame(
     warning_id = c("incomplete_covariates", "probability_rounding_normalized", "diagnostic_unavailable",
-      "hsq_boundary", "no_kinship_ols", "batch_shared_samples"),
+      "hsq_boundary", "no_kinship_ols", "steiger_estimate_outside_ci"),
     default_severity = c(rep("warning", 3L), rep("info", 3L)),
-    shown_in_main_report = c(rep(TRUE, 5L), FALSE),
+    shown_in_main_report = rep(TRUE, 6L),
     consequence = c(
       "Samples without a covariate row or with non-finite additive covariates were excluded before fitting.",
       "Small founder-probability sum errors were normalized in an analysis-local copy.",
       "One or more per-locus diagnostic estimates could not be computed.",
       "A null-model heritability estimate lies on the boundary of [0, 1]; at hsq = 0 the kinship term has no effect for that trait and chromosome.",
       "No kinship was supplied, so founder effects were fitted by ordinary least squares without a polygenic random effect.",
-      "Exposure and outcome were fitted on the same batch sample set, so sample overlap is complete by construction."),
+      "The estimate depends on loci that explain more outcome than exposure variance; they may act on the outcome directly or through another path."),
     recommended_action = c(
       "Inspect data/sample_alignment.csv (single analysis) or batch_sample_exclusions.csv (batch); exclusion causes can overlap.",
       "Inspect data/probability_normalization.csv and input precision; use probability_policy='strict' to reject rounding adjustments.",
       "Inspect diagnostic_status and diagnostic_note in per_locus_results.csv; unavailable diagnostics are not zero estimates.",
       "Inspect data/hsq.csv. A boundary estimate is not an error; check the kinship input and sample size, and supply hsq only with external justification.",
       "For related multiparent samples, supply a chromosome-named LOCO kinship list such as qtl2::calc_kinship(probs, type = 'loco').",
-      "Review the batch sample policy and batch_sample_exclusions.csv."),
+      "Inspect data/steiger_sensitivity.csv and block_first_stage.csv (steiger_pass) and consider the removed loci before interpreting the primary estimate."),
     stringsAsFactors = FALSE
   ))
 }
@@ -960,7 +960,7 @@ plot_method_comparison <- function(methods,
   invisible(d)
 }
 
-qtl2mr_warning_table <- function(result, sample_policy = NULL) {
+qtl2mr_warning_table <- function(result) {
   s <- result$summary
   rows <- list()
   add <- function(id, severity, message) {
@@ -971,11 +971,7 @@ qtl2mr_warning_table <- function(result, sample_policy = NULL) {
       stringsAsFactors = FALSE
     )
   }
-  if (is.null(sample_policy) || identical(sample_policy, "role_specific_complete")) {
-    add("prepared_overlap_engine", "info", "Exposure and outcome use their own complete samples; overlap is derived from harmonized sample IDs.")
-  } else {
-    add("batch_shared_samples", "info", sprintf("Exposure and outcome were fitted on the same %s sample set.", sample_policy))
-  }
+  add("prepared_overlap_engine", "info", "Exposure and outcome use their own complete samples; overlap is derived from harmonized sample IDs.")
   alignment <- result$sample_alignment %||% data.frame()
   covar_counts <- c(alignment$n_incomplete_covar %||% integer(), alignment$n_missing_covar_id %||% integer())
   if (nrow(alignment) && any(covar_counts > 0L, na.rm = TRUE)) {
@@ -1049,7 +1045,15 @@ qtl2mr_block_first_stage_table <- function(result) {
   if (is.null(per_locus) || !"F_X_block" %in% names(per_locus)) {
     return(data.frame(marker = result$selected_loci$marker, chr = result$selected_loci$chr, F_X_block = NA_real_))
   }
-  per_locus[, intersect(c("marker", "chr", "F_X_block", "theta", "se", "Q_min", "weight"), names(per_locus)), drop = FALSE]
+  out <- per_locus[, intersect(c("marker", "chr", "F_X_block", "theta", "se", "Q_min", "weight"), names(per_locus)), drop = FALSE]
+  first <- result$locus_first_stage %||% if (length(result$locus_blocks)) qtl2mr_locus_first_stage(result$locus_blocks)
+  if (is.data.frame(first) && nrow(first)) {
+    idx <- match(out$marker, first$marker)
+    for (column in c("F_Y_block", "partial_R2_X_block", "partial_R2_Y_block", "steiger_pass")) {
+      out[[column]] <- first[[column]][idx]
+    }
+  }
+  out
 }
 
 validate_qtl2_scan1coef <- function(genoprobs,
@@ -1120,7 +1124,7 @@ summarise_qtl2mr_result <- function(result) {
     paste(main_warnings$warning_id, collapse = ", ")
   } else "none"
   reported <- qtl2mr_summary_reported(s)
-  so_theta <- qtl2mr_summary_scalar(s, "theta_so", qtl2mr_summary_scalar(s, "theta"))
+  so_theta <- qtl2mr_summary_scalar(s, "theta")
   reliable <- qtl2mr_summary_scalar(s, "primary_reliable", NA)
   ci_type <- as.character(reported$ci_type %||% "")
   if (is.na(ci_type)) ci_type <- ""
@@ -1137,7 +1141,6 @@ summarise_qtl2mr_result <- function(result) {
     paste0("reported 95% CI: [", qtl2mr_fmt_num(reported$ci_lower, 6), ", ", qtl2mr_fmt_num(reported$ci_upper, 6), "]", if (nzchar(ci_type)) paste0(" (", ci_type, ")") else ""),
     paste0("Numerically bounded SO fit: ", as.character(reliable), " (not a coverage or causal-validity guarantee)"),
     paste0("Effect units: ", qtl2mr_summary_scalar(s, "effect_units", "not recorded")),
-    paste0("Sample policy: ", qtl2mr_summary_scalar(s, "sample_policy", "not recorded")),
     paste0("Null-model hsq: ", qtl2mr_hsq_line(result$pilot[["hsq"]])),
     paste0("Q statistic: ", qtl2mr_fmt_num(qtl2mr_summary_scalar(s, "Q"), 6),
       "; Q p-value: ", qtl2mr_q_reported_label(s, digits = 6),
@@ -1204,7 +1207,6 @@ summary.qtl2mr_analysis_result <- function(object, ...) {
     confidence_set_type = get("confidence_set_type", NA_character_),
     confidence_set_bounded = get("confidence_set_bounded", qtl2mr_confidence_set_bounded(object$pilot$fit)),
     Q = get("Q", NA_real_), Q_p = get("Q_p_reported", NA_real_), Q_p_method = get("Q_p_method", NA_character_),
-    sample_policy = get("sample_policy", NA_character_),
     warnings = paste(unique(shown), collapse = ";"),
     stringsAsFactors = FALSE
   )
@@ -1331,6 +1333,7 @@ write_qtl2mr_html_report <- function(result, file) {
   loo <- if (nrow(loo)) utils::head(loo[order(loo$abs_delta_theta, decreasing = TRUE),
     intersect(c("marker", "theta_minus_m", "profile_ci_lower", "profile_ci_upper", "delta_theta"), names(loo)), drop = FALSE], 5L) else data.frame()
   sensitivity <- result$instrument_sensitivity %||% data.frame()
+  steiger <- result$steiger_sensitivity %||% data.frame()
   if (nrow(sensitivity) && "status" %in% names(sensitivity)) sensitivity <- sensitivity[sensitivity$status == "ok", , drop = FALSE]
   sensitivity <- sensitivity[, intersect(c("set_name", "n_loci", "theta", "se", "profile_ci_lower", "profile_ci_upper"), names(sensitivity)), drop = FALSE]
   figs <- result$figure_manifest %||% data.frame()
@@ -1351,19 +1354,18 @@ write_qtl2mr_html_report <- function(result, file) {
   ci_type <- as.character(reported$ci_type %||% "")
   if (is.na(ci_type)) ci_type <- ""
   reliable <- qtl2mr_summary_scalar(s, "primary_reliable", NA)
-  so_theta <- qtl2mr_summary_scalar(s, "theta_so", qtl2mr_summary_scalar(s, "theta"))
+  so_theta <- qtl2mr_summary_scalar(s, "theta")
   raw_note <- if (!isTRUE(reliable) || !is.finite(reported$theta) || !is.finite(so_theta) ||
                   !isTRUE(all.equal(as.numeric(reported$theta), as.numeric(so_theta)))) {
     paste0(" Raw star-space second-order results remain diagnostic only: theta = ", qtl2mr_fmt_num(so_theta, 6), ".")
   } else ""
   primary_table <- data.frame(
-    item = c("Reported estimator", "Estimate", "95% CI", "Numerically bounded SO fit", "Effect units", "Confidence set", "Inference calibration", "Sample policy", "Q statistic", "Q p-value", "Q reference"),
+    item = c("Reported estimator", "Estimate", "95% CI", "Numerically bounded SO fit", "Effect units", "Confidence set", "Inference calibration", "Q statistic", "Q p-value", "Q reference"),
     value = c(reported$estimator, qtl2mr_fmt_num(reported$theta, 6),
       paste0("[", qtl2mr_fmt_num(reported$ci_lower, 6), ", ", qtl2mr_fmt_num(reported$ci_upper, 6), "]", if (nzchar(ci_type)) paste0(" (", ci_type, ")") else ""),
       as.character(reliable), qtl2mr_summary_scalar(s, "effect_units", "not recorded"),
       qtl2mr_summary_scalar(s, "confidence_set_type", "not recorded"),
       qtl2mr_summary_scalar(s, "inference_status", "not established"),
-      qtl2mr_summary_scalar(s, "sample_policy", "not recorded"),
       qtl2mr_fmt_num(qtl2mr_summary_scalar(s, "Q"), 6),
       qtl2mr_q_reported_label(s, digits = 5), qtl2mr_q_reference_label(s)),
     stringsAsFactors = FALSE
@@ -1385,13 +1387,16 @@ write_qtl2mr_html_report <- function(result, file) {
     if (nrow(hsq_view)) c("<h3>Polygenic background (null-model heritability)</h3>",
       paste0("<p class=\"section-note\">", qtl2mr_hsq_report_note(unique(hsq_view$source)), "</p>"),
       qtl2mr_html_table(hsq_view, digits = 4)) else "",
-    if (nrow(method_table) || nrow(loo) || nrow(sensitivity)) c(
+    if (nrow(method_table) || nrow(loo) || nrow(sensitivity) || nrow(steiger)) c(
       "<h2>Methods and available sensitivities</h2>",
       if (nrow(method_table)) qtl2mr_html_table(method_table, digits = 5) else "",
       if (nzchar(qtl2mr_diagnostic_ci_caption(methods))) paste0(
         "<p class=\"section-note\">", qtl2mr_html_escape(qtl2mr_diagnostic_ci_caption(methods, detailed = TRUE)), "</p>") else "",
       if (nrow(loo)) c("<h3>Leave-one-locus-out sensitivity</h3>", qtl2mr_html_table(loo, digits = 5)) else "",
-      if (nrow(sensitivity)) c("<h3>Instrument-set sensitivity</h3>", qtl2mr_html_table(sensitivity, digits = 5)) else ""
+      if (nrow(sensitivity)) c("<h3>Instrument-set sensitivity</h3>", qtl2mr_html_table(sensitivity, digits = 5)) else "",
+      if (nrow(steiger)) c("<h3>Steiger direction check</h3>",
+        "<p class=\"section-note\">Loci whose founder effects explain more outcome than exposure variance (partial R2_Y &gt; partial R2_X) are removed and the multilocus fit is repeated. The shift is the change in theta divided by the width of the primary 95% CI. This is a sensitivity analysis, not a pass/fail rule.</p>",
+        qtl2mr_html_table(steiger, digits = 5)) else ""
     ) else "",
     if (length(figure_html)) c("<h2>Figures</h2>", figure_html) else "",
     "<h2>Outputs and provenance</h2>",
@@ -1508,6 +1513,12 @@ write_qtl2mr_results <- function(result,
   if (!is.null(result$instrument_sensitivity_error)) {
     warnings <- append_warning("instrument_sensitivity_error", "warning", paste("Instrument-set sensitivity failed:", result$instrument_sensitivity_error))
   }
+  steiger <- result$steiger_sensitivity
+  if (is.data.frame(steiger) && nrow(steiger) && isTRUE(steiger$outside_primary_ci[[1L]])) {
+    warnings <- append_warning("steiger_estimate_outside_ci", "info", sprintf(
+      "Removing %d locus/loci with partial R2_X < partial R2_Y moves the estimate to %s, outside the primary 95%% CI.",
+      steiger$n_loci_removed[[1L]], qtl2mr_fmt_num(steiger$theta_steiger[[1L]], 4)))
+  }
   result$warnings <- warnings
   result$method_comparison <- method_comparison
   result$first_stage_summary <- tryCatch(summarize_block_first_stage(block_first_stage), error = function(e) data.frame())
@@ -1521,6 +1532,7 @@ write_qtl2mr_results <- function(result,
     overlap_qc = file.path(data_dir, "overlap_qc.csv"),
     loo_mr = file.path(data_dir, "loo_mr.csv"),
     instrument_sensitivity = file.path(data_dir, "instrument_sensitivity.csv"),
+    steiger_sensitivity = file.path(data_dir, "steiger_sensitivity.csv"),
     q_calibration = file.path(data_dir, "q_calibration.csv"),
     first_stage_summary = file.path(data_dir, "first_stage_summary.csv"),
     founder_residuals = file.path(data_dir, "founder_residuals.csv"),
@@ -1559,6 +1571,7 @@ write_qtl2mr_results <- function(result,
   utils::write.csv(overlap_qc, data_paths[["overlap_qc"]], row.names = FALSE)
   utils::write.csv(result$loo_mr %||% data.frame(), data_paths[["loo_mr"]], row.names = FALSE)
   utils::write.csv(result$instrument_sensitivity %||% data.frame(), data_paths[["instrument_sensitivity"]], row.names = FALSE)
+  utils::write.csv(result$steiger_sensitivity %||% data.frame(), data_paths[["steiger_sensitivity"]], row.names = FALSE)
   q_calibration <- result$pilot$summary[, intersect(c(
     "Q", "Q_p_reported", "Q_p_method", "Q_p_note",
     "Q_p_chisq", "Q_chisq_df",
@@ -1663,8 +1676,8 @@ write_qtl2mr_results <- function(result,
     paste0("reported_ci_upper\t", reported_log$ci_upper),
     paste0("reported_ci_type\t", reported_log$ci_type),
     paste0("reported_estimator_reason\t", reported_log$reason),
-    paste0("theta_so\t", summary_value("theta_so", summary_value("theta"))),
-    paste0("se_so\t", summary_value("se_so", summary_value("se"))),
+    paste0("theta\t", summary_value("theta")),
+    paste0("se\t", summary_value("se")),
     paste0("primary_reliable\t", summary_value("primary_reliable", NA)),
     paste0("primary_optimizer_status\t", summary_value("primary_optimizer_status", NA_character_)),
     paste0("primary_bracket_status\t", summary_value("primary_bracket_status", NA_character_)),
@@ -1698,6 +1711,7 @@ write_qtl2mr_results <- function(result,
     overlap_qc = "Per-locus overlap counts, overlap fractions, and residual-correlation diagnostics",
     loo_mr = "Leave-one-locus-out MR sensitivity table",
     instrument_sensitivity = "Instrument-set sensitivity refit table",
+    steiger_sensitivity = "Primary estimate compared with the fit without loci whose partial R2_X < partial R2_Y",
     q_calibration = "Reported global Q heterogeneity p-value with chi-square and simulation-calibration fields",
     first_stage_summary = "Summary of block F_X (guide threshold F_X = 2)",
     founder_residuals = "Descriptive founder residual localization diagnostics",
@@ -1742,33 +1756,29 @@ run_qtl2mr_analysis <- function(input,
                                 make_html = TRUE,
                                 make_figures = TRUE,
                                 verbose = TRUE,
-                                diagnostic_bootstrap_B = 500L,
-                                diagnostic_bootstrap_seed = 1L,
+                                on_nonestimable_locus = c("fail", "drop"),
                                 reported_estimator_policy = c("diagnostic_only", "strict_so", "auto_fallback"),
                                 heterogeneity_method = c("auto", "simulation", "chisq", "none"),
                                 heterogeneity_nsim = 1000L,
                                 heterogeneity_seed = 1L,
+                                diagnostic_bootstrap_B = 500L,
+                                diagnostic_bootstrap_seed = 1L,
+                                standardize_phenotypes = TRUE,
+                                cross_cov_model = c("star", "raw", "zero"),
                                 run_loo_mr = TRUE,
                                 run_instrument_sensitivity = TRUE,
-                                progress = NULL,
-                                ...) {
-  dots <- list(...)
-  allowed_dots <- c("standardize_phenotypes", "cross_cov_model", "ridge",
-    "engine", "context_cache", "fit_cache")
-  dot_names <- names(dots)
-  if (length(dots) && (is.null(dot_names) || anyNA(dot_names) ||
-      any(!nzchar(dot_names)) || anyDuplicated(dot_names) ||
-      any(!dot_names %in% allowed_dots))) {
-    bad <- if (is.null(dot_names)) "<unnamed>" else unique(ifelse(is.na(dot_names) | !nzchar(dot_names),
-      "<unnamed>", dot_names)[!dot_names %in% allowed_dots | duplicated(dot_names)])
-    stop("Unknown, unnamed or duplicate analysis argument in ...: ", paste(bad, collapse = ", "),
-      ". Allowed: ", paste(allowed_dots, collapse = ", "), call. = FALSE)
-  }
+                                progress = NULL) {
   if (!inherits(input, "qtl2mr_prepared_input")) {
-    stop("input must be created by as_qtl2mr_prepared_input()", call. = FALSE)
+    stop("input must be created by as_qtl2mr_prepared_input() or qtl2mr_pair_input()", call. = FALSE)
   }
-  reported_estimator_policy <- match.arg(reported_estimator_policy)
-  heterogeneity_method <- match.arg(heterogeneity_method)
+  settings <- qtl2mr_fit_settings(
+    on_nonestimable_locus = match.arg(on_nonestimable_locus),
+    reported_estimator_policy = match.arg(reported_estimator_policy),
+    heterogeneity_method = match.arg(heterogeneity_method),
+    heterogeneity_nsim = heterogeneity_nsim, heterogeneity_seed = heterogeneity_seed,
+    diagnostic_bootstrap_B = diagnostic_bootstrap_B, diagnostic_bootstrap_seed = diagnostic_bootstrap_seed,
+    standardize_phenotypes = standardize_phenotypes, cross_cov_model = match.arg(cross_cov_model)
+  )
   exposure <- exposure %||% input$exposure
   outcome <- outcome %||% input$outcome
   if (is.null(exposure) || is.null(outcome)) {
@@ -1807,23 +1817,8 @@ run_qtl2mr_analysis <- function(input,
 
   qtl2mr_progress(progress_callback, 2L, "Fit selected-locus founder LMM/MR blocks", "starting")
   cap <- qtl2mr_capture_messages(
-    do.call(run_prepared_qtl2mr, c(list(
-      input = input,
-      exposure = exposure,
-      outcome = outcome,
-      loci = loci,
-      output_dir = data_dir,
-      write_outputs = TRUE,
-      verbose = verbose,
-      progress_callback = progress_callback,
-      heterogeneity_method = heterogeneity_method,
-      q_sim_n = heterogeneity_nsim,
-      q_sim_seed = heterogeneity_seed,
-      diagnostic_bootstrap_B = diagnostic_bootstrap_B,
-      diagnostic_bootstrap_seed = diagnostic_bootstrap_seed,
-      reported_estimator_policy = reported_estimator_policy,
-      drop_nonestimable_loci = FALSE
-    ), dots))
+    qtl2mr_fit_prepared(input, exposure, outcome, settings, loci = loci, verbose = verbose,
+      output_dir = data_dir, write_outputs = TRUE, progress_callback = progress_callback)
   )
   pilot <- cap$value
   writeLines(cap$messages, file.path(log_dir, "fit_messages.log"))
@@ -1852,6 +1847,7 @@ run_qtl2mr_analysis <- function(input,
 
   instrument_sensitivity <- NULL
   instrument_sensitivity_error <- NULL
+  steiger <- NULL
   if (isTRUE(run_instrument_sensitivity)) {
     qtl2mr_progress(progress_callback, 4L, "Run instrument-set sensitivity", "starting")
     instrument_sensitivity <- tryCatch(
@@ -1871,6 +1867,12 @@ run_qtl2mr_analysis <- function(input,
       "Run instrument-set sensitivity",
       if (is.null(instrument_sensitivity_error)) sprintf("complete: %d sets", nrow(instrument_sensitivity %||% data.frame())) else paste("failed:", instrument_sensitivity_error)
     )
+    steiger <- tryCatch(qtl2mr_steiger_sensitivity(pilot), error = function(e) NULL)
+    if (!is.null(steiger)) {
+      rows <- rbind(as.data.frame(instrument_sensitivity %||% steiger$row[0L, , drop = FALSE]), steiger$row)
+      rownames(rows) <- NULL
+      instrument_sensitivity <- structure(rows, class = c("qtl2mr_instrument_sensitivity", "data.frame"))
+    }
   } else {
     qtl2mr_progress(progress_callback, 4L, "Run instrument-set sensitivity", "skipped")
   }
@@ -1885,6 +1887,7 @@ run_qtl2mr_analysis <- function(input,
       pilot = pilot,
       loo_mr = loo_mr,
       instrument_sensitivity = instrument_sensitivity,
+      steiger_sensitivity = steiger$comparison,
       loo_error = loo_error,
       instrument_sensitivity_error = instrument_sensitivity_error
     ),
