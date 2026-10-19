@@ -13,8 +13,10 @@ pairs whose exposure and outcome have different missing samples (see below).
   exposure. It keeps every LOD candidate with its exposure block F
   (`F_X_block`, fitted with the same samples, covariates, LOCO kinship and
   null-model hsq as the MR stage, so it equals the block F of every pair using
-  that exposure), `selected` and `drop_reason` (`non_autosomal`,
-  `nonestimable_x`, `F`, `max_loci`). `F_X_min` is off by default.
+  that exposure, up to rounding when pairs are fitted with
+  `standardize_phenotypes = FALSE`), `selected` and `drop_reason`
+  (`non_autosomal`, `nonestimable_x`, `F`, `max_loci`). `F_X_min` is off by
+  default. A scan without trait names can be used for only one exposure.
 - New `qtl2mr_pair_input(resources, instruments, exposure, outcome)` gives the
   single-pair input for any pair of a batch.
 - `run_qtl2mr_batch(resources, pairs, instruments, ...)` takes the instrument
@@ -74,6 +76,14 @@ pairs whose exposure and outcome have different missing samples (see below).
   `steiger_pass`.
 
 ## Fixes
+
+- LOD islands are now formed in marker-map order when the map has no
+  positions; previously the scan's row order was used, so a scan whose rows
+  were not in map order could merge or split islands.
+- Counts and seeds (`heterogeneity_nsim`, `diagnostic_bootstrap_B` and the
+  seeds) are checked when a run starts and stored as integers, so `1000` and
+  `1000L` resume the same batch.
+- A missing `pairs` CSV path now reports that the file does not exist.
 
 - `run_qtl2mr_batch()` refuses an output folder whose package-owned tables,
   checkpoint or pair records are symbolic links, before writing anything.

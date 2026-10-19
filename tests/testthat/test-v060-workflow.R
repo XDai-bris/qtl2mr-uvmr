@@ -174,3 +174,44 @@ test_that("the single analysis reports a Steiger check and batch records the fla
   expect_identical(clean$steiger_sensitivity$theta_steiger, qtl2mr_primary_result(clean)$theta)
   expect_identical(clean$steiger_sensitivity$shift_in_primary_ci_widths, 0)
 })
+
+test_that("selection follows map order and needs trait names for several exposures", {
+  map <- qtl2mr:::qtl2mr_marker_map_table(data.frame(marker = c("a1", "a2", "a3"), chr = "1"))
+  scan <- matrix(c(5, 1, 5), ncol = 1L, dimnames = list(c("a1", "a3", "a2"), "x"))
+  # a1 and a2 are adjacent on the map, so they form one island despite the scan's row order.
+  expect_identical(qtl2mr:::qtl2mr_scan_candidates(scan, map, "x", 4, character())$marker, "a1")
+
+  f <- v060_fixture()
+  lod <- f$scan[, "x"]
+  expect_error(qtl2mr_select_instruments(f$resources, lod, exposures = c("x", "w"), progress = FALSE),
+    "no trait names")
+  one <- qtl2mr_select_instruments(f$resources, lod, exposures = "x", progress = FALSE)
+  expect_identical(one$marker, c("a1", "b2"))
+})
+
+test_that("counts and seeds are validated up front and stored as integers", {
+  f <- v060_fixture()
+  inst <- qtl2mr_select_instruments(f$resources, f$scan, progress = FALSE)
+  path <- tempfile("v060-integer-")
+  first <- run_qtl2mr_batch(f$resources, f$pairs[1L, ], inst, output_dir = path, progress = FALSE)
+  again <- run_qtl2mr_batch(f$resources, f$pairs[1L, ], inst, heterogeneity_nsim = 1000, heterogeneity_seed = 1,
+    output_dir = path, resume = TRUE, progress = FALSE)
+  expect_identical(again$run_manifest$n_pairs_resumed, 1L)
+  expect_identical(again$main_results$theta, first$main_results$theta)
+  expect_error(run_qtl2mr_batch(f$resources, f$pairs, inst, heterogeneity_nsim = -1), "non-negative whole number")
+  expect_error(run_qtl2mr_batch(f$resources, f$pairs, inst, diagnostic_bootstrap_B = 1.5), "non-negative whole number")
+  input <- qtl2mr_pair_input(f$resources, inst, "x", "y")
+  expect_error(run_qtl2mr_analysis(input, output_dir = tempfile(), diagnostic_bootstrap_seed = NA), "whole number")
+  expect_error(run_qtl2mr_batch(f$resources, file.path(tempdir(), "absent-pairs.csv"), inst), "pairs file does not exist")
+})
+
+test_that("a failed Steiger check is logged and reported without hiding the primary result", {
+  f <- v060_fixture()
+  inst <- qtl2mr_select_instruments(f$resources, f$scan, progress = FALSE)
+  local_mocked_bindings(qtl2mr_steiger_sensitivity = function(...) stop("steiger boom"))
+  result <- v060_single(f$resources, inst, "x", "y", run_instrument_sensitivity = TRUE)
+  expect_true("steiger_sensitivity_error" %in% qtl2mr_warnings(result)$warning_id)
+  expect_identical(readLines(file.path(result$output_dir, "logs", "steiger_sensitivity_error.log")), "steiger boom")
+  expect_false("steiger_filtered" %in% result$instrument_sensitivity$set_name)
+  expect_true(is.finite(qtl2mr_primary_result(result)$theta))
+})

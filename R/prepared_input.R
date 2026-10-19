@@ -1034,8 +1034,16 @@ run_prepared_qtl2mr <- function(input,
   out
 }
 
+qtl2mr_check_whole <- function(x, name, min = -.Machine$integer.max) {
+  if (!is.numeric(x) || length(x) != 1L || !is.finite(x) || x != round(x) || x < min) {
+    stop(name, if (min >= 0) " must be a non-negative whole number" else " must be one whole number", call. = FALSE)
+  }
+  as.integer(x)
+}
+
 # Statistical settings shared by run_qtl2mr_analysis() and run_qtl2mr_batch();
-# both entry points fit a pair through qtl2mr_fit_prepared() with them.
+# both entry points fit a pair through qtl2mr_fit_prepared() with them. Counts
+# and seeds are stored as integers so that 1000 and 1000L give the same run.
 qtl2mr_fit_settings <- function(on_nonestimable_locus,
                                 reported_estimator_policy,
                                 heterogeneity_method,
@@ -1049,10 +1057,10 @@ qtl2mr_fit_settings <- function(on_nonestimable_locus,
     on_nonestimable_locus = on_nonestimable_locus,
     reported_estimator_policy = reported_estimator_policy,
     heterogeneity_method = heterogeneity_method,
-    heterogeneity_nsim = heterogeneity_nsim,
-    heterogeneity_seed = heterogeneity_seed,
-    diagnostic_bootstrap_B = diagnostic_bootstrap_B,
-    diagnostic_bootstrap_seed = diagnostic_bootstrap_seed,
+    heterogeneity_nsim = qtl2mr_check_whole(heterogeneity_nsim, "heterogeneity_nsim", min = 0),
+    heterogeneity_seed = qtl2mr_check_whole(heterogeneity_seed, "heterogeneity_seed"),
+    diagnostic_bootstrap_B = qtl2mr_check_whole(diagnostic_bootstrap_B, "diagnostic_bootstrap_B", min = 0),
+    diagnostic_bootstrap_seed = qtl2mr_check_whole(diagnostic_bootstrap_seed, "diagnostic_bootstrap_seed"),
     standardize_phenotypes = qtl2mr_check_flag(standardize_phenotypes, "standardize_phenotypes"),
     cross_cov_model = cross_cov_model
   )

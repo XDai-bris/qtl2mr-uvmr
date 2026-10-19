@@ -37,7 +37,6 @@ qtl2mr_prepare_resources <- function(allele_probs,
   if (!all(c("marker", "chr") %in% names(marker_map))) {
     stop("marker_map must contain marker and chr columns", call. = FALSE)
   }
-  if (!"pos" %in% names(marker_map)) marker_map$pos <- seq_len(nrow(marker_map))
   gp_ids <- dimnames(allele_probs[[1L]])[[1L]]
   if (is.null(gp_ids)) stop("allele_probs arrays must have sample row names", call. = FALSE)
   marker_map$chr <- as.character(marker_map$chr)
@@ -74,6 +73,14 @@ qtl2mr_check_count <- function(x, name, allow_null = FALSE) {
     stop(name, " must be a positive integer", call. = FALSE)
   }
   as.integer(x)
+}
+
+# A scan identifies its traits through list names or column names; a plain LOD
+# vector or an unnamed column does not.
+qtl2mr_scan_has_traits <- function(qtl_scan) {
+  if (is.list(qtl_scan) && !is.data.frame(qtl_scan)) return(TRUE)
+  traits <- colnames(qtl_scan)
+  !is.null(traits) && !anyNA(traits) && all(nzchar(traits))
 }
 
 qtl2mr_scan_traits <- function(qtl_scan) {
@@ -147,7 +154,8 @@ qtl2mr_lod_vector_from_scan <- function(qtl_scan, trait) {
 }
 
 # LOD peaks of one trait: the maximum of each contiguous above-threshold region,
-# defined in map order within a chromosome, never across a chromosome boundary.
+# defined in map order (positions, or map rows when positions are missing) within
+# a chromosome, never across a chromosome boundary.
 qtl2mr_scan_candidates <- function(qtl_scan, marker_map, trait, lod_thresh, exclude_chr) {
   lod <- qtl2mr_lod_vector_from_scan(qtl_scan, trait)
   mm <- marker_map
@@ -156,7 +164,7 @@ qtl2mr_scan_candidates <- function(qtl_scan, marker_map, trait, lod_thresh, excl
   peak_idx <- unlist(lapply(unique(mm$chr[map_idx]), function(chr) {
     idx <- which(mm$chr[map_idx] == chr)
     pos <- mm$pos[map_idx[idx]]
-    if (all(is.finite(pos))) idx <- idx[order(pos, map_idx[idx])]
+    idx <- if (all(is.finite(pos))) idx[order(pos, map_idx[idx])] else idx[order(map_idx[idx])]
     idx[qtl2mr_get_tophits(lod[idx], lod_thresh = lod_thresh)]
   }), use.names = FALSE)
   idx <- match(names(lod)[peak_idx], mm$marker)
@@ -187,7 +195,8 @@ qtl2mr_resources_input <- function(resources, selected_loci, exposure = NULL, ou
 
 # Exposure founder LMM at each candidate locus, fitted exactly as in the MR stage
 # (same samples, covariates, LOCO kinship and null-model hsq), so F_X_block here
-# equals the block F_X of any pair using this exposure.
+# equals the block F_X of any pair using this exposure; with
+# standardize_phenotypes = FALSE in the MR stage they agree up to rounding.
 qtl2mr_exposure_first_stage <- function(input, exposure, candidates, ridge = 1e-10) {
   out <- qtl2mr_empty_first_stage(nrow(candidates))
   if (!nrow(candidates)) return(out)
@@ -282,6 +291,10 @@ qtl2mr_select_instruments <- function(resources,
   }
   missing <- setdiff(exposures, names(resources$pheno))
   if (length(missing)) stop("pheno is missing exposure(s): ", paste(missing, collapse = ", "), call. = FALSE)
+  if (length(exposures) > 1L && !qtl2mr_scan_has_traits(qtl_scan)) {
+    stop("qtl_scan has no trait names, so it cannot be matched to several exposures; ",
+      "use a scan with trait column names or one exposure per call", call. = FALSE)
+  }
   candidates <- lapply(exposures, function(trait) {
     qtl2mr_scan_candidates(qtl_scan, resources$marker_map, trait, lod_thresh, exclude_chr)
   })
@@ -473,7 +486,8 @@ qtl2mr_pair_id <- function(exposure, outcome) {
 }
 
 qtl2mr_normalize_pairs <- function(pairs) {
-  if (is.character(pairs) && length(pairs) == 1L && file.exists(pairs)) {
+  if (is.character(pairs) && length(pairs) == 1L) {
+    if (is.na(pairs) || !file.exists(pairs) || dir.exists(pairs)) stop("pairs file does not exist: ", pairs, call. = FALSE)
     pairs <- utils::read.csv(pairs, stringsAsFactors = FALSE)
   }
   pairs <- as.data.frame(pairs, stringsAsFactors = FALSE)

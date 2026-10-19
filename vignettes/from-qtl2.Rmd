@@ -199,9 +199,10 @@ detail <- run_qtl2mr_analysis(qtl2mr_pair_input(resources, instruments, "x", "z"
   accidental mismatches should be corrected rather than accepted blindly.
 - Both workflows fit X and Y on their role-specific usable samples and model
   their overlap. A batch row is identical to the single analysis of the same
-  pair with the same instruments and options; only the default Q p-value
-  method differs (chi-square in batch, simulation for several loci in the
-  single analysis). Compare estimates only with identical samples, loci,
+  pair with the same instruments and options; only two defaults differ: the Q
+  p-value method (chi-square in batch, simulation for several loci in the
+  single analysis) and the bootstrap draws for the weighted median and mode
+  comparators (none in batch). Compare estimates only with identical samples, loci,
   kinship, scaling and fit options.
 - Check `data/hsq.csv` (or `hsq_x`/`hsq_y` in `batch_locus_results.csv`).
   An hsq of 0 means the kinship term had no effect for that trait and

@@ -686,17 +686,18 @@ qtl2mr_warning_catalog <- function() {
     warning_id = c(
       "prepared_overlap_engine", "raw_space_psd_invalid",
       "star_space_psd_invalid", "weak_block_first_stage", "primary_so_unbounded",
-      "loo_mr_error", "instrument_sensitivity_error", "dropped_nonestimable_loci"
+      "loo_mr_error", "instrument_sensitivity_error", "dropped_nonestimable_loci",
+      "steiger_sensitivity_error"
     ),
     default_severity = c(
       "info", "technical_qc",
       "warning", "warning", "warning",
-      "warning", "warning", "warning"
+      "warning", "warning", "warning", "warning"
     ),
     shown_in_main_report = c(
       FALSE, FALSE,
       TRUE, TRUE, TRUE,
-      TRUE, TRUE, TRUE
+      TRUE, TRUE, TRUE, TRUE
     ),
     consequence = c(
       "Exposure and outcome use their own complete samples; overlap is derived from harmonized sample IDs.",
@@ -706,7 +707,8 @@ qtl2mr_warning_catalog <- function() {
       "The theta-dependent second-order objective was not well bracketed or has an unbounded profile interval; the primary theta may be a weak-identification artifact.",
       "Leave-one-locus-out MR sensitivity did not complete for this run.",
       "Instrument-set sensitivity did not complete for this run.",
-      "Some selected loci were not estimable in the current sample set because a founder contrast was rank-deficient."
+      "Some selected loci were not estimable in the current sample set because a founder contrast was rank-deficient.",
+      "The Steiger direction check did not complete for this run."
     ),
     recommended_action = c(
       "Check data/overlap_qc.csv and logs/run.log to confirm overlap rates.",
@@ -716,7 +718,8 @@ qtl2mr_warning_catalog <- function() {
       "Treat the primary second-order theta as unstable. Inspect Q(theta), profile CI, first-stage strength, and diagnostic comparators such as Two-step IVW before interpretation.",
       "Inspect logs/loo_mr_error.log; primary MR estimate may still be available.",
       "Inspect logs/instrument_sensitivity_error.log; primary MR estimate may still be available.",
-      "Inspect dropped_loci output. This usually means one founder has no information at that marker within the exposure or outcome sample set; do not impute artificial founder probability."
+      "Inspect dropped_loci output. This usually means one founder has no information at that marker within the exposure or outcome sample set; do not impute artificial founder probability.",
+      "Inspect logs/steiger_sensitivity_error.log; primary MR estimate may still be available."
     ),
     stringsAsFactors = FALSE
   )
@@ -1396,6 +1399,7 @@ write_qtl2mr_html_report <- function(result, file) {
       if (nrow(sensitivity)) c("<h3>Instrument-set sensitivity</h3>", qtl2mr_html_table(sensitivity, digits = 5)) else "",
       if (nrow(steiger)) c("<h3>Steiger direction check</h3>",
         "<p class=\"section-note\">Loci whose founder effects explain more outcome than exposure variance (partial R2_Y &gt; partial R2_X) are removed and the multilocus fit is repeated. The shift is the change in theta divided by the width of the primary 95% CI. This is a sensitivity analysis, not a pass/fail rule.</p>",
+        if (isTRUE(steiger$outside_primary_ci[[1L]])) "<p><strong>Notice:</strong> the Steiger-filtered estimate lies outside the primary 95% CI.</p>" else "",
         qtl2mr_html_table(steiger, digits = 5)) else ""
     ) else "",
     if (length(figure_html)) c("<h2>Figures</h2>", figure_html) else "",
@@ -1512,6 +1516,9 @@ write_qtl2mr_results <- function(result,
   }
   if (!is.null(result$instrument_sensitivity_error)) {
     warnings <- append_warning("instrument_sensitivity_error", "warning", paste("Instrument-set sensitivity failed:", result$instrument_sensitivity_error))
+  }
+  if (!is.null(result$steiger_sensitivity_error)) {
+    warnings <- append_warning("steiger_sensitivity_error", "warning", paste("Steiger direction check failed:", result$steiger_sensitivity_error))
   }
   steiger <- result$steiger_sensitivity
   if (is.data.frame(steiger) && nrow(steiger) && isTRUE(steiger$outside_primary_ci[[1L]])) {
@@ -1848,6 +1855,7 @@ run_qtl2mr_analysis <- function(input,
   instrument_sensitivity <- NULL
   instrument_sensitivity_error <- NULL
   steiger <- NULL
+  steiger_error <- NULL
   if (isTRUE(run_instrument_sensitivity)) {
     qtl2mr_progress(progress_callback, 4L, "Run instrument-set sensitivity", "starting")
     instrument_sensitivity <- tryCatch(
@@ -1867,9 +1875,13 @@ run_qtl2mr_analysis <- function(input,
       "Run instrument-set sensitivity",
       if (is.null(instrument_sensitivity_error)) sprintf("complete: %d sets", nrow(instrument_sensitivity %||% data.frame())) else paste("failed:", instrument_sensitivity_error)
     )
-    steiger <- tryCatch(qtl2mr_steiger_sensitivity(pilot), error = function(e) NULL)
-    if (!is.null(steiger)) {
-      rows <- rbind(as.data.frame(instrument_sensitivity %||% steiger$row[0L, , drop = FALSE]), steiger$row)
+    steiger <- tryCatch(qtl2mr_steiger_sensitivity(pilot), error = function(e) {
+      steiger_error <<- conditionMessage(e)
+      NULL
+    })
+    if (!is.null(steiger_error)) writeLines(steiger_error, file.path(log_dir, "steiger_sensitivity_error.log"))
+    if (!is.null(steiger) && !is.null(instrument_sensitivity)) {
+      rows <- rbind(as.data.frame(instrument_sensitivity), steiger$row)
       rownames(rows) <- NULL
       instrument_sensitivity <- structure(rows, class = c("qtl2mr_instrument_sensitivity", "data.frame"))
     }
@@ -1889,7 +1901,8 @@ run_qtl2mr_analysis <- function(input,
       instrument_sensitivity = instrument_sensitivity,
       steiger_sensitivity = steiger$comparison,
       loo_error = loo_error,
-      instrument_sensitivity_error = instrument_sensitivity_error
+      instrument_sensitivity_error = instrument_sensitivity_error,
+      steiger_sensitivity_error = steiger_error
     ),
     class = c("qtl2mr_analysis_result", "list")
   )

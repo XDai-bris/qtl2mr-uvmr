@@ -57,7 +57,8 @@ a marker-named LOD vector for one trait.}
 \item{exposures}{Traits to select instruments for; \code{NULL} uses every trait
 in \code{qtl_scan}. Each must be a numeric column of \code{pheno}.}
 \item{lod_thresh}{LOD threshold for peak picking: within each chromosome, the
-maximum of each contiguous region above the threshold is a candidate. It is a
+maximum of each contiguous region above the threshold, in map order (marker
+positions, or map rows when positions are missing), is a candidate. It is a
 selection rule, not a significance calibration.}
 \item{exclude_chr}{Chromosomes left out of the candidate table (default
 \code{"X"}; only autosomal loci can be fitted).}
@@ -92,8 +93,10 @@ exposure and the outcome of a pair.}
 \item{min_loci}{Minimum number of instruments required for a pair, also after
 non-estimable loci are dropped.}
 \item{fail_fast}{Stop at the first failing pair instead of recording an error
-row and continuing. Completed pairs and the failing pair are written to
-\code{output_dir} before the error is raised. With \code{n_workers > 1}, each
+row and continuing. A pair that fails the checks made before fitting (missing
+traits or instruments, too few loci or samples) stops the run before anything
+is written; when a pair fails during fitting, completed pairs and the failing
+pair are written to \code{output_dir} before the error is raised. With \code{n_workers > 1}, each
 worker stops at its first failure, but exposure groups already running in other
 workers finish first.}
 \item{resume}{Continue an earlier run in \code{output_dir}; see Details.}
@@ -107,7 +110,11 @@ written by \code{run_qtl2mr_batch()} are removed.}
 candidate it fits the exposure founder LMM with the same samples, covariates,
 LOCO kinship and null-model hsq as the MR analysis and records the block F,
 \code{F_X_block}: the joint Wald statistic of the seven founder contrasts
-divided by 7 (see the README for its scale). A candidate is not selected, in
+divided by 7 (see the README for its scale). It equals the block F of every pair
+using that exposure; when the pairs are fitted with
+\code{standardize_phenotypes = FALSE} the two agree up to rounding. A scan
+without trait names (a plain LOD vector or an unnamed column) can only be used
+for one exposure. A candidate is not selected, in
 this order, when it is not autosomal (\code{drop_reason = "non_autosomal"}),
 when the exposure founder effects cannot be estimated (\code{"nonestimable_x"}
 or \code{"x_fit_error"}), when \code{F_X_block < F_X_min} (\code{"F"}), or when
@@ -132,8 +139,8 @@ those records: a run stopped at any point, including during a parallel run,
 continues where it left off; the directory may be moved; and
 \code{n_workers} may change. A resume is refused, and nothing in
 \code{output_dir} is changed, when the inputs, pairs, instruments of the
-exposures in \code{pairs}, options or package code differ from the original
-run, or when a record or a published table has been modified. An output folder
+exposures in \code{pairs} (including their order), options or package code
+differ from the original run, or when a record or a published table has been modified. An output folder
 whose package-owned files or records are symbolic links is refused. Pairs that
 ended in an error are fitted again on resume.
 
