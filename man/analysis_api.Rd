@@ -7,6 +7,8 @@
 \alias{qtl2mr_output_paths}
 \alias{qtl2mr_method_comparison}
 \alias{export_qtl2mr_lite_result}
+\alias{summary.qtl2mr_analysis_result}
+\alias{print.qtl2mr_analysis_result}
 \title{Run and report one exposure-outcome analysis}
 \description{
 \if{latex}{\out{\sloppy}}
@@ -25,6 +27,10 @@ run_qtl2mr_analysis(input, exposure = NULL, outcome = NULL,
   diagnostic_bootstrap_B = 500L, diagnostic_bootstrap_seed = 1L,
   standardize_phenotypes = TRUE, cross_cov_model = c("star", "raw", "zero"),
   run_loo_mr = TRUE, run_instrument_sensitivity = TRUE, progress = NULL)
+
+\method{summary}{qtl2mr_analysis_result}(object, ...)
+
+\method{print}{qtl2mr_analysis_result}(x, ...)
 
 qtl2mr_primary_result(result)
 
@@ -47,6 +53,8 @@ validate_qtl2_scan1coef(genoprobs, pheno, kinship = NULL,
 }
 \arguments{
 \if{latex}{\out{\sloppy}}
+\item{object, x}{A \code{qtl2mr_analysis_result}.}
+\item{...}{Ignored.}
 \item{input}{An object created by \code{\link{as_qtl2mr_prepared_input}()} or
 \code{\link{qtl2mr_pair_input}()}.}
 \item{exposure, outcome}{Trait names; default to the names stored in
@@ -81,9 +89,10 @@ second-order estimate. \code{"auto_fallback"} reports the Two-step IVW
 comparator when the second-order fit is not reportable.}
 \item{heterogeneity_method}{Reference distribution for the Q heterogeneity
 p-value. \code{"auto"} uses chi-square for one locus and conditional residual
-simulation for several loci. \code{"chisq"} avoids the simulation.}
+simulation for several loci. \code{"chisq"} avoids the simulation;
+\code{"none"} reports the Q statistic without a p-value.}
 \item{heterogeneity_nsim, heterogeneity_seed}{Number of Q simulation draws and
-their seed. Each draw refits the model; see Details for runtime.}
+their seed. Each draw re-solves the multilocus fit; see Details for runtime.}
 \item{standardize_phenotypes}{Fit both traits in SD units (default) or, with
 \code{FALSE}, in original units.}
 \item{cross_cov_model}{Exposure-outcome covariance used for overlapping samples:
@@ -116,8 +125,11 @@ standard errors.}
 At each selected locus the exposure and the outcome are regressed on the
 founder probabilities (as seven founder contrasts) with a linear mixed model.
 The polygenic background is the kinship for that locus's chromosome, weighted
-by the null-model heritability (hsq) estimated by REML with the intercept and
-covariates but no locus, and then treated as fixed. The locus effects are
+by the null-model heritability (hsq) and then treated as fixed. hsq is estimated
+by REML with the intercept and covariates but no locus, unless it is supplied
+through \code{hsq} in \code{\link{as_qtl2mr_prepared_input}()}; without kinship
+the founder effects are fitted by ordinary least squares. \code{data/hsq.csv}
+records the source. The locus effects are
 combined by minimising a second-order objective that accounts for the
 uncertainty of the exposure effects and for the covariance between exposure
 and outcome effects that arises when the two traits share samples
@@ -146,11 +158,15 @@ R2 of the outcome above that of the exposure, \code{steiger_pass = FALSE} in
 the LMMs. \code{steiger_sensitivity.csv} compares it with the primary estimate,
 including the shift in units of the primary confidence-interval width; an
 estimate outside the primary interval adds the
-\code{steiger_estimate_outside_ci} notice. It is a sensitivity analysis, not a
-filter of the primary estimate.
+\code{steiger_estimate_outside_ci} notice. Its \code{status} is \code{"ok"},
+\code{"no_loci_removed"} (every locus passes; the primary fit is shown),
+\code{"no_loci_left"} (every locus fails; no estimate) or \code{"failed"}. It
+runs only with \code{run_instrument_sensitivity = TRUE} and is a sensitivity
+analysis, not a filter of the primary estimate.
 
 Runtime is dominated by the Q heterogeneity simulation when there are several
-loci: each of the 1,000 default draws refits the model. On a laptop, the
+loci: each of the 1,000 default draws re-solves the multilocus fit (the
+locus LMMs are not refitted). On a laptop, the
 bundled 400-mouse, 40-locus example takes roughly 10 to 15 minutes with the
 default and under 2 minutes with \code{heterogeneity_method = "chisq"}. Progress messages report completed
 draws. Progress has five stages: input preparation, locus fitting (including
@@ -166,7 +182,8 @@ anonymise results.
 \value{
 \if{latex}{\out{\sloppy}}
 \code{run_qtl2mr_analysis()} invisibly returns a \code{qtl2mr_analysis_result}
-and writes \code{report.html}, \code{summary.md}, \code{result_object.rds},
+and writes \code{report.html}, \code{summary.md}, \code{output_manifest.html},
+\code{result_object.rds},
 \code{figures/}, \code{logs/} and \code{data/}. The main data files are
 \code{main_result.csv} (one row; see below), \code{warnings.csv} (warning ID,
 severity, message, consequence and recommended action),
@@ -207,7 +224,8 @@ invisibly returns the locus report directory, \code{export_qtl2mr_lite_result()}
 the zip path, and \code{validate_qtl2_scan1coef()} a one-row pass/fail summary.
 }
 \seealso{
-\code{\link{as_qtl2mr_prepared_input}} to build the input;
+\code{\link{as_qtl2mr_prepared_input}} or \code{\link{qtl2mr_pair_input}} to
+build the input; \code{\link{qtl2mr_select_instruments}} to choose instruments;
 \code{\link{run_qtl2mr_batch}} for many pairs;
 \code{\link{refit_qtl2mr_subset}} for follow-up refits.
 }

@@ -9,13 +9,13 @@ pairs whose exposure and outcome have different missing samples (see below).
 ## Three main functions
 
 - New `qtl2mr_select_instruments(resources, qtl_scan, exposures, lod_thresh,
-  exclude_chr, max_loci, F_X_min, n_workers)` builds one instrument set per
-  exposure. It keeps every LOD candidate with its exposure block F
+  exclude_chr, max_loci, F_X_min, n_workers, progress)` builds one instrument
+  set per exposure (`exposures = NULL` means every trait in the scan). It keeps every LOD candidate with its exposure block F
   (`F_X_block`, fitted with the same samples, covariates, LOCO kinship and
   null-model hsq as the MR stage, so it equals the block F of every pair using
   that exposure, up to rounding when pairs are fitted with
   `standardize_phenotypes = FALSE`), `selected` and `drop_reason`
-  (`non_autosomal`, `nonestimable_x`, `F`, `max_loci`). `F_X_min` is off by
+  (`non_autosomal`, `nonestimable_x`, `x_fit_error`, `F`, `max_loci`). `F_X_min` is off by
   default. A scan without trait names can be used for only one exposure.
 - New `qtl2mr_pair_input(resources, instruments, exposure, outcome)` gives the
   single-pair input for any pair of a batch.
@@ -23,6 +23,9 @@ pairs whose exposure and outcome have different missing samples (see below).
   table (a data frame or CSV path; only `exposure` and `marker` are required,
   and only rows with `selected = TRUE` are used when that column exists). Each
   pair is fitted through the same input and settings as the single analysis.
+- `as_qtl2mr_prepared_input()` uses `selected_loci` as given and refuses an
+  instruments table with unselected rows or rows of several or another
+  exposure; use `qtl2mr_pair_input()` for such tables.
 
 ## Breaking changes and migration
 
@@ -53,8 +56,19 @@ pairs whose exposure and outcome have different missing samples (see below).
   `ci_upper_so` columns and the `sample_policy` column are removed (use
   `theta`, `se`, `profile_ci_lower`, `profile_ci_upper`);
   `n_loci_steiger_fail` is added. Batch `main_results` drops
-  `instrument_trait`, `lod_thresh` and `exclude_chr`; its other columns are a
-  subset of the single `main_result` with the same names and values.
+  `instrument_trait`, `lod_thresh` and `exclude_chr`. Apart from `pair_id`,
+  `status`, `error_message`, `locus_fit_status` and `runtime_sec`, its columns
+  are a subset of the single `main_result`, with equal values for the same
+  settings.
+- `fit_instrument_set_sensitivity()` now defaults to `weak_f_threshold = 2`,
+  so the standard set `exclude_F_lt_10` is now `exclude_F_lt_2`; pass
+  `weak_f_threshold = 10` for the old set.
+- Arguments of `run_qtl2mr_analysis()` after `verbose` were reordered to match
+  `run_qtl2mr_batch()`; pass them by name.
+- Batch warnings now use the single-analysis catalog (for example
+  `prepared_overlap_engine` instead of `batch_shared_samples`), and the batch
+  run manifest has a `status` column (`complete` or `stopped_fail_fast`) with
+  the same layout in both cases.
 - Batch tables: `batch_selected_loci.csv` and `batch_first_stage_summary.csv`
   are merged into `batch_locus_results.csv` (one row per pair and instrument:
   kept, drop reason, exposure and outcome block F, partial R2,
@@ -73,7 +87,8 @@ pairs whose exposure and outcome have different missing samples (see below).
   primary-CI widths), and the notice `steiger_estimate_outside_ci` when the
   filtered estimate leaves the primary 95% CI. It does not filter the primary
   estimate. `block_first_stage.csv` gains `F_Y_block`, partial R2 and
-  `steiger_pass`.
+  `steiger_pass`. A failed check is logged and raises
+  `steiger_sensitivity_error`.
 
 ## Fixes
 
@@ -84,7 +99,8 @@ pairs whose exposure and outcome have different missing samples (see below).
   seeds) are checked when a run starts and stored as integers, so `1000` and
   `1000L` resume the same batch.
 - A missing `pairs` CSV path now reports that the file does not exist.
-
+- A single-locus analysis no longer fails while drawing the block-F dashboard
+  figure (present since 0.4.x).
 - `run_qtl2mr_batch()` refuses an output folder whose package-owned tables,
   checkpoint or pair records are symbolic links, before writing anything.
   Previously a resume or overwrite could write through such a link to a file
@@ -223,7 +239,8 @@ errors, profile confidence intervals and Q statistics are unchanged from 0.4.x
 - Batch warnings describe the shared batch sample set instead of the
   single-analysis role-specific note.
 - Progress shows five real stages instead of seven.
-- Continuous integration runs on every push and pull request.
+- Continuous integration runs on every push (pull requests were added in
+  0.6.0).
 
 ## Fixes carried over from the unreleased 0.4.1
 

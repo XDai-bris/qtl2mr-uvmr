@@ -21,7 +21,7 @@ start with `vignette("getting-started", package = "qtl2mr")`.
 | `covar` | Numeric/logical additive covariates with sample IDs, or `NULL`. Encode categorical covariates deliberately. |
 | `kinship` | Sample-named symmetric matrix or chromosome-named LOCO matrix list. Supply the qtl2 kinship scale; qtl2mr internally uses `2K`. |
 | `marker_map` | qtl2 named map list, or a table with `marker`, `chr`, `pos`. Marker IDs must match the probability arrays. |
-| `selected_loci` | Marker IDs or a marker table explicitly defining the instruments; `qtl2mr_select_instruments()` builds one from a scan. |
+| `selected_loci` | Marker IDs or a marker table defining the instruments, used as given. For `qtl2mr_select_instruments()` output use `qtl2mr_pair_input()`, or pass only one exposure's rows with `selected = TRUE`. |
 | `hsq` | Optional heritabilities. With kinship and `hsq=NULL`, qtl2mr estimates them internally. They are not prerequisites from a QTL scan. |
 
 The probability array is raw input to qtl2mr's selected-locus LMM, but it
@@ -130,6 +130,7 @@ if (requireNamespace("qtl2", quietly = TRUE)) {
     bridge_resources, bridge_scan, exposures = "x", lod_thresh = 4, progress = FALSE
   )
   stopifnot(any(bridge_instruments$selected)) # teaching threshold, not calibration
+  print(bridge_instruments[, c("marker", "chr", "lod", "F_X_block", "selected")])
   bridge_prepared <- qtl2mr::qtl2mr_pair_input(
     bridge_resources, bridge_instruments, exposure = "x", outcome = "y"
   )
@@ -138,6 +139,11 @@ if (requireNamespace("qtl2", quietly = TRUE)) {
   ))
 }
 ```
+
+The invented genotypes have no recombination, so LOD is flat along each
+chromosome and the selector keeps one peak per above-threshold region; real
+scans have sharper peaks. The table records the exposure block F of each
+candidate and whether it was selected.
 
 ## Decide the instruments, then fit both traits at those loci
 
@@ -160,8 +166,10 @@ qtl2mr_warnings(result)
 the exposure (`F_X_block`, fitted with the same samples, covariates and kinship
 as the MR analysis) and whether it was selected. `F_X_min` additionally drops
 candidates with weak founder effects on the exposure; it is off by default.
-Already have a selected-locus table? Pass it to `as_qtl2mr_prepared_input()`
-as `selected_loci` and omit `scan1()`.
+When the scan used the same samples and kinship, LOD 4 corresponds to F of
+about 2.6, so `F_X_min = 2` rarely removes a locus near the threshold (see the
+README section on instrument strength). Already have a selected-locus table?
+Pass it to `as_qtl2mr_prepared_input()` as `selected_loci` and omit `scan1()`.
 qtl2mr estimates founder effects for **both** X and Y at every selected locus;
 Y need not have a significant QTL at an X-selected locus. It does need enough
 usable information for the Y LMM to be estimable. A union of X and Y peaks
@@ -176,9 +184,11 @@ threshold, or evidence that different selected loci are independent.
 
 For many pairs, prepare the shared inputs once, select one instrument set per
 exposure, and pass both to `run_qtl2mr_batch()`. Each pair is fitted exactly as
-`run_qtl2mr_analysis()` would fit it; results are compact tables. Rerun a pair
-of interest with `qtl2mr_pair_input()` and `run_qtl2mr_analysis()` for the full
-report, which adds the Steiger and other sensitivity analyses.
+`run_qtl2mr_analysis()` would fit it; results are compact tables, and
+`batch_locus_results.csv` flags loci that fail the Steiger direction check
+(`steiger_pass`). Rerun a pair of interest with `qtl2mr_pair_input()` and
+`run_qtl2mr_analysis()` for the full report, which adds the Steiger refit and
+the other sensitivity analyses.
 
 ```{r batch-template, eval=FALSE}
 resources <- qtl2mr_prepare_resources(allele_probs, kinship, pheno, covar, marker_map = map)
@@ -199,10 +209,12 @@ detail <- run_qtl2mr_analysis(qtl2mr_pair_input(resources, instruments, "x", "z"
   accidental mismatches should be corrected rather than accepted blindly.
 - Both workflows fit X and Y on their role-specific usable samples and model
   their overlap. A batch row is identical to the single analysis of the same
-  pair with the same instruments and options; only two defaults differ: the Q
+  pair with the same instruments and options. Two defaults differ: the Q
   p-value method (chi-square in batch, simulation for several loci in the
   single analysis) and the bootstrap draws for the weighted median and mode
-  comparators (none in batch). Compare estimates only with identical samples, loci,
+  comparators (none in batch). Batch also records pairs with fewer than
+  `min_samples = 50` complete samples as errors and runs no leave-one-out or
+  sensitivity refits. Compare estimates only with identical samples, loci,
   kinship, scaling and fit options.
 - Check `data/hsq.csv` (or `hsq_x`/`hsq_y` in `batch_locus_results.csv`).
   An hsq of 0 means the kinship term had no effect for that trait and

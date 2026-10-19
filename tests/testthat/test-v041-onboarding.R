@@ -78,7 +78,7 @@ test_that("README quick start keeps the documented explicit fast-demo settings",
   end <- which(seq_along(source) > start & source == ")")[[1L]]
   call <- parse(text = source[seq.int(start, end)])[[1L]][[3L]]
   fast <- as.list(call)[-1L]
-  settings <- c("loci", "overwrite", "make_figures", "make_html", "verbose",
+  settings <- c("overwrite", "make_figures", "make_html", "verbose",
                 "diagnostic_bootstrap_B", "heterogeneity_method", "run_loo_mr",
                 "run_instrument_sensitivity", "progress")
   getting <- onboarding_vignette_source("getting-started")

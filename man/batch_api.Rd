@@ -8,7 +8,8 @@
 \if{latex}{\out{\sloppy}}
 Prepare shared inputs once, select one instrument set per exposure, and fit
 many exposure-outcome pairs with compact tabular output. Every batch row is
-the same fit that \code{run_qtl2mr_analysis()} gives for that pair;
+the same fit that \code{run_qtl2mr_analysis()} gives for that pair with the
+same settings;
 \code{qtl2mr_pair_input()} builds the single-pair input for a full report.
 }
 \usage{
@@ -75,9 +76,12 @@ depend on \code{n_workers}.}
 \item{instruments}{Instrument table, or the path of a CSV file holding one,
 with one row per exposure and marker: usually
 \code{qtl2mr_select_instruments()} output. Only \code{exposure} and
-\code{marker} are required. When a logical \code{selected} column is present
-only rows with \code{selected = TRUE} are used. \code{chr} must agree with the
-marker map when given; other columns are ignored.}
+\code{marker} are required. When a \code{selected} column is present it must
+be logical without missing values, and only rows with \code{selected = TRUE}
+are used. \code{chr} must agree with the marker map when given; other columns
+are ignored. Pass the table to \code{qtl2mr_pair_input()}, not as
+\code{selected_loci} of \code{\link{as_qtl2mr_prepared_input}()}, which refuses
+unselected rows and other exposures' rows.}
 \item{exposure, outcome}{Trait names of one pair.}
 \item{pairs}{Data frame or CSV path with \code{exposure} and \code{outcome}
 columns and an optional unique \code{pair_id}. Each pair uses the instruments
@@ -96,9 +100,9 @@ non-estimable loci are dropped.}
 row and continuing. A pair that fails the checks made before fitting (missing
 traits or instruments, too few loci or samples) stops the run before anything
 is written; when a pair fails during fitting, completed pairs and the failing
-pair are written to \code{output_dir} before the error is raised. With \code{n_workers > 1}, each
-worker stops at its first failure, but exposure groups already running in other
-workers finish first.}
+pair are written to \code{output_dir} before the error is raised. With
+\code{n_workers > 1}, each exposure group stops at its own first failing pair,
+but every exposure group is still run before the error is raised.}
 \item{resume}{Continue an earlier run in \code{output_dir}; see Details.}
 \item{overwrite}{Replace existing batch outputs in \code{output_dir}. Only files
 written by \code{run_qtl2mr_batch()} are removed.}
@@ -129,8 +133,8 @@ columns of \code{main_results} other than \code{pair_id}, \code{status},
 \code{error_message}, \code{locus_fit_status} and \code{runtime_sec} are
 identical to the same columns of the single-pair \code{main_result}. Locus fits
 that share a trait, chromosome, marker and sample set are computed once and
-reused across pairs; with \code{n_workers > 1} this reuse happens within each
-worker only. Pairs whose exposure has no selected instrument are recorded as
+reused across pairs; with \code{n_workers > 1} this reuse happens only within
+each exposure group. Pairs whose exposure has no selected instrument are recorded as
 \code{no_instruments} errors.
 
 When \code{output_dir} is given, every completed pair is saved as one record in
@@ -171,12 +175,15 @@ frames, written as \code{batch_<name>.csv} when \code{output_dir} is given:
 \code{steiger_pass}, sample counts and null-model hsq), \code{overlap_qc},
 \code{warnings}, \code{errors}, \code{sample_exclusions} (one row per trait
 and exclusion reason), \code{probability_normalization},
-\code{input_alignment} and \code{run_manifest}. Every table has its documented
-columns even when it has no rows. The run configuration is written to
+\code{input_alignment} and \code{run_manifest} (one row; \code{status} is
+\code{"complete"} or \code{"stopped_fail_fast"}). Each table has the same
+columns whether or not it has rows. The list also holds \code{config},
+\code{resources_metadata} and \code{pairs}; the run configuration is written to
 \code{batch_config.json}.
 }
 \seealso{
-\code{\link{run_qtl2mr_analysis}} for one pair with a full report.
+\code{\link{run_qtl2mr_analysis}} for one pair with a full report;
+\code{\link{as_qtl2mr_prepared_input}} for a hand-built single-pair input.
 }
 \examples{
 data("qtl2mr_example", package = "qtl2mr")
@@ -192,5 +199,12 @@ batch <- run_qtl2mr_batch(resources, data.frame(exposure = "x", outcome = "y"),
   instruments, min_samples = 20L, progress = FALSE)
 batch$main_results[, c("pair_id", "status", "theta", "profile_ci_lower",
   "profile_ci_upper", "n_loci_steiger_fail")]
+
+# The same pair in the single-pair workflow gives the same estimate.
+single <- run_qtl2mr_analysis(qtl2mr_pair_input(resources, instruments, "x", "y"),
+  output_dir = tempfile("qtl2mr-"), make_html = FALSE, make_figures = FALSE,
+  verbose = FALSE, progress = FALSE, heterogeneity_method = "chisq",
+  diagnostic_bootstrap_B = 0L)
+identical(batch$main_results$theta, qtl2mr_primary_result(single)$theta)
 }
 \keyword{methods}

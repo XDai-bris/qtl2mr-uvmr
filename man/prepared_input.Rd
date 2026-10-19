@@ -52,16 +52,18 @@ fits. Separate exposure/outcome kinships are not supported by the prepared adapt
 \item{marker_map}{Marker map as a data frame, qtl2-style list, or named vector.
 A data frame must contain \code{marker} and \code{chr}, or marker row names and
 a chromosome column.}
-\item{selected_loci}{Marker vector or data frame containing selected loci.
-May be omitted while preparing resources, but analysis requires an explicit
-selection or deliberate \code{use_all_loci = TRUE}.}
+\item{selected_loci}{Marker vector or data frame (with \code{marker} and
+optionally \code{chr}) of the instruments, used as given. Analysis requires an
+explicit selection or deliberate \code{use_all_loci = TRUE}; an empty selection
+is an error. A table from \code{\link{qtl2mr_select_instruments}()} is accepted
+only when it holds the selected rows of this exposure; otherwise use
+\code{\link{qtl2mr_pair_input}()}.}
 \item{use_all_loci}{Explicit opt-in to use every mapped marker when no
 selected-locus list is supplied. Defaults to false. This is not a recommended
 instrument-selection rule.}
 \item{exposure, outcome}{For prepared-input construction and validation,
 optional exposure and outcome trait names stored with the prepared object or
-supplied to \code{run_qtl2mr_analysis()}; they must be two different traits.
-An empty \code{selected_loci} is an error. For
+supplied to \code{run_qtl2mr_analysis()}; they must be two different traits. For
 \code{fit_mr_locus_block_overlap()}, named exposure and outcome phenotype
 vectors.}
 \item{exposure_samples, outcome_samples}{Optional role-specific sample filters.
@@ -127,7 +129,7 @@ per-marker adjustment counts and maximum original sum deviations. An adjustment
 emits a warning and is repeated only on an analysis-local copy; the prepared
 result retains this disclosure in \code{prepared_metadata}. The bound permits
 ordinary four-to-six-decimal exported probabilities, not arbitrary rescaling.
-As before, only selected markers are value-checked when a selection is supplied;
+Only selected markers are value-checked when a selection is supplied;
 the full array dimensions and marker/founder identifiers are always checked.
 
 High-level analysis standardizes phenotypes by default: the effect is SD of

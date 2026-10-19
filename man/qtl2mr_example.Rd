@@ -16,7 +16,10 @@ A list with \code{allele_probs}, \code{pheno}, \code{covar}, \code{kinship},
 \code{marker_map}, \code{selected_loci}, \code{exposure}, \code{outcome},
 \code{true_theta}, and \code{metadata}. \code{allele_probs} is a
 chromosome-named \code{calc_genoprob} list holding a 96 by 8 by 4
-sample-by-founder-by-marker array. \code{kinship} is deliberately \code{NULL}
+sample-by-founder-by-marker array (markers \code{m1} to \code{m4} on chromosome
+1). \code{pheno} has the exposure \code{x} and outcome \code{y}; \code{covar}
+has \code{sex} and \code{age}; \code{marker_map} has \code{marker}, \code{chr},
+\code{pos} and \code{exposure_lod}; \code{selected_loci} is \code{c("m1", "m2")}. \code{kinship} is deliberately \code{NULL}
 only to keep this teaching fixture self-contained.
 }
 \details{
@@ -28,8 +31,8 @@ marker founder contrast. The listed \code{exposure_lod} values are illustrative
 marker labels, not qtl2-derived calibration.
 
 For real Diversity Outbred analyses, users should harmonize sample IDs,
-determine selected loci upstream, and provide harmonized chromosome-specific
-LOCO kinship. The fixture's \code{kinship = NULL} is not a recommended real-data
+select instruments, for example with \code{\link{qtl2mr_select_instruments}()}
+from a qtl2 scan, and provide harmonized chromosome-specific LOCO kinship. The fixture's \code{kinship = NULL} is not a recommended real-data
 analysis setting.
 }
 \examples{

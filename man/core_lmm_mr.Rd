@@ -8,12 +8,12 @@
 \title{Advanced interface: founder LMM blocks and second-order MR}
 \description{
 \if{latex}{\out{\sloppy}}
-Low-level functions behind \code{run_qtl2mr_analysis()} and
-\code{run_qtl2mr_batch()}: fit founder-aware LMM blocks at single markers and
-combine them with the overlap-aware second-order estimator. They are intended
-for method development and checks; most analyses should use the two
-high-level workflows, which add input validation, sample accounting,
-diagnostics and reporting.
+Low-level founder-aware LMM blocks at single markers and the overlap-aware
+second-order estimator. They are intended for method development and checks;
+most analyses should use the high-level functions
+(\code{\link{qtl2mr_select_instruments}()}, \code{\link{run_qtl2mr_analysis}()}
+and \code{\link{run_qtl2mr_batch}()}), which add input validation, sample
+accounting, diagnostics and reporting.
 }
 \usage{
 make_founder_contrasts(founders = LETTERS[1:8])
@@ -83,8 +83,10 @@ sensitivity estimate.}
 heterogeneity p-value. \code{"auto"} reports a chi-square reference for
 single-locus fits and simulation calibration for multi-locus fits.}
 \item{q_sim_n}{Number of conditional residual simulations for the aggregate
-Q heterogeneity p-value. The low-level default is \code{0L}; the high-level
-analysis workflow runs calibration by default. If simulation is selected with
+Q heterogeneity p-value. The low-level default is \code{0L};
+\code{run_qtl2mr_analysis()} runs 1,000 draws by default for several loci
+(its \code{heterogeneity_nsim}), while \code{run_qtl2mr_batch()} defaults to the
+chi-square reference. If simulation is selected with
 \code{q_sim_n = 0L}, the low-level fit warns and returns \code{Q_p_reported =
 NA}.}
 \item{q_sim_seed}{Random seed for Q simulation calibration.}
@@ -109,7 +111,10 @@ influence operators. Kinship is decomposed internally after forming
 
 \code{fit_mr_locus_block()} fits exposure and outcome on joint complete
 samples and constructs \code{Sigma_x}, \code{Sigma_y}, and one-sample
-overlap-aware \code{Sigma_xy}. The default \code{cross_cov_model = "star"}
+overlap-aware \code{Sigma_xy}. The high-level functions do not use it: they fit
+each trait on its own complete samples and model the partial overlap, so their
+estimates differ from this function when exposure and outcome have different
+missing samples. The default \code{cross_cov_model = "star"}
 matches the manuscript method for LMM analyses. Raw-space covariance is
 reported only as technical QC and is not a public estimator.
 

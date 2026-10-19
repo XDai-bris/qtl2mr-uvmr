@@ -27,8 +27,10 @@ data("qtl2mr_example", package = "qtl2mr")
 ```
 
 The fixture has 96 samples, eight founders, one chromosome, four markers, and
-two selected teaching loci (`m1`, `m2`). Locus choice remains upstream in a
-real analysis; `exposure_lod` is an illustrative label, not qtl2 calibration.
+two selected teaching loci (`m1`, `m2`). In a real analysis, choose loci with
+`qtl2mr_select_instruments()` or a prespecified list
+(`vignette("from-qtl2", package = "qtl2mr")`); the `exposure_lod` column of
+`marker_map` is an illustrative label, not qtl2 output.
 
 ## Prepare the input
 
@@ -53,7 +55,6 @@ stopifnot(validate_qtl2mr_input(prepared, require_selected_loci = TRUE))
 result_dir <- tempfile("qtl2mr-getting-started-")
 result <- run_qtl2mr_analysis(
   prepared,
-  loci = 2,
   output_dir = result_dir,
   overwrite = TRUE,
   make_figures = FALSE,
@@ -90,7 +91,7 @@ primary_view <- data.frame(
   estimator = primary$reported_estimator,
   estimate = primary$theta_reported,
   `95% CI` = sprintf("[%.3f, %.3f]", primary$reported_ci_lower, primary$reported_ci_upper),
-  numerically_bounded = primary$primary_reliable,
+  primary_reliable = primary$primary_reliable,
   row.names = NULL,
   check.names = FALSE
 )
@@ -108,10 +109,23 @@ knitr::kable(actionable_warnings)
 The default `reported_estimator_policy = "diagnostic_only"` reports the
 Star-space second-order estimate only for a numerically acceptable, bounded
 fit. An unresolved or unbounded fit is left unreported; raw second-order and Two-step
-diagnostics remain inspectable. Block F for each locus is in
-`data/block_first_stage.csv`; `weak_block_first_stage` is raised when a
-retained locus has F_X < 2, that is, its founder effects on the exposure do
-not reach nominal p = 0.05. Both loci here are above that guide.
+diagnostics remain inspectable. The only notice here, `no_kinship_ols`, says
+that this fixture has no kinship, so the founder LMM reduces to ordinary least
+squares; the next section adds one.
+
+```{r first-stage}
+first_stage <- read.csv(file.path(result_dir, "data", "block_first_stage.csv"))
+first_stage[, c("marker", "F_X_block", "partial_R2_X_block", "partial_R2_Y_block", "steiger_pass")]
+```
+
+`weak_block_first_stage` is raised when a retained locus has F_X < 2, that is,
+its founder effects on the exposure do not reach nominal p = 0.05. Both loci
+are above that guide, but `m2` is close to it and explains more outcome than
+exposure variance (`steiger_pass = FALSE`). With the default
+`run_instrument_sensitivity = TRUE`, the Steiger direction check refits
+without `m2` and reports the result next to the primary estimate in
+`data/steiger_sensitivity.csv` (about 0.79 instead of 0.89); it never filters
+the primary estimate.
 
 The default estimate is in **SD of outcome per SD of exposure**. A bounded
 fit does not guarantee 95% coverage: weak instruments, correlated loci and
@@ -137,9 +151,12 @@ background <- matrix(rnorm(length(ids) * 24L), nrow = length(ids))
 K <- tcrossprod(background) / ncol(background)
 K <- (K / mean(diag(K)) + diag(length(ids))) / 2
 dimnames(K) <- list(ids, ids)
-prepared_lmm <- prepared
-prepared_lmm$kinship <- list("1" = K)
-prepared_lmm$hsq <- NULL  # estimate trait-specific hsq internally
+prepared_lmm <- as_qtl2mr_prepared_input(
+  allele_probs = qtl2mr_example$allele_probs, pheno = qtl2mr_example$pheno,
+  covar = qtl2mr_example$covar, kinship = list("1" = K),
+  marker_map = qtl2mr_example$marker_map, selected_loci = qtl2mr_example$selected_loci,
+  exposure = qtl2mr_example$exposure, outcome = qtl2mr_example$outcome
+)
 lmm_dir <- tempfile("qtl2mr-lmm-")
 lmm_result <- run_qtl2mr_analysis(
   prepared_lmm, output_dir = lmm_dir, make_figures = FALSE,
@@ -147,12 +164,19 @@ lmm_result <- run_qtl2mr_analysis(
   heterogeneity_method = "none", run_loo_mr = FALSE,
   run_instrument_sensitivity = FALSE, progress = FALSE
 )
-qtl2mr_primary_result(lmm_result)
 ```
 
-An estimated `hsq = 0` is a valid boundary fit in this small independent-
-background example. It does not show that kinship is unimportant in real DO
-data, nor establish agreement between kinship-adjusted and unadjusted models.
+```{r kinship-hsq}
+read.csv(file.path(lmm_dir, "data", "hsq.csv"))[, c("role", "trait", "hsq", "hsq_status")]
+summary(lmm_result)$estimate
+```
+
+hsq is estimated by REML for each trait without the locus. Here both traits
+get `hsq = 0` (`boundary_zero`, flagged by the `hsq_boundary` notice), so the
+kinship term has no effect and the estimate equals the fit without kinship. That
+is a valid boundary fit in this small independent-background example. It does
+not show that kinship is unimportant in real DO data, nor establish agreement
+between kinship-adjusted and unadjusted models.
 
 ## Open the useful files
 
@@ -168,13 +192,14 @@ Use founder **allele** probabilities (sample x eight founders x marker),
 numeric traits and covariates with sample IDs, an explicit selected-locus
 list, and harmonized chromosome-specific LOCO kinship. The companion
 `vignette("from-qtl2", package = "qtl2mr")` shows the upstream steps and
-explains which choices are yours. A missing selected-locus list no longer
-means "use every marker".
-The single-pair workflow uses separate usable samples for X and Y and models
-their overlap. For many pairs, `qtl2mr_select_instruments()` builds one
-instrument set per exposure and `run_qtl2mr_batch()` fits every pair in the
-same way, so a batch row equals the single analysis of that pair with the same
-instruments and options.
+explains which choices are yours. Without a selected-locus list the analysis
+stops; `use_all_loci = TRUE` is an explicit opt-in, not a selection rule.
+Exposure and outcome each use their own usable samples and their overlap is
+modelled. For one or many pairs, `qtl2mr_prepare_resources()` and
+`qtl2mr_select_instruments()` build one instrument set per exposure;
+`qtl2mr_pair_input()` makes the input used above, and `run_qtl2mr_batch()` fits
+many pairs, each exactly as `run_qtl2mr_analysis()` would with the same
+settings.
 
 ```{r cleanup, include=FALSE}
 unlink(result_dir, recursive = TRUE, force = TRUE)

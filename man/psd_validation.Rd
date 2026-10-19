@@ -40,4 +40,10 @@ A list with logical \code{psd_valid}, eigenvalue diagnostics, the maximum
 whitened cross-covariance singular value, and the singular values used in the
 canonical-correlation check.
 }
+\examples{
+# A valid block: whitened cross-covariance singular values below one.
+validate_joint_psd(diag(2), diag(2), diag(0.5, 2))$psd_valid
+# An impossible block: cross-covariance larger than both variances allow.
+validate_joint_psd(diag(2), diag(2), diag(1.5, 2))$psd_valid
+}
 \keyword{methods}

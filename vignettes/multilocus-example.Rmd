@@ -21,17 +21,6 @@ Everything needed is installed with `qtl2mr`. No download or `qtl2`
 installation is needed. The example demonstrates the workflow, not method
 calibration or a realistic mouse-genome simulation.
 
-### Provenance boundary
-
-The installed fixture is sufficient to rerun this analysis, not to regenerate
-the upstream simulation. The public `data-raw/make_qtl2mr_multilocus_example.R`
-is an extractor: it needs a separately frozen synthetic input, identified by
-hash, that is not distributed here. Its recorded master seed alone is not a
-generator. Omitted traits and background loci contributed to the stored
-outcome and cannot be recovered from this subset. Full from-seed regeneration
-would require a separately reviewed, self-contained public generator and its
-complete construction parameters; none is claimed or substituted here.
-
 ## 1. Load and prepare
 
 ```{r prepare}
@@ -89,8 +78,8 @@ plus or minus 1.96 times the SD from 500 parametric-bootstrap draws.
 Loci and weights stay fixed; each per-locus effect is sampled independently
 using its estimate and SE. These diagnostic intervals are not profile CIs
 or a coverage guarantee. The primary result retains its profile interval;
-the other two methods use Wald intervals. Heterogeneity uses an approximate
-chi-square reference.
+the `Sigma_xy=0 qtl2mr` and `Two-step IVW` comparators use Wald intervals.
+Heterogeneity uses an approximate chi-square reference.
 
 ## 3. Read the estimate
 
@@ -128,17 +117,29 @@ warnings <- qtl2mr_warnings(result)
 warnings[, c("warning_id", "severity")]
 ```
 
-Keep warnings visible. Here the founder-block F statistics range from about
-2.07 to 5.50. They are seven-contrast statistics; neither the construction's
-F > 2 rule nor a generic warning threshold establishes reliable inference.
-`primary_reliable` describes a numerically acceptable bounded fit, not causal
-validity or calibrated coverage.
+Keep warnings visible. `hsq_boundary` reports that the outcome's null-model
+hsq is 0 on every chromosome (the exposure's is about 0.06; see
+`data/hsq.csv`), so the kinship term does not reweight the outcome LMM. Here
+the founder-block F statistics range from about 2.07 to 5.50. They are
+seven-contrast statistics; neither the construction's F > 2 rule nor the
+package's F_X < 2 guide (no locus is flagged here) establishes reliable
+inference. `primary_reliable` describes a numerically acceptable bounded fit,
+not causal validity or calibrated coverage.
+
+```{r steiger}
+result$steiger_sensitivity[, c("n_loci", "n_loci_removed", "theta_primary",
+                               "theta_steiger", "status")]
+```
+
+Every locus explains at least as much exposure as outcome variance, so the
+Steiger direction check removes nothing (`no_loci_removed`). It is a
+sensitivity analysis and never filters the primary estimate.
 
 The report includes all 40 leave-one-locus-out refits. Its plot shows the
 25 largest changes: each point omits one locus while retaining the other 39.
 Large changes identify influential loci, not automatically invalid ones.
 
-```{r loo-figure, echo=FALSE, out.width='100%'}
+```{r loo-figure, echo=FALSE, out.width='100%', fig.alt='Change in the MR estimate when each of the 25 most influential loci is left out'}
 knitr::include_graphics(file.path(result_dir, "figures", "loo_mr_top25.png"))
 ```
 
@@ -147,7 +148,7 @@ common relationship. The report's heatmap shows the first 30 selected loci;
 the CSV contains all 40. These are descriptive diagnostics, not a list of
 proven causal or pleiotropic founders.
 
-```{r founder-figure, echo=FALSE, out.width='100%'}
+```{r founder-figure, echo=FALSE, out.width='100%', fig.alt='Heatmap of founder residuals for the first 30 selected loci'}
 knitr::include_graphics(file.path(result_dir, "figures", "founder_residual_heatmap.png"))
 ```
 
@@ -166,3 +167,14 @@ when running the analysis. Keep the whole result folder, not just its HTML.
 For the data fields and construction notes, see
 `?qtl2mr_multilocus_example`. For your own qtl2 data, continue with
 `vignette("from-qtl2", package = "qtl2mr")`.
+
+## About the example data
+
+The installed fixture is sufficient to rerun this analysis, not to regenerate
+the upstream simulation. The public `data-raw/make_qtl2mr_multilocus_example.R`
+is an extractor: it needs a separately frozen synthetic input, identified by
+hash, that is not distributed here. Its recorded master seed alone is not a
+generator. Omitted traits and background loci contributed to the stored
+outcome and cannot be recovered from this subset. Full from-seed regeneration
+would require a separately reviewed, self-contained public generator and its
+complete construction parameters; none is claimed or substituted here.
