@@ -399,7 +399,7 @@ plot_block_first_stage_dashboard <- function(block_first_stage,
   op <- graphics::par(no.readonly = TRUE)
   on.exit(graphics::par(op), add = TRUE)
   graphics::par(mfrow = c(1, 2), mar = c(5, 4, 4, 1))
-  graphics::hist(f, breaks = "FD", col = "#80b1aa", border = "white",
+  graphics::hist(f, breaks = if (length(f) > 1L) "FD" else 1L, col = "#80b1aa", border = "white",
                  xlab = "Block F_X", main = main, ...)
   graphics::abline(v = threshold, lty = 2, col = "#b2182b", lwd = 2)
   graphics::plot(sort(f, decreasing = TRUE), pch = 16, col = ifelse(sort(f, decreasing = TRUE) < threshold, "#c46a1b", "#00796b"),

@@ -693,7 +693,7 @@ qtl2mr_empty_batch_table <- function(name) {
       "error_message", "traceback_available", "runtime_sec"
     ),
     run_manifest = c(
-      "run_id", "created_at", "n_pairs_requested", "n_pairs_ok", "n_pairs_error",
+      "run_id", "created_at", "status", "n_pairs_requested", "n_pairs_ok", "n_pairs_error",
       "n_pairs_resumed", "nonestimable_locus_policy", "n_loci_dropped_nonestimable",
       "parallel_backend", "n_workers", "context_cache_hits", "context_cache_misses",
       "lmm_fit_cache_hits", "lmm_fit_cache_misses", "wall_sec", "mean_wall_sec_per_pair", "lmm_backend"
@@ -995,14 +995,11 @@ qtl2mr_batch_assemble <- function(batch, records, results, todo, pairs, prefligh
 
 # On a fail_fast stop, completed pairs are published so the user can inspect them;
 # their records already allow resume = TRUE to continue.
-qtl2mr_batch_publish_partial <- function(output_dir, records, results, todo, batch, pairs, preflight) {
+qtl2mr_batch_publish_partial <- function(output_dir, records, results, todo, batch, pairs, preflight, manifest) {
   if (is.null(output_dir)) return(invisible(NULL))
   done <- !vapply(results, is.null, logical(1))
   batch <- qtl2mr_batch_assemble(batch, records, results[done], todo[done, , drop = FALSE], pairs, preflight)
-  batch$run_manifest <- data.frame(created_at = as.character(Sys.time()), n_pairs_requested = nrow(pairs),
-    n_pairs_ok = sum(batch$main_results$status == "ok", na.rm = TRUE),
-    n_pairs_error = sum(batch$main_results$status == "error", na.rm = TRUE), status = "stopped_fail_fast",
-    stringsAsFactors = FALSE)
+  batch$run_manifest <- manifest(batch, "stopped_fail_fast")
   write_qtl2mr_batch_outputs(batch, output_dir)
   invisible(output_dir)
 }
@@ -1159,30 +1156,33 @@ run_qtl2mr_batch <- function(resources,
     }
     cache_stats[[1L]] <- list(qtl2mr_context_cache_stats(context_cache), qtl2mr_context_cache_stats(fit_cache))
   }
+  stat_sum <- function(which, field) sum(vapply(cache_stats, function(s) as.numeric(s[[which]][[field]] %||% 0), numeric(1)))
+  manifest <- function(batch, status) {
+    wall_sec <- proc.time()[["elapsed"]] - t_run
+    data.frame(
+      run_id = run_id, created_at = as.character(Sys.time()), status = status,
+      n_pairs_requested = nrow(pairs),
+      n_pairs_ok = sum(batch$main_results$status == "ok", na.rm = TRUE),
+      n_pairs_error = sum(batch$main_results$status == "error", na.rm = TRUE),
+      n_pairs_resumed = length(records),
+      nonestimable_locus_policy = if (identical(settings$on_nonestimable_locus, "drop")) "drop_audited" else "fail_closed",
+      n_loci_dropped_nonestimable = sum(batch$main_results$n_loci_dropped_nonestimable %||% 0L, na.rm = TRUE),
+      parallel_backend = backend, n_workers = n_workers,
+      context_cache_hits = stat_sum(1L, "hits"), context_cache_misses = stat_sum(1L, "misses"),
+      lmm_fit_cache_hits = stat_sum(2L, "hits"), lmm_fit_cache_misses = stat_sum(2L, "misses"),
+      wall_sec = wall_sec, mean_wall_sec_per_pair = wall_sec / max(nrow(todo), 1L),
+      lmm_backend = qtl2mr_backend_label(batch$main_results$lmm_backend[batch$main_results$status == "ok"]),
+      stringsAsFactors = FALSE
+    )
+  }
   if (!is.null(first_failure)) {
-    qtl2mr_batch_publish_partial(output_dir, records, results, todo, batch, pairs, preflight)
+    qtl2mr_batch_publish_partial(output_dir, records, results, todo, batch, pairs, preflight, manifest)
     stop(sprintf("Pair %s failed (fail_fast = TRUE): %s", first_failure$pair_id[[1L]],
       first_failure$error_message[[1L]]), call. = FALSE)
   }
 
   batch <- qtl2mr_batch_assemble(batch, records, results, todo, pairs, preflight)
-  stat_sum <- function(which, field) sum(vapply(cache_stats, function(s) as.numeric(s[[which]][[field]] %||% 0), numeric(1)))
-  wall_sec <- proc.time()[["elapsed"]] - t_run
-  batch$run_manifest <- data.frame(
-    run_id = run_id, created_at = as.character(Sys.time()),
-    n_pairs_requested = nrow(pairs),
-    n_pairs_ok = sum(batch$main_results$status == "ok", na.rm = TRUE),
-    n_pairs_error = sum(batch$main_results$status == "error", na.rm = TRUE),
-    n_pairs_resumed = length(records),
-    nonestimable_locus_policy = if (identical(settings$on_nonestimable_locus, "drop")) "drop_audited" else "fail_closed",
-    n_loci_dropped_nonestimable = sum(batch$main_results$n_loci_dropped_nonestimable %||% 0L, na.rm = TRUE),
-    parallel_backend = backend, n_workers = n_workers,
-    context_cache_hits = stat_sum(1L, "hits"), context_cache_misses = stat_sum(1L, "misses"),
-    lmm_fit_cache_hits = stat_sum(2L, "hits"), lmm_fit_cache_misses = stat_sum(2L, "misses"),
-    wall_sec = wall_sec, mean_wall_sec_per_pair = wall_sec / max(nrow(todo), 1L),
-    lmm_backend = qtl2mr_backend_label(batch$main_results$lmm_backend[batch$main_results$status == "ok"]),
-    stringsAsFactors = FALSE
-  )
+  batch$run_manifest <- manifest(batch, "complete")
   if (!is.null(output_dir)) {
     files <- write_qtl2mr_batch_outputs(batch, output_dir)
     hashes <- tools::md5sum(file.path(output_dir, files))

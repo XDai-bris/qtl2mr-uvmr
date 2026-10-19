@@ -215,3 +215,42 @@ test_that("a failed Steiger check is logged and reported without hiding the prim
   expect_false("steiger_filtered" %in% result$instrument_sensitivity$set_name)
   expect_true(is.finite(qtl2mr_primary_result(result)$theta))
 })
+
+test_that("an instruments table cannot silently change the loci of a prepared input", {
+  f <- v060_fixture()
+  inst <- qtl2mr_select_instruments(f$resources, f$scan, max_loci = 1L, progress = FALSE)
+  r <- f$resources
+  prepare <- function(selected, exposure = "x") {
+    as_qtl2mr_prepared_input(r$allele_probs, r$pheno, r$covar, r$kinship, r$marker_map,
+      selected_loci = selected, exposure = exposure, outcome = "y")
+  }
+  expect_error(prepare(inst), "not selected = TRUE.*qtl2mr_pair_input")
+  expect_error(prepare(inst[inst$selected, ]), "several exposures")
+  expect_error(prepare(inst[inst$selected & inst$exposure == "w", ]), "exposure w, not x")
+  ok <- prepare(inst[inst$selected & inst$exposure == "x", ])
+  expect_identical(ok$selected_loci$marker, qtl2mr_pair_input(r, inst, "x", "y")$selected_loci$marker)
+})
+
+test_that("a single-locus analysis writes its figures", {
+  f <- v060_fixture()
+  inst <- data.frame(exposure = "x", marker = "a1")
+  result <- v060_single(f$resources, inst, "x", "y", make_figures = TRUE, make_html = TRUE)
+  expect_true(file.exists(file.path(result$output_dir, "figures", "weak_denominator_dashboard.png")))
+  expect_true(file.exists(file.path(result$output_dir, "report.html")))
+})
+
+test_that("a fail_fast stop writes the run manifest in the usual layout", {
+  f <- v060_fixture(nonestimable_b2 = TRUE)
+  inst <- data.frame(exposure = c("w", "x", "x"), marker = c("a3", "a1", "b2"))
+  pairs <- data.frame(exposure = c("w", "x"), outcome = "y")
+  path <- tempfile("v060-manifest-")
+  expect_error(run_qtl2mr_batch(f$resources, pairs, inst, fail_fast = TRUE, output_dir = path, progress = FALSE),
+    "Pair x__to__y failed")
+  partial <- utils::read.csv(file.path(path, "batch_run_manifest.csv"), stringsAsFactors = FALSE)
+  expect_identical(names(partial), names(qtl2mr:::qtl2mr_empty_batch_table("run_manifest")))
+  expect_identical(partial$status, "stopped_fail_fast")
+  expect_identical(c(partial$n_pairs_ok, partial$n_pairs_error), c(1L, 1L))
+  complete <- run_qtl2mr_batch(f$resources, pairs[1L, ], inst, progress = FALSE)
+  expect_identical(complete$run_manifest$status, "complete")
+  expect_identical(names(complete$run_manifest), names(partial))
+})

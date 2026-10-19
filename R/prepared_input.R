@@ -18,6 +18,7 @@ as_qtl2mr_prepared_input <- function(allele_probs,
   if (!is.logical(use_all_loci) || length(use_all_loci) != 1L || is.na(use_all_loci)) {
     stop("use_all_loci must be TRUE or FALSE", call. = FALSE)
   }
+  qtl2mr_check_selected_loci_table(selected_loci, exposure)
   input <- list(
     allele_probs = allele_probs,
     pheno = pheno,
@@ -41,6 +42,25 @@ as_qtl2mr_prepared_input <- function(allele_probs,
   input$sample_alignment <- qtl2mr_input_alignment(input)
   qtl2mr_warn_alignment(input$sample_alignment)
   input
+}
+
+# selected_loci is used as given. An instruments table (exposure and selected
+# columns) would silently bring in unselected loci or another exposure's loci,
+# so it is refused unless it already holds the selected rows of this exposure.
+qtl2mr_check_selected_loci_table <- function(selected_loci, exposure = NULL) {
+  if (!is.data.frame(selected_loci)) return(invisible(TRUE))
+  hint <- "; use qtl2mr_pair_input(resources, instruments, exposure, outcome) or keep only the selected rows of one exposure"
+  if ("selected" %in% names(selected_loci) && !all(selected_loci$selected %in% TRUE)) {
+    stop("selected_loci contains rows that are not selected = TRUE", hint, call. = FALSE)
+  }
+  if ("exposure" %in% names(selected_loci)) {
+    traits <- unique(as.character(selected_loci$exposure))
+    if (length(traits) > 1L) stop("selected_loci holds instruments of several exposures", hint, call. = FALSE)
+    if (!is.null(exposure) && length(traits) == 1L && !identical(traits, exposure)) {
+      stop("selected_loci holds instruments of exposure ", traits, ", not ", exposure, hint, call. = FALSE)
+    }
+  }
+  invisible(TRUE)
 }
 
 qtl2mr_validate_ids <- function(ids, label) {
