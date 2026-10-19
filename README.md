@@ -8,20 +8,20 @@ using selected QTL as instruments. Each instrument is represented by founder
 haplotype probabilities from `qtl2`, not by a single SNP dosage, and the
 estimator accounts for exposure-outcome sample overlap.
 
-**Current release:** [v0.5.0](https://github.com/XDai-bris/qtl2mr-uvmr/releases/tag/v0.5.0).
+**Current release:** [v0.6.0](https://github.com/XDai-bris/qtl2mr-uvmr/releases/tag/v0.6.0).
 See [NEWS.md](NEWS.md) for what changed and the
-[migration table](#upgrading-from-04x) if you used 0.4.x.
+[migration table](#upgrading-from-05x) if you used 0.5.x.
 
 ## Installation
 
-Download `qtl2mr_0.5.0.tar.gz` and `SHA256SUMS` from the release assets. Use
+Download `qtl2mr_0.6.0.tar.gz` and `SHA256SUMS` from the release assets. Use
 the package file, not GitHub's automatic "Source code" archive, because the
 package file contains the built vignettes. Check the SHA-256 against
 `SHA256SUMS`, then in R:
 
 ```r
 install.packages("fs")  # with conda: conda install -c conda-forge r-fs
-install.packages("qtl2mr_0.5.0.tar.gz", repos = NULL, type = "source")
+install.packages("qtl2mr_0.6.0.tar.gz", repos = NULL, type = "source")
 library(qtl2mr)
 vignette("getting-started", package = "qtl2mr")
 ```
@@ -33,12 +33,17 @@ compute allele probabilities, kinship and QTL scans:
 install.packages("qtl2", repos = "https://cloud.r-project.org")
 ```
 
-## Two ways to use qtl2mr
+## How to use qtl2mr
 
-| You want to analyse | Use | You get |
+| Step | Use | You get |
 |---|---|---|
-| One exposure → outcome pair | `as_qtl2mr_prepared_input()` then `run_qtl2mr_analysis()` | A result folder with tables, figures and an HTML report |
-| Many pairs | `qtl2mr_prepare_resources()` then `run_qtl2mr_batch()` | Compact tables with one row per pair; optional parallel workers and resume |
+| Choose instruments | `qtl2mr_prepare_resources()` then `qtl2mr_select_instruments()` | One instrument set per exposure, with the exposure block F of every LOD candidate |
+| Study one exposure → outcome pair | `as_qtl2mr_prepared_input()` or `qtl2mr_pair_input()`, then `run_qtl2mr_analysis()` | A result folder with tables, figures, sensitivity analyses and an HTML report |
+| Screen many pairs | `run_qtl2mr_batch()` | Compact tables with one row per pair; optional parallel workers and resume |
+
+A batch row is the same fit as `run_qtl2mr_analysis()` on that pair with the
+same instruments and settings, so pairs found in a batch can be studied in
+detail without any change in the estimate.
 
 ### One pair
 
@@ -91,32 +96,40 @@ comparable. The example is teaching data, not evidence about the method.
 ### Many pairs
 
 ```r
-resources <- qtl2mr_prepare_resources(
-  allele_probs, kinship, pheno, covar,
-  qtl_scan = scan,          # e.g. qtl2::scan1() output, markers x traits
-  marker_map = map
-)
+resources <- qtl2mr_prepare_resources(allele_probs, kinship, pheno, covar, marker_map = map)
+# scan: e.g. qtl2::scan1() output, markers x traits
+instruments <- qtl2mr_select_instruments(resources, scan, exposures = c("x", "w"),
+                                         lod_thresh = 4)
 pairs <- data.frame(exposure = c("x", "x", "w"), outcome = c("y", "z", "z"))
 
-batch <- run_qtl2mr_batch(
-  resources, pairs,
-  instrument_rule = list(lod_thresh = 4),
-  output_dir = "batch-results",
-  n_workers = 4
-)
+batch <- run_qtl2mr_batch(resources, pairs, instruments,
+                          output_dir = "batch-results", n_workers = 4)
 batch$main_results[, c("pair_id", "status", "theta_reported",
                        "reported_ci_lower", "reported_ci_upper")]
+
+# A full report for one pair, with the same estimate as its batch row
+detail <- run_qtl2mr_analysis(qtl2mr_pair_input(resources, instruments, "x", "z"),
+                              output_dir = "x-to-z")
 ```
 
-Instruments are selected for each exposure from the scan (one peak per
-contiguous above-threshold region per chromosome). Each pair is fitted on the
-samples complete for both of its traits. If a run is interrupted, call it
-again with `resume = TRUE`: completed pairs are kept, the output folder may
-have been moved, and `n_workers` may differ. A resume is refused if the
-inputs, options or qtl2mr code changed (for example after an upgrade).
+`qtl2mr_select_instruments()` takes, for each exposure, one peak per
+contiguous above-threshold region per chromosome and fits the exposure at each
+candidate to report its block F (`F_X_block`). `F_X_min` optionally drops weak
+candidates; it is off by default. The table keeps every candidate with
+`selected` and `drop_reason`, so you can inspect it, edit it or write your own
+(only `exposure` and `marker` are required).
 
-Batch defaults skip the Q simulation and bootstrap intervals; rerun pairs of
-interest with `run_qtl2mr_analysis()` for a full report.
+Each pair is fitted with the exposure and the outcome on their own complete
+samples, exactly as in `run_qtl2mr_analysis()`. If a run is interrupted, call
+it again with `resume = TRUE`: completed pairs are kept, the output folder may
+have been moved, and `n_workers` may differ. A resume is refused if the
+inputs, instruments, options or qtl2mr code changed (for example after an
+upgrade).
+
+Batch defaults use the chi-square Q p-value and skip bootstrap intervals and
+sensitivity analyses; `batch_locus_results.csv` flags loci that fail the
+Steiger direction check (`steiger_pass`). Rerun pairs of interest with
+`run_qtl2mr_analysis()` for the full report.
 
 ## Using your own data
 
@@ -132,8 +145,8 @@ are:
   (`qtl2::calc_kinship(probs, type = "loco")`); `NULL` fits ordinary least
   squares;
 - `marker_map`: a data frame with `marker`, `chr`, `pos`, or a qtl2 map list;
-- `selected_loci`: the instrument markers, for example from
-  `qtl2mr_select_loci_from_scan()`. Choose the threshold before seeing MR
+- `selected_loci`: the instrument markers, for example the selected rows of
+  `qtl2mr_select_instruments()`. Choose the threshold before seeing MR
   results; the package never uses every marker unless you set
   `use_all_loci = TRUE`.
 
@@ -187,6 +200,12 @@ is approximately chi-square with 7 degrees of freedom.
   here. Weak blocks can make profile intervals too narrow; use the LOD
   threshold and F to limit that risk, not as a coverage guarantee.
 
+When the scan and the MR fit use the same samples, covariates and kinship, a
+LOD threshold of 4 already implies F of about 2.6, so `F_X_min = 2` in
+`qtl2mr_select_instruments()` rarely removes a locus. It matters when the scan
+was run differently (for example without kinship, or on other samples) or when
+a lower LOD threshold is used with F as the real gate.
+
 ## Runtime
 
 With several loci, `run_qtl2mr_analysis()` calibrates the Q heterogeneity
@@ -197,11 +216,15 @@ per draw. On a laptop, the bundled 400-mouse, 40-locus example takes roughly
 
 ## Advanced use
 
-- **Batch options.** `sample_policy = "batch_common_complete"` fits every pair
-  on one sample set complete for all batch traits (faster to share, but it can
-  change estimates; `min_sample_retention` stops the run if too many samples
-  are lost). `on_nonestimable_locus = "drop"` removes a locus whose founder
-  contrast cannot be estimated and records it, instead of failing the pair.
+- **Non-estimable loci.** In both workflows, `on_nonestimable_locus = "drop"`
+  removes a locus whose founder contrast cannot be estimated in the exposure or
+  outcome samples and records it, instead of failing the pair.
+- **Steiger direction check.** `run_qtl2mr_analysis()` repeats the fit without
+  loci that explain more outcome than exposure variance and compares it with
+  the primary estimate (`data/steiger_sensitivity.csv`). It is a sensitivity
+  analysis; the primary estimate is not filtered.
+- **Parallel batches.** With `n_workers > 1`, pairs sharing an exposure run in
+  one worker; outcome fits are reused within a worker but not across workers.
   See `?run_qtl2mr_batch`.
 - **Follow-up refits.** `refit_qtl2mr_subset()` and
   `fit_instrument_set_sensitivity()` re-estimate an analysis on locus subsets
@@ -212,25 +235,25 @@ per draw. On a laptop, the bundled 400-mouse, 40-locus example takes roughly
 - **qtl2 parity check.** `validate_qtl2_scan1coef()` compares the qtl2mr LMM
   with `qtl2::scan1coef()` for one marker.
 
-## Upgrading from 0.4.x
+## Upgrading from 0.5.x
 
-| 0.4.x | 0.5.0 |
+| 0.5.x | 0.6.0 |
 |---|---|
-| `run_qtl2mr_batch(r, p)` | unchanged |
-| `run_qtl2mr_batch(r, p, sample_rule = list(mode = "batch_common_complete"))` | `run_qtl2mr_batch(r, p, sample_policy = "batch_common_complete", min_sample_retention = 0)` (0.4.x had no retention gate here; the new default stops below 85% retention) |
-| `run_qtl2mr_batch_fast(r, p)` | `run_qtl2mr_batch(r, p, sample_policy = "batch_common_complete", on_nonestimable_locus = "drop")` |
-| `run_qtl2mr_batch_exact_grouped(r, p)` | `run_qtl2mr_batch(r, p)` |
-| `run_qtl2mr_batch_parallel_by_exposure(r, p, n_workers = k)` | `run_qtl2mr_batch(r, p, sample_policy = "batch_common_complete", on_nonestimable_locus = "drop", n_workers = k)` |
-| `run_qtl2mr_batch_parallel_by_exposure(r, p, fast = FALSE, n_workers = k)` | `run_qtl2mr_batch(r, p, n_workers = k)` |
-| `fit_options = list(save_mr_block_cache = TRUE)`, `run_first_stage_filter_grid`, `steiger_filter`, `refit_qtl2mr_mr_block_cache()` | removed; for one pair, refit locus subsets with `fit_instrument_set_sensitivity()` |
-| `run_qtl2mr_analysis(..., adapter = "prepared")` | drop `adapter` (and `run_qtl2_validation`, `run_heteroskedasticity`, `heteroskedasticity_B`) |
-| `run_qtl2mr_analysis(input, "x", "y", "prepared", out)` (positional) | `run_qtl2mr_analysis(input, "x", "y", out)`: `output_dir` is now the fourth argument |
-| `summary(result)` (99 columns) | `qtl2mr_primary_result(result)`; `summary()` is now a one-row overview |
+| `qtl2mr_prepare_resources(probs, K, pheno, covar, qtl_scan = scan, marker_map = map)` | `qtl2mr_prepare_resources(probs, K, pheno, covar, marker_map = map)`; the scan goes to `qtl2mr_select_instruments()` |
+| `qtl2mr_select_loci_from_scan(scan, map, "x", lod_thresh = 4)` | `qtl2mr_select_instruments(resources, scan, exposures = "x", lod_thresh = 4)` |
+| `run_qtl2mr_batch(r, p, instrument_rule = list(lod_thresh = 4))` | `run_qtl2mr_batch(r, p, qtl2mr_select_instruments(r, scan, lod_thresh = 4))` |
+| pair columns `instrument_trait`, `lod_thresh`, `exclude_chr`, `max_loci`, `selected_loci_file` | one instrument set per exposure in the `instruments` table; these columns are now an error |
+| `sample_policy`, `min_sample_retention` | removed: every pair uses role-specific samples, as in `run_qtl2mr_analysis()` |
+| `fit_options = list(...)`, `force = TRUE` | top-level arguments, `overwrite = TRUE`; `q_sim_n`/`q_sim_seed` are `heterogeneity_nsim`/`heterogeneity_seed` |
+| `run_qtl2mr_analysis(..., standardize_phenotypes = , cross_cov_model = )` through `...` | named arguments; `...` is gone |
+| `batch_selected_loci.csv`, `batch_first_stage_summary.csv`, `batch_sample_qc.csv` | `batch_locus_results.csv`; per-trait `batch_sample_exclusions.csv` |
+| `theta_so`, `se_so`, `ci_lower_so`, `ci_upper_so`, `sample_policy` columns | `theta`, `se`, `profile_ci_lower`, `profile_ci_upper`; no sample-policy column |
 
-The three old batch functions were removed in 0.5.0; the replacements give the
-same numbers. Batch output folders from 0.4.x cannot be resumed by 0.5.0.
-Several internal helpers are no longer exported, and result labels now read
-`qtl2mr` (for example `"Star-space qtl2mr"`); see NEWS.
+Batch estimates change for pairs whose exposure and outcome have different
+missing samples: 0.5.x fitted both traits on their common samples, 0.6.0 fits
+each on its own complete samples. Pairs without such differences give the same
+numbers. The batch Q p-value now defaults to chi-square. Batch folders from
+0.5.x cannot be resumed. For older versions, see [NEWS.md](NEWS.md).
 
 ## Method in brief
 

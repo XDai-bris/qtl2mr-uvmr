@@ -17,13 +17,14 @@ parts of the result.
 \usage{
 run_qtl2mr_analysis(input, exposure = NULL, outcome = NULL,
   output_dir = NULL, loci = NULL, overwrite = FALSE, make_html = TRUE,
-  make_figures = TRUE, verbose = TRUE, diagnostic_bootstrap_B = 500L,
-  diagnostic_bootstrap_seed = 1L,
+  make_figures = TRUE, verbose = TRUE,
+  on_nonestimable_locus = c("fail", "drop"),
   reported_estimator_policy = c("diagnostic_only", "strict_so", "auto_fallback"),
   heterogeneity_method = c("auto", "simulation", "chisq", "none"),
   heterogeneity_nsim = 1000L, heterogeneity_seed = 1L,
-  run_loo_mr = TRUE, run_instrument_sensitivity = TRUE,
-  progress = NULL, ...)
+  diagnostic_bootstrap_B = 500L, diagnostic_bootstrap_seed = 1L,
+  standardize_phenotypes = TRUE, cross_cov_model = c("star", "raw", "zero"),
+  run_loo_mr = TRUE, run_instrument_sensitivity = TRUE, progress = NULL)
 
 qtl2mr_primary_result(result)
 
@@ -46,7 +47,8 @@ validate_qtl2_scan1coef(genoprobs, pheno, kinship = NULL,
 }
 \arguments{
 \if{latex}{\out{\sloppy}}
-\item{input}{An object created by \code{\link{as_qtl2mr_prepared_input}()}.}
+\item{input}{An object created by \code{\link{as_qtl2mr_prepared_input}()} or
+\code{\link{qtl2mr_pair_input}()}.}
 \item{exposure, outcome}{Trait names; default to the names stored in
 \code{input}. They must differ.}
 \item{output_dir}{Destination directory. If omitted, a new directory is created
@@ -61,6 +63,12 @@ directories are refused.}
 \item{make_html, make_figures}{Write \code{report.html} and the figure files.}
 \item{verbose}{Print the result summary at the end; also controls progress
 when \code{progress = NULL}.}
+\item{on_nonestimable_locus}{What to do when a selected locus has a
+non-estimable founder contrast in the exposure or outcome samples.
+\code{"fail"} (default) stops with an error; \code{"drop"} removes the locus,
+fits the remaining loci, and records the dropped locus and reason
+(\code{n_loci_dropped_nonestimable} and the \code{dropped_nonestimable_loci}
+warning).}
 \item{diagnostic_bootstrap_B}{Parametric-bootstrap draws for the weighted
 median and weighted mode comparators (\code{0} for point estimates only).
 These comparators are diagnostics, not the reported estimate.}
@@ -76,17 +84,18 @@ p-value. \code{"auto"} uses chi-square for one locus and conditional residual
 simulation for several loci. \code{"chisq"} avoids the simulation.}
 \item{heterogeneity_nsim, heterogeneity_seed}{Number of Q simulation draws and
 their seed. Each draw refits the model; see Details for runtime.}
+\item{standardize_phenotypes}{Fit both traits in SD units (default) or, with
+\code{FALSE}, in original units.}
+\item{cross_cov_model}{Exposure-outcome covariance used for overlapping samples:
+\code{"star"} (default, LMM-whitened residuals), \code{"raw"} or \code{"zero"}.}
 \item{run_loo_mr}{Run leave-one-locus-out refits.}
 \item{run_instrument_sensitivity}{Run refits on standard locus subsets: the
 strongest loci by block F, loci with block F of at least 2, one chromosome
-left out at a time, and without the most influential leave-one-out loci.}
+left out at a time, without the most influential leave-one-out loci, and the
+Steiger direction check (see Details).}
 \item{progress}{\code{NULL} follows \code{verbose}; \code{TRUE} prints progress
 messages and writes \code{logs/progress.log}; \code{"log"} only writes the log;
 \code{FALSE} disables both.}
-\item{...}{Advanced fit settings: \code{standardize_phenotypes} (default
-\code{TRUE}), \code{cross_cov_model} (default \code{"star"}) and \code{ridge};
-\code{engine}, \code{context_cache} and \code{fit_cache} are internal tuning
-hooks. Other names are an error.}
 \item{result}{A \code{qtl2mr_analysis_result}; for \code{report_qtl2mr_locus()}
 also a path to its \code{result_object.rds}.}
 \item{detail}{For \code{qtl2mr_output_paths()}, return the full file manifest
@@ -115,9 +124,10 @@ and outcome effects that arises when the two traits share samples
 (star-space \code{Sigma_xy}). The confidence interval is the profile-likelihood
 set of the objective.
 
-The exposure and the outcome each use their own complete samples
-(\code{sample_policy = "role_specific_complete"}); overlap is derived from the
-sample IDs. With default standardisation the effect is in SD of outcome per SD
+The exposure and the outcome each use their own complete samples; overlap is
+derived from the sample IDs. \code{\link{run_qtl2mr_batch}} fits pairs the same
+way, so a batch row equals this analysis of the pair with the same instruments
+and settings. With default standardisation the effect is in SD of outcome per SD
 of exposure (\code{effect_units}); \code{theta_raw_units} converts it to
 original units when both traits have one fitted SD.
 
@@ -128,6 +138,16 @@ cross-locus dependence or selecting instruments in the same samples can also
 invalidate nominal uncertainty. When the confidence set is unbounded or has
 several pieces, the reported estimate is \code{NA} and the full set is in
 \code{data/confidence_set.csv}; see the warnings for what to inspect.
+
+The Steiger direction check, run with the instrument-set sensitivity, removes
+loci whose founder effects explain more outcome than exposure variance (partial
+R2 of the outcome above that of the exposure, \code{steiger_pass = FALSE} in
+\code{block_first_stage.csv}) and repeats the multilocus fit without refitting
+the LMMs. \code{steiger_sensitivity.csv} compares it with the primary estimate,
+including the shift in units of the primary confidence-interval width; an
+estimate outside the primary interval adds the
+\code{steiger_estimate_outside_ci} notice. It is a sensitivity analysis, not a
+filter of the primary estimate.
 
 Runtime is dominated by the Q heterogeneity simulation when there are several
 loci: each of the 1,000 default draws refits the model. On a laptop, the
@@ -154,7 +174,9 @@ severity, message, consequence and recommended action),
 \code{confidence_set.csv}, \code{hsq.csv} (null-model heritability per role and
 chromosome with its status and source), \code{sample_alignment.csv},
 \code{phenotype_scaling.csv}, \code{overlap_qc.csv}, \code{loo_mr.csv},
-\code{instrument_sensitivity.csv} and \code{output_manifest.csv}, which lists
+\code{block_first_stage.csv} (per-locus block F, partial R2 and
+\code{steiger_pass}), \code{instrument_sensitivity.csv},
+\code{steiger_sensitivity.csv} and \code{output_manifest.csv}, which lists
 every file.
 
 \code{qtl2mr_primary_result()} returns the one-row summary. Key columns:

@@ -1,4 +1,77 @@
-# qtl2mr 0.6.0 (in development)
+# qtl2mr 0.6.0
+
+This release separates instrument selection from MR fitting and makes the batch
+workflow the batch form of the single-pair analysis: for the same pair,
+instruments and settings, every batch row equals `run_qtl2mr_analysis()`. The
+single-pair estimates are unchanged from 0.5.0; batch estimates change only for
+pairs whose exposure and outcome have different missing samples (see below).
+
+## Three main functions
+
+- New `qtl2mr_select_instruments(resources, qtl_scan, exposures, lod_thresh,
+  exclude_chr, max_loci, F_X_min, n_workers)` builds one instrument set per
+  exposure. It keeps every LOD candidate with its exposure block F
+  (`F_X_block`, fitted with the same samples, covariates, LOCO kinship and
+  null-model hsq as the MR stage, so it equals the block F of every pair using
+  that exposure), `selected` and `drop_reason` (`non_autosomal`,
+  `nonestimable_x`, `F`, `max_loci`). `F_X_min` is off by default.
+- New `qtl2mr_pair_input(resources, instruments, exposure, outcome)` gives the
+  single-pair input for any pair of a batch.
+- `run_qtl2mr_batch(resources, pairs, instruments, ...)` takes the instrument
+  table (a data frame or CSV path; only `exposure` and `marker` are required,
+  and only rows with `selected = TRUE` are used when that column exists). Each
+  pair is fitted through the same input and settings as the single analysis.
+
+## Breaking changes and migration
+
+- Removed without deprecation: `qtl2mr_select_loci_from_scan()`,
+  `qtl2mr_select_loci_for_traits()`, the `qtl_scan` argument of
+  `qtl2mr_prepare_resources()`, and the batch arguments `instrument_rule`,
+  `sample_policy`, `min_sample_retention` and `fit_options`. Pair columns
+  `instrument_trait`, `lod_thresh`, `exclude_chr`, `max_loci` and
+  `selected_loci_file` are now an error rather than silently ignored.
+- Batch samples: every pair now fits the exposure and the outcome on their own
+  complete samples, as the single analysis always did. 0.5.0 fitted both on
+  the samples complete for both traits, so pairs with different missingness in
+  exposure and outcome get new (and now identical-to-single) estimates; other
+  pairs are unchanged. `batch_sample_qc.csv` is gone and
+  `batch_sample_exclusions.csv` has one row per trait and reason, now also
+  counting samples missing from the genotype probabilities or kinship.
+- Both entry points share flat argument names: `on_nonestimable_locus`
+  (now also in `run_qtl2mr_analysis()`, default `"fail"`),
+  `reported_estimator_policy`, `heterogeneity_method`, `heterogeneity_nsim`
+  and `heterogeneity_seed` (formerly `q_sim_n`/`q_sim_seed` in batch),
+  `diagnostic_bootstrap_B`/`_seed`, `standardize_phenotypes` and
+  `cross_cov_model`. `run_qtl2mr_analysis()` no longer takes `...`
+  (`ridge`, `engine` and the caches are internal). In batch, `force` is now
+  `overwrite`, and `min_samples`/`min_loci` are top-level arguments.
+- The batch Q p-value defaults to chi-square (`heterogeneity_method = "chisq"`)
+  instead of none.
+- Main results: the duplicate `theta_so`, `se_so`, `ci_lower_so` and
+  `ci_upper_so` columns and the `sample_policy` column are removed (use
+  `theta`, `se`, `profile_ci_lower`, `profile_ci_upper`);
+  `n_loci_steiger_fail` is added. Batch `main_results` drops
+  `instrument_trait`, `lod_thresh` and `exclude_chr`; its other columns are a
+  subset of the single `main_result` with the same names and values.
+- Batch tables: `batch_selected_loci.csv` and `batch_first_stage_summary.csv`
+  are merged into `batch_locus_results.csv` (one row per pair and instrument:
+  kept, drop reason, exposure and outcome block F, partial R2,
+  `steiger_pass`, sample counts and hsq). Every batch table has its documented
+  columns even when it has no rows (empty `overlap_qc` and
+  `method_comparison` tables previously had different columns).
+- Batch folders from 0.5.0 cannot be resumed.
+
+## Steiger direction check
+
+- `run_qtl2mr_analysis()` (with `run_instrument_sensitivity = TRUE`, the
+  default) repeats the multilocus fit without loci whose partial R2 for the
+  outcome exceeds that for the exposure. The result is a `steiger_filtered` row
+  in `instrument_sensitivity.csv`, a comparison with the primary estimate in
+  `data/steiger_sensitivity.csv` and the report (including the shift in
+  primary-CI widths), and the notice `steiger_estimate_outside_ci` when the
+  filtered estimate leaves the primary 95% CI. It does not filter the primary
+  estimate. `block_first_stage.csv` gains `F_Y_block`, partial R2 and
+  `steiger_pass`.
 
 ## Fixes
 
@@ -40,7 +113,7 @@ errors, profile confidence intervals and Q statistics are unchanged from 0.4.x
 - Removed `run_qtl2mr_batch_fast()`, `run_qtl2mr_batch_exact_grouped()` and
   `run_qtl2mr_batch_parallel_by_exposure()`. Each is an option combination of
   `run_qtl2mr_batch()`, which gives the same numbers; see the migration table
-  in the README.
+  in the [0.5.0 README](https://github.com/XDai-bris/qtl2mr-uvmr/blob/v0.5.0/README.md#upgrading-from-04x).
 - Removed the `run_qtl2mr_analysis()` arguments `adapter`,
   `run_qtl2_validation`, `run_heteroskedasticity` and `heteroskedasticity_B`,
   which had no effect. `output_dir` is now the fourth argument.

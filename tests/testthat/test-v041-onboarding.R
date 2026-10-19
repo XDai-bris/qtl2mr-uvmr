@@ -87,10 +87,13 @@ test_that("README quick start keeps the documented explicit fast-demo settings",
   call <- parse(text = getting[seq.int(start, end)])[[1L]][[3L]]
   expect_identical(fast[settings], as.list(call)[-1L][settings])
   text <- paste(source, collapse = "\n")
-  expect_match(text, "**Current release:** [v0.5.0]", fixed = TRUE)
-  expect_match(text, "releases/tag/v0.5.0", fixed = TRUE)
-  expect_match(text, "samples complete for both of its traits", fixed = TRUE)
-  expect_false(grepl("run_qtl2mr_batch_fast", sub("## Upgrading from 0.4.x.*", "", text), fixed = TRUE))
+  expect_match(text, "**Current release:** [v0.6.0]", fixed = TRUE)
+  expect_match(text, "releases/tag/v0.6.0", fixed = TRUE)
+  expect_match(text, "exposure and the outcome on their own complete", fixed = TRUE)
+  current <- sub("## Upgrading from 0.5.x.*", "", text)
+  for (retired in c("run_qtl2mr_batch_fast", "sample_policy", "instrument_rule", "qtl_scan =", "select_loci")) {
+    expect_false(grepl(retired, current, fixed = TRUE), info = retired)
+  }
 })
 
 test_that("the historical extractor fails clearly without its undistributed input", {

@@ -11,16 +11,19 @@ instruments represented by founder haplotype probabilities.
 }
 \details{
 \if{latex}{\out{\sloppy}}
-Two workflows cover ordinary use:
+Three main functions cover ordinary use:
 \describe{
-\item{One exposure-outcome pair}{\code{\link{as_qtl2mr_prepared_input}()}
-then \code{\link{run_qtl2mr_analysis}()}, which writes tables, figures and an
-HTML report. Read results with \code{\link{qtl2mr_primary_result}()} and
-\code{\link{qtl2mr_warnings}()}.}
-\item{Many pairs}{\code{\link{qtl2mr_prepare_resources}()} then
-\code{\link{run_qtl2mr_batch}()}, which selects instruments from a qtl2 scan
-for each exposure and writes compact tables, with optional parallel workers and
-resume.}
+\item{Instrument selection}{\code{\link{qtl2mr_select_instruments}()} picks
+one instrument set per exposure from a qtl2 scan, with the exposure block F of
+every candidate, after \code{\link{qtl2mr_prepare_resources}()}.}
+\item{One exposure-outcome pair}{\code{\link{as_qtl2mr_prepared_input}()} (or
+\code{\link{qtl2mr_pair_input}()} from selected instruments) then
+\code{\link{run_qtl2mr_analysis}()}, which writes tables, figures and an HTML
+report with sensitivity analyses. Read results with
+\code{\link{qtl2mr_primary_result}()} and \code{\link{qtl2mr_warnings}()}.}
+\item{Many pairs}{\code{\link{run_qtl2mr_batch}()} fits every pair exactly as
+the single-pair analysis would and writes compact tables, with optional
+parallel workers and resume.}
 }
 Follow-up refits on locus subsets use \code{\link{refit_qtl2mr_subset}()} and
 \code{\link{fit_instrument_set_sensitivity}()}. The low-level fitting functions
