@@ -56,8 +56,9 @@ test_that("raw-unit results do not depend on the units of the traits", {
     standardize_phenotypes = FALSE, progress = FALSE)
   scan <- matrix(c(6, 1, 1, 5), ncol = 1L, dimnames = list(f$map$marker, "x"))
   selected <- qtl2mr_select_instruments(resources, scan, lod_thresh = 3, progress = FALSE)
+  # Equal to numerical precision; the last digits depend on the platform's BLAS.
   expect_equal(batch$locus_results$F_X_block, selected$F_X_block[match(c("a1", "b2"), selected$marker)],
-    tolerance = 1e-8)
+    tolerance = 1e-6)
 })
 
 test_that("allele probabilities must hold the same samples on every chromosome", {
