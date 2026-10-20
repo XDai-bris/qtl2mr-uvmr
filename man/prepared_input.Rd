@@ -34,7 +34,8 @@ fit_mr_locus_block_overlap(genoprobs, exposure, outcome,
 list of sample by founder by marker arrays, for example
 \code{qtl2::genoprob_to_alleleprob()} output. Checked values must be finite and
 within [0, 1] up to floating-point error of 1e-8; genotype-state probabilities
-(36 states) and allele dosages must be converted first.}
+(36 states) and allele dosages must be converted first. Every chromosome must
+hold the same samples, as qtl2 output does.}
 \item{probability_policy}{Prepared-input sum policy. The default
 \code{"normalize_rounding"} accepts a maximum absolute founder-sum deviation
 of \code{n_founders * 5e-5} (0.0004 for eight founders), the worst-case bound

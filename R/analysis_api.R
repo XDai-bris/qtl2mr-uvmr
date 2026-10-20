@@ -1879,6 +1879,8 @@ run_qtl2mr_analysis <- function(input,
       steiger_error <<- conditionMessage(e)
       NULL
     })
+    # A failed Steiger refit is returned as a row, not raised; report it as well.
+    if (is.null(steiger_error) && identical(steiger$row$status, "failed")) steiger_error <- steiger$row$notes
     if (!is.null(steiger_error)) writeLines(steiger_error, file.path(log_dir, "steiger_sensitivity_error.log"))
     if (!is.null(steiger) && !is.null(instrument_sensitivity)) {
       rows <- rbind(as.data.frame(instrument_sensitivity), steiger$row)

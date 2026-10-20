@@ -161,6 +161,14 @@ qtl2mr_allele_prob_markers <- function(allele_probs, markers_to_validate = NULL,
     dn <- dimnames(arr)
     for (d in seq_len(3L)) qtl2mr_validate_ids(dn[[d]], paste0("allele_probs dimension ", d))
     if (!is.numeric(arr)) stop("allele_probs must be numeric", call. = FALSE)
+    # Every chromosome must hold the same samples, as qtl2 output does; sample
+    # sets that differ by chromosome are not supported by the fitting code.
+    first_ids <- dimnames(allele_probs[[1L]])[[1L]]
+    if (i > 1L && !setequal(dn[[1L]], first_ids)) {
+      stop(sprintf("allele_probs chromosomes must hold the same samples; chromosome %s has %d sample(s) not on chromosome %s and lacks %d of its samples",
+        chr_names[[i]], length(setdiff(dn[[1L]], first_ids)), chr_names[[1L]], length(setdiff(first_ids, dn[[1L]]))),
+        call. = FALSE)
+    }
     # Bound temporary allocations for genome-wide inputs.
     checked <- if (is.null(markers_to_validate)) seq_len(dim(arr)[3L]) else which(dn[[3L]] %in% markers_to_validate)
     for (first in seq.int(1L, max(length(checked), 1L), by = 128L)) {

@@ -8,13 +8,13 @@ using selected QTL as instruments. Each instrument is represented by founder
 haplotype probabilities from `qtl2`, not by a single SNP dosage, and the
 estimator accounts for exposure-outcome sample overlap.
 
-**Current release:** [v0.6.0](https://github.com/XDai-bris/qtl2mr-uvmr/releases/tag/v0.6.0).
+**Current release:** [v0.6.1](https://github.com/XDai-bris/qtl2mr-uvmr/releases/tag/v0.6.1).
 See [NEWS.md](NEWS.md) for what changed and the
 [migration table](#upgrading-from-05x) if you used 0.5.x.
 
 ## Installation
 
-Download `qtl2mr_0.6.0.tar.gz` and `SHA256SUMS` from the release assets. Use
+Download `qtl2mr_0.6.1.tar.gz` and `SHA256SUMS` from the release assets. Use
 the package file, not GitHub's automatic "Source code" archive, because the
 package file contains the built vignettes. Check the SHA-256 against
 `SHA256SUMS` (for example `shasum -a 256 -c SHA256SUMS` on macOS or
@@ -22,7 +22,7 @@ package file contains the built vignettes. Check the SHA-256 against
 
 ```r
 install.packages("fs")  # with conda: conda install -c conda-forge r-fs
-install.packages("qtl2mr_0.6.0.tar.gz", repos = NULL, type = "source")
+install.packages("qtl2mr_0.6.1.tar.gz", repos = NULL, type = "source")
 library(qtl2mr)
 vignette("getting-started", package = "qtl2mr")
 ```
@@ -146,7 +146,8 @@ are:
 
 - `allele_probs`: founder **allele** probabilities, a chromosome-named list of
   sample × 8 founder × marker arrays (`qtl2::genoprob_to_alleleprob()`), not the
-  36-state genotype probabilities;
+  36-state genotype probabilities; every chromosome must hold the same samples,
+  as qtl2 output does;
 - `pheno`, `covar`: numeric data frames with sample IDs as row names;
 - `kinship`: a chromosome-named LOCO kinship list
   (`qtl2::calc_kinship(probs, type = "loco")`); `NULL` fits ordinary least

@@ -37,7 +37,8 @@ run_qtl2mr_batch(resources, pairs, instruments,
 \if{latex}{\out{\sloppy}}
 \item{allele_probs}{Founder allele probabilities: a chromosome-named list of
 sample by founder by marker arrays, for example
-\code{qtl2::genoprob_to_alleleprob()} output.}
+\code{qtl2::genoprob_to_alleleprob()} output. Every chromosome must hold the
+same samples.}
 \item{kinship}{One kinship matrix, a chromosome-named LOCO kinship list such as
 \code{qtl2::calc_kinship(probs, type = "loco")}, or \code{NULL} for ordinary
 least squares.}

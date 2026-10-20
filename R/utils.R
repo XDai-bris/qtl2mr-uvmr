@@ -28,7 +28,8 @@ qtl2mr_add_invariant_ridge <- function(Omega, ridge) {
     stop("Omega must be positive semidefinite", call. = FALSE)
   }
   if (ridge == 0) return(Omega)
-  scale <- max(mean(diag(Omega)), .Machine$double.eps)
+  scale <- mean(diag(Omega))
+  if (!is.finite(scale) || scale <= 0) scale <- 1
   Omega + diag(ridge * scale, nrow(Omega))
 }
 
@@ -170,6 +171,8 @@ estimate_rho_star <- function(resid_x_star,
     )
   }
 
+  ss_x <- as.numeric(t(rx) %*% D_x %*% rx)
+  ss_y <- as.numeric(t(ry) %*% D_y %*% ry)
   if (isTRUE(center)) {
     mx <- as.numeric(t(one_x) %*% D_x %*% rx) / denom_mean_x
     my <- as.numeric(t(one_y) %*% D_y %*% ry) / denom_mean_y
@@ -179,7 +182,9 @@ estimate_rho_star <- function(resid_x_star,
 
   vx <- as.numeric(t(rx) %*% D_x %*% rx)
   vy <- as.numeric(t(ry) %*% D_y %*% ry)
-  if (!is.finite(vx) || !is.finite(vy) || vx <= eps || vy <= eps) {
+  # Relative to the uncentred sum of squares, so the check does not depend on
+  # the units of the traits.
+  if (!is.finite(vx) || !is.finite(vy) || vx <= eps * ss_x || vy <= eps * ss_y) {
     stop("Residual variance on the overlap is zero or non-finite", call. = FALSE)
   }
   rho <- as.numeric(t(rx) %*% O_xy %*% ry) / sqrt(vx * vy)
@@ -285,19 +290,26 @@ block_diag_matrix <- function(mats) {
   out
 }
 
+# Floors for eigenvalues are relative to the largest one, so results do not
+# depend on the units of the traits.
+qtl2mr_eigen_scale <- function(values) {
+  scale <- max(abs(values))
+  if (!is.finite(scale) || scale <= 0) 1 else scale
+}
+
 qtl2mr_mat_inv <- function(S, ridge = 1e-10) {
   S <- qtl2mr_sym(S)
   ee <- eigen(S, symmetric = TRUE)
-  scale <- max(abs(ee$values), .Machine$double.eps)
-  lam <- pmax(ee$values, ridge * scale, .Machine$double.eps)
+  scale <- qtl2mr_eigen_scale(ee$values)
+  lam <- pmax(ee$values, max(ridge, .Machine$double.eps) * scale)
   ee$vectors %*% (diag(1 / lam, nrow = length(lam)) %*% t(ee$vectors))
 }
 
 qtl2mr_psd_clip <- function(S, ridge = 1e-10) {
   S <- qtl2mr_sym(S)
   ee <- eigen(S, symmetric = TRUE)
-  scale <- max(abs(ee$values), .Machine$double.eps)
-  lam <- pmax(ee$values, ridge * scale, .Machine$double.eps)
+  scale <- qtl2mr_eigen_scale(ee$values)
+  lam <- pmax(ee$values, max(ridge, .Machine$double.eps) * scale)
   out <- ee$vectors %*% (diag(lam, nrow = length(lam)) %*% t(ee$vectors))
   qtl2mr_sym(out)
 }
@@ -305,8 +317,8 @@ qtl2mr_psd_clip <- function(S, ridge = 1e-10) {
 qtl2mr_matrix_power <- function(S, power, ridge = 1e-10) {
   S <- qtl2mr_sym(S)
   ee <- eigen(S, symmetric = TRUE)
-  scale <- max(abs(ee$values), .Machine$double.eps)
-  lam <- pmax(ee$values, ridge * scale, .Machine$double.eps)
+  scale <- qtl2mr_eigen_scale(ee$values)
+  lam <- pmax(ee$values, max(ridge, .Machine$double.eps) * scale)
   out <- ee$vectors %*% (diag(lam^power, nrow = length(lam)) %*% t(ee$vectors))
   qtl2mr_sym(out)
 }

@@ -124,7 +124,7 @@ qtl2mr_hsq_profile <- function(h,
   if (qr_design$rank != p || n <= p) return(Inf)
   residual <- qr.resid(qr_design, y_weighted)
   rss <- as.numeric(crossprod(residual))
-  if (!is.finite(rss) || rss <= .Machine$double.eps) return(Inf)
+  if (!is.finite(rss) || rss <= .Machine$double.eps * sum(y_weighted^2)) return(Inf)
   if (isTRUE(reml)) {
     logdet_weighted <- as.numeric(determinant(crossprod(design_weighted), logarithm = TRUE)$modulus)
     if (!is.finite(logdet_weighted)) return(Inf)

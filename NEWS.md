@@ -1,3 +1,27 @@
+# qtl2mr 0.6.1
+
+A patch release from a post-release audit. Estimates for ordinary inputs are
+unchanged from 0.6.0; no arguments or outputs were added or removed.
+
+- Results no longer depend on the units of the traits when
+  `standardize_phenotypes = FALSE`. Eigenvalue floors in matrix inverses and
+  square roots, the overlap residual-variance check and the REML
+  residual-sum-of-squares check were absolute and are now relative to the
+  data. Previously, traits with very small values (variances around 1e-16)
+  could change block F and the Steiger flags, or stop with "Residual variance
+  on the overlap is zero". The block F reported by
+  `qtl2mr_select_instruments()`, which standardizes internally, now also
+  matches raw-unit analyses.
+- Allele probabilities must hold the same samples on every chromosome, as
+  qtl2 output does; other inputs are refused with a direct message. Before,
+  a sample missing on an unused chromosome made the batch sample check
+  undercount, and a sample missing on a used chromosome stopped the fit with
+  "subscript out of bounds".
+- A Steiger refit that fails inside the direction check now raises the
+  `steiger_sensitivity_error` warning and writes
+  `logs/steiger_sensitivity_error.log`, as documented; previously only the
+  `failed` status in the table recorded it.
+
 # qtl2mr 0.6.0
 
 This release separates instrument selection from MR fitting and makes the batch
