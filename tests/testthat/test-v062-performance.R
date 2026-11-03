@@ -574,6 +574,53 @@ test_that("batch rows equal single analyses under both sample policies", {
   expect_identical(enough$main_results$status, rep("ok", nrow(f$pairs)))
 })
 
+# The main_results columns that depend on the stored blocks alone, rebuilt from them
+# exactly as run_prepared_qtl2mr() builds them, with the run's settings.
+perf_row_from_blocks <- function(blocks, method, nsim, seed, boot, boot_seed, policy) {
+  meta <- attr(blocks, "qtl2mr_locus_blocks")
+  fit <- fit_multilocus_founder_mr(blocks, allow_cross_cov = TRUE, ridge = 1e-10, heterogeneity_method = method,
+    q_sim_n = nsim, q_sim_seed = seed)
+  layer <- qtl2mr:::fit_multilocus_diagnostic_layer(blocks, global_fit = fit, ridge = 1e-10, bootstrap_B = boot,
+    bootstrap_seed = boot_seed)
+  reported <- qtl2mr:::qtl2mr_reported_estimate(fit, layer, policy)
+  est <- function(name) {
+    rows <- layer$estimates$estimator == name
+    if (!any(rows)) NA_real_ else layer$estimates$theta[which(rows)[1L]]
+  }
+  q <- qtl2mr:::qtl2mr_add_q_fields(data.frame(Q = fit$Q, Q_chisq_df = fit$Q_chisq_df %||% NA_integer_,
+    Q_p_chisq = fit$Q_p_chisq %||% NA_real_, Q_p_reported = fit$Q_p_reported %||% NA_real_,
+    Q_p_method = fit$Q_p_method %||% NA_character_, stringsAsFactors = FALSE), fit = fit)
+  overlap <- qtl2mr:::qtl2mr_locus_overlap_table(blocks)
+  list(
+    exact = list(pair_id = meta$pair_id, exposure = meta$exposure, outcome = meta$outcome,
+      n_loci = length(blocks),
+      n_loci_steiger_fail = sum(vapply(blocks, `[[`, logical(1), "steiger_pass") %in% FALSE),
+      theta_reported = reported$theta, se_reported = reported$se, reported_ci_lower = reported$ci_lower,
+      reported_ci_upper = reported$ci_upper, reported_ci_type = reported$ci_type,
+      reported_estimator = reported$estimator, reported_estimator_source = reported$source,
+      reported_estimator_policy = reported$policy, reported_estimator_reason = reported$reason,
+      theta = fit$theta, se = fit$se, profile_ci_lower = fit$profile_ci_lower, profile_ci_upper = fit$profile_ci_upper,
+      profile_p = fit$profile_p, confidence_set_type = fit$confidence_set_type %||% "unresolved",
+      confidence_set_bounded = qtl2mr:::qtl2mr_confidence_set_bounded(fit),
+      primary_optimizer_status = fit$optimizer_status %||% NA_character_,
+      primary_bracket_status = fit$bracket_status %||% NA_character_,
+      primary_bracket_n_expand = fit$bracket_n_expand %||% NA_integer_,
+      primary_profile_ci_finite = isTRUE(fit$profile_ci_finite), primary_reliable = isTRUE(fit$primary_reliable),
+      numerical_ok = isTRUE(fit$numerical_ok), inference_status = fit$inference_status %||% "not_calibrated",
+      effect_units = if (isTRUE(meta$standardize_phenotypes)) "SD_y per SD_x" else "outcome units per exposure unit",
+      first_order_theta = fit$first_order_theta %||% NA_real_, first_order_se = fit$first_order_se %||% NA_real_,
+      theta_independence = fit$independence$theta, theta_overlap_delta = fit$theta_overlap_delta,
+      theta_two_step_ivw = est("Two-step IVW"), theta_weighted_median = est("Weighted median"),
+      theta_weighted_mode = est("Weighted mode"),
+      Q = q$Q[[1L]], Q_chisq_df = q$Q_chisq_df[[1L]], Q_p_chisq = q$Q_p_chisq[[1L]], Q_p_reported = q$Q_p_reported[[1L]],
+      Q_p_method = q$Q_p_method[[1L]], cross_cov_model = meta$cross_cov_model,
+      standardize_phenotypes = meta$standardize_phenotypes),
+    # rbind() of batch rows may store these as double (as in 0.6.1.9001); compared by value.
+    by_value = list(n_x_median = stats::median(overlap$n_x), n_y_median = stats::median(overlap$n_y),
+      n_overlap_median = stats::median(overlap$n_overlap))
+  )
+}
+
 test_that("per-locus blocks are written on request and refit to the batch estimates", {
   f <- perf_fixture()
   inst <- suppressWarnings(qtl2mr_select_instruments(f$resources, f$scan, max_loci = 2L, progress = FALSE))
@@ -586,10 +633,24 @@ test_that("per-locus blocks are written on request and refit to the batch estima
   expect_error(run_qtl2mr_batch(f$resources, f$pairs, inst, write_locus_blocks = NA), "TRUE or FALSE")
 
   dir <- tempfile("v062-blocks-")
-  for (policy in c("own_complete", "pair_common_complete")) {
-    batch <- perf_batch(f, inst, output_dir = dir, write_locus_blocks = TRUE, sample_policy = policy,
-      overwrite = TRUE)$value
-    if (identical(policy, "own_complete")) {
+  runs <- list(
+    list(sample_policy = "own_complete"),
+    list(sample_policy = "pair_common_complete"),
+    list(sample_policy = "own_complete", heterogeneity_method = "simulation", heterogeneity_nsim = 25L,
+      heterogeneity_seed = 3L, diagnostic_bootstrap_B = 20L, diagnostic_bootstrap_seed = 5L,
+      reported_estimator_policy = "auto_fallback", cross_cov_model = "raw", standardize_phenotypes = FALSE),
+    list(sample_policy = "pair_common_complete", heterogeneity_method = "none", cross_cov_model = "zero",
+      reported_estimator_policy = "strict_so"))
+  # Columns of main_results that the blocks cannot give: they need fields not stored (LMM backend, loci
+  # dropped before fitting, trait SDs). Listed in IMPLEMENTATION_NOTES, O1.
+  not_from_blocks <- c("lmm_backend", "n_loci_selected", "n_loci_dropped_nonestimable", "exposure_sd", "outcome_sd",
+    "raw_conversion_available", "theta_raw_units", "se_raw_units", "status", "error_message", "locus_fit_status",
+    "runtime_sec")
+  for (run in runs) {
+    policy <- run$sample_policy
+    batch <- do.call(perf_batch, c(list(f, inst, output_dir = dir, write_locus_blocks = TRUE, overwrite = TRUE), run))$value
+    settings <- batch$config
+    if (identical(run, runs[[1L]])) {
       expect_true(perf_same(batch[setdiff(names(batch), c("config", "locus_blocks_manifest"))],
         plain[setdiff(names(plain), "config")]))
     }
@@ -604,12 +665,18 @@ test_that("per-locus blocks are written on request and refit to the batch estima
       expect_true(all(c("marker", "chr", "pos", "beta_x", "beta_y", "Sigma_x", "Sigma_y", "Sigma_xy", "F_X_block",
         "F_Y_block", "partial_R2_X_block", "partial_R2_Y_block", "steiger_pass", "df_x", "df_y", "n_x", "n_y",
         "n_overlap", "hsq_x", "hsq_y") %in% names(blocks[[1L]])))
-      refit <- fit_multilocus_founder_mr(blocks, allow_cross_cov = TRUE, ridge = 1e-10, heterogeneity_method = "chisq")
       j <- match(manifest$pair_id[[i]], main$pair_id)
-      expect_identical(refit$theta, main$theta[[j]])
-      expect_identical(refit$Q, main$Q[[j]])
-      expect_identical(refit$Q_p_chisq, main$Q_p_chisq[[j]])
-      expect_identical(refit$independence$theta, main$theta_independence[[j]])
+      rebuilt <- perf_row_from_blocks(blocks, settings$heterogeneity_method, settings$heterogeneity_nsim,
+        settings$heterogeneity_seed, settings$diagnostic_bootstrap_B, settings$diagnostic_bootstrap_seed,
+        settings$reported_estimator_policy)
+      for (column in names(rebuilt$exact)) {
+        expect_identical(rebuilt$exact[[column]], main[[column]][[j]], label = paste(policy, column))
+      }
+      for (column in names(rebuilt$by_value)) {
+        expect_identical(as.double(rebuilt$by_value[[column]]), as.double(main[[column]][[j]]), label = column)
+      }
+      # Every main_results column is either rebuilt above or listed as not given by the blocks.
+      expect_setequal(setdiff(names(main), c(names(rebuilt$exact), names(rebuilt$by_value))), not_from_blocks)
       l <- loci[loci$pair_id == manifest$pair_id[[i]], ]
       expect_identical(unname(vapply(blocks, `[[`, numeric(1), "F_X_block")), l$F_X_block)
       expect_identical(unname(vapply(blocks, `[[`, logical(1), "steiger_pass")), l$steiger_pass)
