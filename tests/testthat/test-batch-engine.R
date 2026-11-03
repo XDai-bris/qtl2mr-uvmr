@@ -287,7 +287,8 @@ test_that("scan locus selector reproduces contiguous LOD island maxima", {
                  dimnames = list(markers, "lod"))
   marker_map <- data.frame(marker = markers, chr = c(rep("1", 8), "X", "2"),
                            pos = seq_along(markers), stringsAsFactors = FALSE)
-  selected <- qtl2mr:::qtl2mr_scan_candidates(list(x = scan), marker_map, "x", lod_thresh = 4, exclude_chr = "X")
+  selected <- qtl2mr:::qtl2mr_scan_candidates(list(x = scan), marker_map, "x", lod_thresh = 4, exclude_chr = "X",
+    peak_rule = "legacy")
   # The chr2 marker must not be swallowed by the adjacent chrX island.
   expect_equal(selected$marker, c("m3", "m10", "m7"))
   expect_equal(selected$lod, c(5, 4.8, 4.3))
@@ -324,7 +325,8 @@ test_that("LOD selection validates the requested trait before peak picking", {
   expect_equal(unname(qtl2mr:::qtl2mr_lod_vector_from_scan(list(traitA = one), "traitA")["m1"]), 5)
 
   candidates <- do.call(rbind, lapply(c("traitA", "traitB"), function(trait) {
-    qtl2mr:::qtl2mr_scan_candidates(scan, marker_map, trait, lod_thresh = 4, exclude_chr = character())
+    qtl2mr:::qtl2mr_scan_candidates(scan, marker_map, trait, lod_thresh = 4, exclude_chr = character(),
+      peak_rule = "legacy")
   }))
   expect_equal(candidates$marker, c("m1", "m4"))
   expect_equal(candidates$exposure, c("traitA", "traitB"))

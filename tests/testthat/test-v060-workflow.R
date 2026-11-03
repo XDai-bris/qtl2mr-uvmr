@@ -179,6 +179,7 @@ test_that("selection follows map order and needs trait names for several exposur
   map <- qtl2mr:::qtl2mr_marker_map_table(data.frame(marker = c("a1", "a2", "a3"), chr = "1"))
   scan <- matrix(c(5, 1, 5), ncol = 1L, dimnames = list(c("a1", "a3", "a2"), "x"))
   # a1 and a2 are adjacent on the map, so they form one island despite the scan's row order.
+  expect_identical(qtl2mr:::qtl2mr_scan_candidates(scan, map, "x", 4, character(), peak_rule = "legacy")$marker, "a1")
   expect_identical(qtl2mr:::qtl2mr_scan_candidates(scan, map, "x", 4, character())$marker, "a1")
 
   f <- v060_fixture()

@@ -65,7 +65,8 @@ test_that("LOD islands stop at chromosome boundaries and native maps work", {
     dimnames = list(c(paste0("a", 1:4), paste0("b", 1:4)), "x"))
   map <- list(`1` = setNames(1:4, paste0("a", 1:4)), `2` = setNames(1:4, paste0("b", 1:4)))
   table <- qtl2mr:::qtl2mr_marker_map_table
-  selected <- qtl2mr:::qtl2mr_scan_candidates(lod, table(map), "x", lod_thresh = 4, exclude_chr = "X")
+  selected <- qtl2mr:::qtl2mr_scan_candidates(lod, table(map), "x", lod_thresh = 4, exclude_chr = "X",
+    peak_rule = "legacy")
   expect_setequal(selected$marker, c("a4", "b1"))
   expect_error(qtl2mr:::qtl2mr_scan_candidates(lod, table(list(`1` = map[[1]])), "x", 4, "X"), "missing qtl_scan markers")
 })

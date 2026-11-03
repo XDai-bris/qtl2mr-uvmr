@@ -1,7 +1,7 @@
-# qtl2mr 0.6.1.9000 (development)
+# qtl2mr 0.6.1.9001 (development)
 
-Not released. Instrument selection changes for ordinary scans; MR estimates for
-a given instrument set are unchanged.
+Not released. A selection-only build: instrument selection changes for
+ordinary scans; MR estimates for a given instrument set are unchanged.
 
 - `qtl2mr_select_instruments()` now finds LOD peaks with the qtl2 peak rule
   (`peak_rule = "peakdrop"`, the new default): on each chromosome, a second

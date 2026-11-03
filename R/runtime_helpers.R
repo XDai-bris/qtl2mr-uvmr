@@ -17,7 +17,8 @@ qtl2mr_get_tophits <- function(lod, lod_thresh = 4, rule = c("peakdrop", "lod_is
   lod <- as.numeric(lod)
   finite <- which(is.finite(lod))
   peaks <- if (identical(rule, "peakdrop")) {
-    qtl2mr_peakdrop_peaks(lod[finite], lod_thresh, qtl2mr_validate_peakdrop(peakdrop))
+    peakdrop <- qtl2mr_validate_peakdrop(peakdrop)
+    qtl2mr_peakdrop_peaks(lod[finite], lod_thresh, peakdrop)
   } else {
     qtl2mr_lod_island_peaks(lod[finite], lod_thresh)
   }
