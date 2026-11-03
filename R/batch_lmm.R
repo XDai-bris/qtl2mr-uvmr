@@ -338,6 +338,7 @@ fit_founder_lmm_blocks_batch <- function(genoprobs_chr,
   full <- NULL
   compute <- function(design, marker) {
     if (is.null(full)) full <<- qtl2mr_full_context(context)
+    qtl2mr_count_computed("fit_attempt")
     fit <- qtl2mr_fit_founder_lmm_marker(design, marker, full, contrasts, allele_names, fallback_genoprobs, fc_cols, tol)
     qtl2mr_count_computed("fit")
     fit

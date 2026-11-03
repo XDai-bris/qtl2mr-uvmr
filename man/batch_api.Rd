@@ -20,10 +20,11 @@ qtl2mr_prepare_resources(allele_probs, kinship, pheno, covar,
 qtl2mr_select_instruments(resources, qtl_scan, exposures = NULL,
   lod_thresh = 4, peak_rule = c("peakdrop", "spacing", "legacy"),
   peakdrop = 1.5, min_spacing = 1, exclude_chr = "X", max_loci = NULL,
-  F_X_min = NULL, n_workers = 1L, progress = TRUE)
+  F_X_min = NULL, n_workers = 1L, progress = TRUE, min_founder_copies = NULL)
 
 qtl2mr_pair_input(resources, instruments, exposure, outcome,
-  sample_policy = c("own_complete", "pair_common_complete"))
+  sample_policy = c("own_complete", "pair_common_complete"),
+  min_founder_copies = NULL)
 
 run_qtl2mr_batch(resources, pairs, instruments,
   on_nonestimable_locus = c("fail", "drop"),
@@ -35,7 +36,8 @@ run_qtl2mr_batch(resources, pairs, instruments,
   min_samples = 50L, min_loci = 1L, n_workers = 1L, fail_fast = FALSE,
   resume = FALSE, overwrite = FALSE, output_dir = NULL, progress = TRUE,
   write_locus_blocks = FALSE,
-  sample_policy = c("own_complete", "pair_common_complete"))
+  sample_policy = c("own_complete", "pair_common_complete"),
+  min_founder_copies = NULL)
 }
 \arguments{
 \if{latex}{\out{\sloppy}}
@@ -134,6 +136,17 @@ traits, the covariates and every instrument chromosome, as the 0.5.0 batch did;
 \code{min_samples} then applies to that common sample. For
 \code{qtl2mr_pair_input()} the same choice sets the samples of the single-pair
 input, so that a batch row equals the single analysis under either policy.}
+\item{min_founder_copies}{Optional founder-design QC; \code{NULL} (default) is
+off. A locus is dropped when the rarest founder's expected allele count,
+\eqn{E = \min_k \sum_i 2 p_{ik}}, is below \code{min_founder_copies}, where the
+sum runs over the samples the trait's LMM is fitted on and \eqn{p} are the
+founder probabilities as fitted (after the probability policy's normalisation).
+In \code{qtl2mr_select_instruments()} it applies to the exposure on its own
+complete samples; in \code{run_qtl2mr_batch()} and \code{qtl2mr_pair_input()} to
+the outcome of each pair, on the samples the outcome is fitted with (its own
+complete samples, or the pair's common complete samples under
+\code{sample_policy = "pair_common_complete"}), so a locus can be dropped for
+one pair and kept for another. See Details.}
 }
 \details{
 \if{latex}{\out{\sloppy}}
@@ -164,10 +177,26 @@ using that exposure; when the pairs are fitted with
 without trait names (a plain LOD vector or an unnamed column) can only be used
 for one exposure. A candidate is not selected, in
 this order, when it is not autosomal (\code{drop_reason = "non_autosomal"}),
-when the exposure founder effects cannot be estimated (\code{"nonestimable_x"}
-or \code{"x_fit_error"}), when \code{F_X_block < F_X_min} (\code{"F"}), or when
-\code{max_loci} better candidates by LOD were already kept
+when it fails the founder QC (\code{"founder_qc"}, only with
+\code{min_founder_copies}; such a candidate is not fitted, so it has no block F
+and cannot be \code{"nonestimable_x"}), when the exposure founder effects cannot
+be estimated (\code{"nonestimable_x"} or \code{"x_fit_error"}), when
+\code{F_X_block < F_X_min} (\code{"F"}), or when \code{max_loci} better
+candidates by LOD were already kept among those passing every earlier rule
 (\code{"max_loci"}).
+
+With \code{min_founder_copies} in \code{run_qtl2mr_batch()}, the outcome QC runs
+for each pair before anything is fitted: a failing locus is not fitted for that
+pair (so it cannot stop the pair as non-estimable under
+\code{on_nonestimable_locus = "fail"}), is listed in \code{locus_results} with
+\code{kept = FALSE} and \code{drop_reason = "founder_qc_outcome"}, and is
+counted in \code{main_results$n_loci_dropped_founder_qc}; \code{n_loci_selected}
+counts the loci that pass. A pair left with fewer than \code{min_loci} loci
+ends as a \code{too_few_loci} error. \code{qtl2mr_pair_input()} with the same
+value gives the input of the remaining loci, so a batch row still equals the
+single analysis; the QC result is recorded in the input's
+\code{metadata$founder_qc_outcome}. Loci that pass the QC but are not estimable
+still follow \code{on_nonestimable_locus}.
 
 \code{run_qtl2mr_batch()} fits each pair exactly as
 \code{run_qtl2mr_analysis(qtl2mr_pair_input(resources, instruments, exposure,
@@ -239,7 +268,9 @@ candidate: \code{exposure}, \code{marker}, \code{chr}, \code{pos}, \code{lod},
 the settings \code{lod_thresh}, \code{peak_rule}, \code{peakdrop} and
 \code{min_spacing} (each \code{NA} when the rule does not use it),
 \code{rule_version} (\code{"tophit_v1"} or \code{"legacy"}), \code{F_X_min},
-\code{max_loci} and \code{exclude_chr}.
+\code{max_loci} and \code{exclude_chr}. With \code{min_founder_copies} it also has
+\code{E_min_x} (after \code{hsq_x}; \code{NA} for loci that are not autosomal)
+and the setting \code{min_founder_copies}.
 
 \code{qtl2mr_pair_input()} returns a \code{qtl2mr_prepared_input} for
 \code{\link{run_qtl2mr_analysis}}.
@@ -254,7 +285,10 @@ frames, written as \code{batch_<name>.csv} when \code{output_dir} is given:
 and exclusion reason), \code{probability_normalization},
 \code{input_alignment} and \code{run_manifest} (one row; \code{status} is
 \code{"complete"} or \code{"stopped_fail_fast"}). Each table has the same
-columns whether or not it has rows. The list also holds \code{config},
+columns whether or not it has rows. With \code{min_founder_copies},
+\code{main_results} also has \code{n_loci_dropped_founder_qc} and
+\code{locus_results} also has \code{E_min_y} (the outcome's \eqn{E} at every
+instrument of the pair), and the threshold is recorded in \code{config}. The list also holds \code{config},
 \code{resources_metadata} and \code{pairs}; the run configuration is written to
 \code{batch_config.json}. With \code{write_locus_blocks = TRUE} it also holds
 \code{locus_blocks_manifest}.

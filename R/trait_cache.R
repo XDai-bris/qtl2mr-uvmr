@@ -127,7 +127,7 @@ qtl2mr_registry_import <- function(entries) {
 
 # Internal counts of computed (not reused) LMM contexts and fits, for tests.
 qtl2mr_count_computed <- function(kind) {
-  counts <- qtl2mr_state$computed %||% c(context = 0, fit = 0)
+  counts <- qtl2mr_state$computed %||% c(context = 0, fit = 0, fit_attempt = 0)
   counts[[kind]] <- counts[[kind]] + 1
   assign("computed", counts, envir = qtl2mr_state)
   invisible(NULL)

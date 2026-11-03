@@ -1,3 +1,26 @@
+# qtl2mr 0.6.1.9003 (development)
+
+Not released. An opt-in founder-design QC on top of 0.6.1.9002; with the
+default `min_founder_copies = NULL` every result, table, file and warning is
+the same as in 0.6.1.9002.
+
+- `min_founder_copies` in `qtl2mr_select_instruments()`, `run_qtl2mr_batch()`
+  and `qtl2mr_pair_input()`: a locus is dropped when the rarest founder's
+  expected allele count, E = min over founders of the sum over samples of
+  2 p, is below the threshold. E is computed on the samples the trait's LMM is
+  fitted on, from the probabilities as fitted (after the probability policy's
+  normalisation).
+- In selection it applies to the exposure on its own complete samples, after
+  `non_autosomal` and before fitting: a failing candidate is not fitted and
+  gets `drop_reason = "founder_qc"`; `max_loci` counts only loci that pass. The
+  table gains `E_min_x` and `min_founder_copies`.
+- In the batch it applies to each pair's outcome, on the samples the outcome
+  is fitted with, before fitting: a failing locus is dropped for that pair only
+  (`locus_results`: `kept = FALSE`, `drop_reason = "founder_qc_outcome"`,
+  `E_min_y`; `main_results`: `n_loci_dropped_founder_qc`), so it cannot stop the
+  pair as non-estimable. `qtl2mr_pair_input()` applies the same QC, so a batch
+  row equals the single analysis.
+
 # qtl2mr 0.6.1.9002 (development)
 
 Not released. A speed build: at the same settings and worker count, every

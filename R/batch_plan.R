@@ -13,23 +13,41 @@
 
 # Per-pair demand: the two traits, their common sample set under
 # sample_policy = "pair_common_complete" (NULL otherwise), and the instruments.
-qtl2mr_batch_plan <- function(resources, todo, instruments, sample_policy) {
+# With the outcome founder QC (min_founder_copies), the pair's QC result is kept
+# (founder_qc) and the outcome needs only the loci that pass it.
+qtl2mr_batch_plan <- function(resources, todo, instruments, sample_policy, min_founder_copies = NULL) {
   lapply(seq_len(nrow(todo)), function(i) {
     pair <- todo[i, , drop = FALSE]
     rows <- instruments[instruments$exposure == pair$exposure, , drop = FALSE]
     tryCatch({
       samples <- qtl2mr_pair_samples(resources, pair$exposure, pair$outcome, rows, sample_policy)
-      list(traits = c(pair$exposure, pair$outcome), samples = samples,
+      out <- list(traits = c(pair$exposure, pair$outcome), samples = samples,
         sig = if (is.null(samples)) "" else qtl2mr_fingerprint_object(samples),
         marker = as.character(rows$marker), chr = as.character(rows$chr))
+      if (!is.null(min_founder_copies)) {
+        out$founder_qc <- qtl2mr_pair_founder_qc(resources, rows, pair$exposure, pair$outcome, sample_policy,
+          min_founder_copies)
+      }
+      out
     }, error = function(e) NULL)
   })
+}
+
+# The loci each trait of a planned pair is fitted at: every instrument for the
+# exposure; for the outcome, those passing the outcome founder QC when it is on.
+qtl2mr_plan_trait_loci <- function(p) {
+  keep <- if (is.null(p$founder_qc)) rep(TRUE, length(p$marker)) else p$founder_qc$pass
+  list(list(trait = p$traits[[1L]], marker = p$marker, chr = p$chr),
+    list(trait = p$traits[[2L]], marker = p$marker[keep], chr = p$chr[keep]))
 }
 
 qtl2mr_batch_fit_items <- function(plan) {
   unique(unlist(lapply(plan, function(p) {
     if (is.null(p)) return(character())
-    as.vector(outer(paste(p$traits, p$sig, sep = "\r"), p$marker, paste, sep = "\r"))
+    lapply(qtl2mr_plan_trait_loci(p), function(t) {
+      if (!length(t$marker)) return(character())
+      paste(t$trait, p$sig, t$marker, sep = "\r")
+    })
   }), use.names = FALSE))
 }
 
@@ -38,8 +56,10 @@ qtl2mr_batch_fit_items <- function(plan) {
 qtl2mr_batch_release_items <- function(plan) {
   unique(unlist(lapply(plan, function(p) {
     if (is.null(p)) return(character())
-    c(as.vector(outer(p$traits, unique(p$chr), paste, sep = "\r")),
-      as.vector(outer(p$traits, paste(p$chr, p$marker, sep = "\r"), paste, sep = "\r")))
+    lapply(qtl2mr_plan_trait_loci(p), function(t) {
+      if (!length(t$marker)) return(character())
+      c(paste(t$trait, unique(t$chr), sep = "\r"), paste(t$trait, t$chr, t$marker, sep = "\r"))
+    })
   }), use.names = FALSE))
 }
 
@@ -53,7 +73,10 @@ qtl2mr_registry_item <- function(info) {
 qtl2mr_batch_context_items <- function(plan) {
   unique(unlist(lapply(plan, function(p) {
     if (is.null(p)) return(character())
-    as.vector(outer(paste(p$traits, p$sig, sep = "\r"), unique(p$chr), paste, sep = "\r"))
+    lapply(qtl2mr_plan_trait_loci(p), function(t) {
+      if (!length(t$marker)) return(character())
+      paste(t$trait, p$sig, unique(t$chr), sep = "\r")
+    })
   }), use.names = FALSE))
 }
 
@@ -119,10 +142,10 @@ qtl2mr_batch_prefill_units <- function(plan) {
   units <- list()
   for (p in plan) {
     if (is.null(p)) next
-    for (trait in p$traits) {
-      id <- paste(trait, p$sig, sep = "\r")
-      u <- units[[id]] %||% list(trait = trait, samples = p$samples, markers = list())
-      for (chr in unique(p$chr)) u$markers[[chr]] <- union(u$markers[[chr]], p$marker[p$chr == chr])
+    for (t in qtl2mr_plan_trait_loci(p)) {
+      id <- paste(t$trait, p$sig, sep = "\r")
+      u <- units[[id]] %||% list(trait = t$trait, samples = p$samples, markers = list())
+      for (chr in unique(t$chr)) u$markers[[chr]] <- union(u$markers[[chr]], t$marker[t$chr == chr])
       units[[id]] <- u
     }
   }
