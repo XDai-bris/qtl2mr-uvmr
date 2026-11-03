@@ -82,9 +82,11 @@ keeping the highest LOD peaks among those that pass the other rules.}
 \item{F_X_min}{Optional minimum block F for the exposure. \code{NULL} (default)
 does not filter on F.}
 \item{n_workers}{Number of processes. On Unix, exposures (selection) run in
-parallel with \code{parallel::mclapply()}; in a batch, the trait LMM fits are
-computed in parallel by trait and, when there are several exposures, the groups
-of pairs sharing an exposure run in parallel. Elsewhere everything runs
+parallel with \code{parallel::mclapply()}. In a batch, the trait LMM fits are
+computed in parallel by trait; with several exposures, the groups of pairs
+sharing an exposure then run in parallel workers, as before (warnings raised
+inside a group worker are not returned to the caller); with one exposure the
+pairs are fitted in order in the calling process. Elsewhere everything runs
 sequentially. Results do not depend on \code{n_workers}.}
 \item{progress}{Print one progress line per exposure (selection) or per pair
 (batch; per exposure group when running in parallel).}
@@ -180,10 +182,14 @@ Locus fits that share a trait, chromosome, marker, sample set and phenotype
 values are computed once and reused across pairs: the batch first fits, trait by
 trait, every locus its pairs need, then fits the pairs in order. Fits are kept
 for the R session (also those of \code{qtl2mr_select_instruments()} and of
-single analyses), within a fixed memory bound, and are released once no
-remaining pair of a batch needs them; reuse never changes a result. Pairs whose
-exposure has no selected instrument are recorded as \code{no_instruments}
-errors.
+single analyses) within a bound of 2 GiB as measured by \code{object.size()}:
+the least recently used are released first, a batch keeps the fits it is
+using, and fits that no remaining pair needs become the first to be released.
+Reuse never changes a result. Pairs whose exposure has no selected instrument
+are recorded as \code{no_instruments} errors. Under
+\code{sample_policy = "pair_common_complete"}, \code{sample_exclusions} still
+lists each trait's own exclusions; samples dropped because the partner trait is
+missing show in the fitted sample counts.
 
 With \code{write_locus_blocks = TRUE}, \code{batch_locus_blocks/pair_<index>.rds}
 holds, for each completed pair, a named list of per-locus blocks with

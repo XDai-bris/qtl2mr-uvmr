@@ -1,8 +1,10 @@
 # qtl2mr 0.6.1.9002 (development)
 
-Not released. A speed build: every result, table and warning is the same
-as in 0.6.1.9001 at the same settings, for any worker count. Defaults are
-unchanged; three arguments are added.
+Not released. A speed build: at the same settings and worker count, every
+result, table and warning is the same as in 0.6.1.9001, and
+`run_qtl2mr_analysis()` with `n_workers > 1` gives the same as with one
+process. Defaults are unchanged; three arguments are added. Fits now stay
+cached in the R session, within a fixed memory bound (see below).
 
 - `qtl2mr_prepare_resources()` checks the founder probabilities once instead of
   twice, and the sum-to-one check no longer calls `sum()` once per sample and
@@ -16,17 +18,26 @@ unchanged; three arguments are added.
   heterogeneity simulation, the diagnostic bootstrap, leave-one-locus-out and
   the instrument-set sensitivity can run in several processes. Random numbers
   are drawn in the calling process in the same order, so results do not depend
-  on `n_workers`.
+  on `n_workers`. Under `options(warn = 2)` or higher the refits run in the
+  calling process; a worker that is killed (for example out of memory) stops
+  the analysis.
 - LMM contexts and locus fits are reused across the R session: fits made by
   `qtl2mr_select_instruments()` serve the MR stage, and single analyses and
   batches share them. They are keyed by trait, chromosome, sample set,
   phenotype and covariate values, kinship and marker probabilities, so only
   identical fits are shared. The kinship decomposition is computed once per
   chromosome and sample set, and the overlap products once per pair. The cache
-  has a fixed memory bound.
-- `run_qtl2mr_batch()` first fits, trait by trait (in parallel with
-  `n_workers > 1`, also for a single exposure), every locus its pairs need, then
-  fits the pairs as before; fits no later pair needs are released.
+  holds at most 2 GiB as measured by `object.size()`; the least recently used
+  entries are released first, and a running batch keeps those it is using.
+  Small session memos (kinship checks and fingerprints, up to eight kinship
+  decompositions) are outside this bound.
+- `run_qtl2mr_batch()` first fits, trait by trait (in parallel by trait with
+  `n_workers > 1`), every locus its pairs need, then fits the pairs as before:
+  in order in the calling process for a single exposure, and in parallel
+  exposure-group workers for several exposures, as in 0.6.1.9001 (warnings
+  raised inside those workers are still not returned). Fits that no later pair
+  needs become the first to be released and otherwise stay in the session for
+  later calls.
 - `run_qtl2mr_batch(write_locus_blocks = FALSE)`: with `TRUE`, the per-locus
   founder blocks of each pair are written to `batch_locus_blocks/` with a
   manifest; `fit_multilocus_founder_mr()` refits a pair from them.

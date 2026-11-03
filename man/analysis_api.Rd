@@ -111,7 +111,9 @@ simulation, the diagnostic bootstrap, leave-one-locus-out and the
 instrument-set sensitivity. On Unix they run in parallel with
 \code{parallel::mclapply()}; elsewhere sequentially. Random numbers are drawn
 in the calling process in the same order as with one process, so results,
-warnings and the random number stream do not depend on \code{n_workers}.}
+warnings and the random number stream do not depend on \code{n_workers}. Under
+\code{options(warn = 2)} or higher the refits run in the calling process. A
+worker that is killed (for example out of memory) stops the analysis.}
 \item{result}{A \code{qtl2mr_analysis_result}; for \code{report_qtl2mr_locus()}
 also a path to its \code{result_object.rds}.}
 \item{detail}{For \code{qtl2mr_output_paths()}, return the full file manifest

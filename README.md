@@ -250,10 +250,12 @@ fit once per draw (the locus LMMs are not refitted). On a laptop, the bundled
 - **Parallel runs and reuse.** In a batch, each trait's locus fits are computed
   once and shared by all its pairs, and within an R session fits made by
   `qtl2mr_select_instruments()` and earlier analyses are reused; results never
-  depend on this. With `n_workers > 1` the batch fits traits, and exposure
-  groups, in parallel processes, and `run_qtl2mr_analysis(n_workers = )` runs
-  its simulation, bootstrap and sensitivity refits in parallel, with the same
-  results. See `?run_qtl2mr_batch`.
+  depend on this. Cached fits stay in the session up to a fixed memory bound.
+  With `n_workers > 1` the batch fits traits in parallel processes and, with
+  several exposures, runs exposure groups in parallel workers;
+  `run_qtl2mr_analysis(n_workers = )` runs its simulation, bootstrap and
+  sensitivity refits in parallel. Results are the same. See
+  `?run_qtl2mr_batch`.
 - **Follow-up refits.** `refit_qtl2mr_subset()` and
   `fit_instrument_set_sensitivity()` re-estimate an analysis on locus subsets
   without refitting the LMMs.

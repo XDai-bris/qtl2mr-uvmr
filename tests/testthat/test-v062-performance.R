@@ -174,7 +174,156 @@ test_that("only the requested markers are copied when probabilities are normaliz
   expect_identical(input$allele_probs, f$resources$allele_probs)
 })
 
-test_that("Q-only refits search exactly as the full fit", {
+
+# qtl2mr_so_fit() of 0.6.1.9001 (c5a0e52), kept verbatim (apart from the name and
+# the internal helpers it reaches) as the reference for the anchor reuse.
+old_so_fit <- function(locus_blocks, allow_cross_cov = TRUE, ridge = 1e-10,
+                       theta_grid = NULL) {
+  qtl2mr_so_coordinates <- qtl2mr:::qtl2mr_so_coordinates
+  gls_ivw <- qtl2mr:::gls_ivw
+  block_diag_matrix <- qtl2mr:::block_diag_matrix
+  qtl2mr_profile_set <- qtl2mr:::qtl2mr_profile_set
+  coordinates <- qtl2mr_so_coordinates(locus_blocks, allow_cross_cov, ridge)
+  scale <- coordinates$scale
+  nonfinite_interior <- FALSE
+  evaluate <- function(alpha, derivatives = FALSE) {
+    value <- coordinates$evaluate(alpha, derivatives)
+    q <- if (derivatives) value[["Q"]] else value
+    if (abs(alpha) < pi / 2 && !is.finite(q)) nonfinite_interior <<- TRUE
+    value
+  }
+  # optimize() cannot consume Inf without substituting its own value and warning.
+  # A penalty is only an exploration device; all reported Q values are evaluated
+  # with the true objective and any interior failure makes the result unresolved.
+  optimizer_value <- function(alpha, direction = 1) {
+    q <- evaluate(alpha)
+    if (is.finite(q)) direction * q else .Machine$double.xmax / 100
+  }
+  objective <- function(theta) evaluate(atan(theta / scale))
+  blocks <- coordinates$blocks
+  bx <- unlist(lapply(blocks, `[[`, "beta_x"), use.names = FALSE)
+  by <- unlist(lapply(blocks, `[[`, "beta_y"), use.names = FALSE)
+  Sy <- block_diag_matrix(lapply(blocks, `[[`, "Sigma_y"))
+  first <- try(gls_ivw(bx, by, Sy, ridge = ridge), silent = TRUE)
+  if (inherits(first, "try-error")) first <- list(theta = NA_real_, se = NA_real_)
+  first$theta <- first$theta * scale
+  first$se <- first$se * scale
+  if (!is.null(theta_grid) && (!is.numeric(theta_grid) || !length(theta_grid) ||
+                              any(!is.finite(theta_grid)))) {
+    stop("theta_grid must contain finite numeric supplemental search points", call. = FALSE)
+  }
+  # theta_grid supplements the whole-real-line search; it is never a bound.
+  hints <- c(theta_grid, first$theta,
+             first$theta + first$se * c(-4, -1, 1, 4))
+  hints <- atan(hints[is.finite(hints)] / scale)
+  grid <- sort(unique(c(seq(-pi / 2, pi / 2, length.out = 257L), hints)))
+  values <- vapply(grid, evaluate, numeric(1))
+  if (!any(is.finite(values))) stop("The second-order objective is non-finite over the search grid", call. = FALSE)
+  minima <- maxima <- numeric()
+  for (i in seq.int(2L, length(grid) - 1L)) {
+    yi <- values[[i]]
+    near <- values[c(i - 1L, i + 1L)]
+    if (!is.finite(yi)) next
+    if (yi <= min(near) && yi < max(near)) {
+      opt <- stats::optimize(optimizer_value, grid[c(i - 1L, i + 1L)], tol = 1e-11)
+      a <- opt$minimum
+      # An analytic Newton correction avoids unit- and basis-dependent
+      # finite-difference curvature and optimizer stopping effects.
+      for (j in seq_len(3L)) {
+        d <- evaluate(a, derivatives = TRUE)
+        step <- d[["first"]] / d[["second"]]
+        candidate <- a - step
+        if (!is.finite(step) || d[["second"]] <= 0 ||
+            candidate <= grid[[i - 1L]] || candidate >= grid[[i + 1L]]) break
+        if (evaluate(candidate) > d[["Q"]] + 1e-10 * max(1, abs(d[["Q"]]))) break
+        a <- candidate
+      }
+      minima <- c(minima, a)
+    }
+    if (yi >= max(near) && yi > min(near) && all(is.finite(near))) {
+      maxima <- c(maxima, stats::optimize(function(a) optimizer_value(a, -1),
+        grid[c(i - 1L, i + 1L)], tol = 1e-11)$minimum)
+    }
+  }
+  # Tail-adjacent minima can lie between the endpoint and the first grid point.
+  for (ii in list(c(1L, 2L), c(length(grid) - 1L, length(grid)))) {
+    opt <- stats::optimize(optimizer_value, grid[ii], tol = 1e-11)
+    if (opt$objective < min(values[ii])) minima <- c(minima, opt$minimum)
+  }
+  anchors <- sort(unique(c(grid, minima, maxima)))
+  q_anchor <- vapply(anchors, evaluate, numeric(1))
+  best <- which.min(q_anchor)
+  alpha_hat <- anchors[[best]]
+  q_min <- q_anchor[[best]]
+  tails <- c(negative = values[[1L]], positive = values[[length(values)]])
+  at_infinity <- best %in% c(1L, length(anchors)) ||
+    min(tails) <= q_min + 1e-10 * max(1, abs(q_min))
+  theta_hat <- if (at_infinity) NA_real_ else scale * tan(alpha_hat)
+  curvature <- if (at_infinity) NA_real_ else evaluate(alpha_hat, derivatives = TRUE)[["second"]]
+  se <- if (is.finite(curvature) && curvature > 0) {
+    scale / cos(alpha_hat)^2 * sqrt(2 / curvature)
+  } else NA_real_
+  confidence <- qtl2mr_profile_set(evaluate, anchors, q_anchor, q_min, scale)
+  evaluation_ok <- !nonfinite_interior && all(is.finite(q_anchor[-c(1L, length(q_anchor))]))
+  if (!evaluation_ok) confidence$type <- "unresolved"
+  ci <- confidence$components
+  single <- nrow(ci) == 1L && confidence$type != "unresolved"
+  finite_ci <- single && all(is.finite(unlist(ci)))
+  numerical_ok <- is.finite(q_min) && confidence$type != "unresolved"
+  reliable <- numerical_ok && !at_infinity && finite_ci &&
+    is.finite(theta_hat) && is.finite(se)
+  status <- if (!numerical_ok) "failed" else if (at_infinity) {
+    "minimum_at_infinity"
+  } else if (confidence$type == "disconnected") {
+    "disconnected_profile"
+  } else if (!finite_ci) {
+    "unbounded_profile"
+  } else if (!is.finite(se)) "nonpositive_curvature" else "success"
+  warnings <- "Finite angular-grid search with local refinement is not a proof of global optimality."
+  if (!evaluation_ok) warnings <- c(warnings, "A non-finite interior objective was encountered; the confidence set is unresolved.")
+  if (!finite_ci) warnings <- c(warnings, paste0("Profile confidence set is ", confidence$type, "; do not report a finite interval."))
+  if (at_infinity) warnings <- c(warnings, "A finite optimum is not numerically distinguishable from an infinite-effect limit; no finite theta is reported.")
+  df <- max(length(bx) - 1L, 1L)
+  # Compatibility bracket fields describe the full searched domain.
+  list(
+    theta = theta_hat, beta = theta_hat, se = se,
+    z = theta_hat / se,
+    p = 2 * stats::pnorm(abs(theta_hat / se), lower.tail = FALSE),
+    profile_p = stats::pchisq(max(objective(0) - q_min, 0), df = 1, lower.tail = FALSE),
+    profile_ci_lower = if (single) ci$lower[[1L]] else NA_real_,
+    profile_ci_upper = if (single) ci$upper[[1L]] else NA_real_,
+    confidence_set = ci, confidence_set_type = confidence$type,
+    confidence_cutoff = confidence$cutoff,
+    Q = q_min, Q_df = df, Q_chisq_df = df,
+    Q_p_chisq = stats::pchisq(q_min, df = df, lower.tail = FALSE),
+    first_order_theta = first$theta, first_order_se = first$se,
+    theta_start = first$theta,
+    bracket_lower = -Inf, bracket_upper = Inf,
+    bracket_status = "whole_real_line", bracket_n_expand = 0L,
+    optimizer_status = status, profile_ci_finite = finite_ci,
+    numerical_ok = numerical_ok,
+    primary_reliable = reliable,
+    reliability_scope = "numerically_bounded_single_component_only",
+    inference_status = "not_calibrated",
+    objective_min = q_min, objective_tail = tails,
+    optimizer_warnings = warnings,
+    search_method = "scaled_arctan_grid_with_local_extrema_refinement",
+    search_grid_n = length(grid), search_local_minima_n = length(minima),
+    search_nonfinite_interior = nonfinite_interior,
+    search_certified = FALSE, theta_grid_role = "supplemental_search_points",
+    lower = -Inf, upper = Inf,
+    objective = objective, converged = numerical_ok && !at_infinity,
+    allow_cross_cov = isTRUE(allow_cross_cov)
+  )
+}
+
+
+perf_fit_same <- function(a, b, probe = c(-3, -0.4, 0, 0.25, 2)) {
+  identical(a[setdiff(names(a), c("objective", "independence"))], b[setdiff(names(b), c("objective", "independence"))]) &&
+    identical(vapply(probe, a$objective, numeric(1)), vapply(probe, b$objective, numeric(1)))
+}
+
+test_that("second-order fits equal the 0.6.1.9001 search, and Q-only refits its minimum", {
   f <- perf_fixture()
   inst <- data.frame(exposure = "x", marker = c("a1", "a2", "b2", "c1"))
   pilot <- qtl2mr:::qtl2mr_fit_prepared(qtl2mr_pair_input(f$resources, inst, "x", "y"), "x", "y",
@@ -184,9 +333,18 @@ test_that("Q-only refits search exactly as the full fit", {
     b <- blocks[seq_len(k)]
     for (cross in c(TRUE, FALSE)) {
       full <- qtl2mr:::qtl2mr_so_fit(b, cross, 1e-10)
+      expect_true(perf_fit_same(full, old_so_fit(b, cross, 1e-10)))
+      expect_true(perf_fit_same(qtl2mr:::qtl2mr_so_fit(b, cross, 1e-10, theta_grid = c(-1, 0.5)),
+        old_so_fit(b, cross, 1e-10, theta_grid = c(-1, 0.5))))
       expect_identical(qtl2mr:::qtl2mr_so_fit(b, cross, 1e-10, q_only = TRUE), list(Q = full$Q))
     }
   }
+  # Zero exposure variance at one locus (infinite tail objective).
+  z <- blocks[1:2]
+  z[[2L]]$Sigma_x[] <- 0
+  z[[2L]]$Sigma_xy[] <- 0
+  z[[2L]]$beta_x[] <- 0
+  expect_true(perf_fit_same(qtl2mr:::qtl2mr_so_fit(z, TRUE, 1e-10), old_so_fit(z, TRUE, 1e-10)))
 })
 
 test_that("ordered worker calls signal warnings, messages and the first error as sequential calls do", {
@@ -200,14 +358,33 @@ test_that("ordered worker calls signal warnings, messages and the first error as
   run <- function(workers) {
     old <- qtl2mr:::qtl2mr_set_workers(workers)
     on.exit(qtl2mr:::qtl2mr_set_workers(old), add = TRUE)
-    seen <- character()
+    seen <- list()
     value <- tryCatch(withCallingHandlers(qtl2mr:::qtl2mr_ordered_lapply(as.list(1:7), fun),
-      warning = function(w) { seen <<- c(seen, conditionMessage(w)); invokeRestart("muffleWarning") },
-      message = function(m) { seen <<- c(seen, conditionMessage(m)); invokeRestart("muffleMessage") }),
-      error = function(e) conditionMessage(e))
+      warning = function(w) { seen[[length(seen) + 1L]] <<- w; invokeRestart("muffleWarning") },
+      message = function(m) { seen[[length(seen) + 1L]] <<- m; invokeRestart("muffleMessage") }),
+      error = function(e) e)
     list(value = value, seen = seen)
   }
+  # Same conditions, classes and calls, including those raised by FUN itself.
   expect_identical(run(2L), run(1L))
+  fun <- function(i) {
+    warning("w", i)
+    if (i == 3L) stop("raised by FUN at ", i)
+    i
+  }
+  expect_identical(run(2L), run(1L))
+  expect_identical(deparse(conditionCall(run(2L)$value)), "FUN(X[[i]], ...)")
+  # Under options(warn = 2) refits stay in this process, where a caller's handler can muffle warnings.
+  old_warn <- options(warn = 2)
+  on.exit(options(old_warn), add = TRUE)
+  expect_false(qtl2mr:::qtl2mr_can_fork(2L, 7L))
+  muffled <- function(workers) {
+    old <- qtl2mr:::qtl2mr_set_workers(workers)
+    on.exit(qtl2mr:::qtl2mr_set_workers(old), add = TRUE)
+    suppressWarnings(qtl2mr:::qtl2mr_ordered_lapply(as.list(1:2), function(i) { warning("w"); i }))
+  }
+  expect_identical(muffled(2L), muffled(1L))
+  options(old_warn)
   ok <- function(workers) {
     old <- qtl2mr:::qtl2mr_set_workers(workers)
     on.exit(qtl2mr:::qtl2mr_set_workers(old), add = TRUE)
@@ -461,6 +638,84 @@ test_that("per-locus blocks are written on request and refit to the batch estima
   expect_false(dir.exists(file.path(rdir, "batch_locus_blocks")))
   expect_false(file.exists(file.path(rdir, "batch_locus_blocks_manifest.csv")))
   expect_identical(cleared$main_results$theta, first$main_results$theta[1:3])
+})
+
+perf_capture_all <- function(expr) {
+  conditions <- character()
+  value <- withCallingHandlers(expr,
+    warning = function(w) { conditions <<- c(conditions, paste("W", conditionMessage(w))); invokeRestart("muffleWarning") },
+    message = function(m) { conditions <<- c(conditions, paste("M", conditionMessage(m))); invokeRestart("muffleMessage") })
+  list(value = value, conditions = conditions)
+}
+
+test_that("several exposure groups with two workers run in workers, in every wave", {
+  skip_on_os("windows")
+  f <- perf_fixture()
+  inst <- suppressWarnings(qtl2mr_select_instruments(f$resources, f$scan, max_loci = 2L, progress = FALSE))
+  run <- function(workers, budget = NULL) {
+    qtl2mr:::qtl2mr_cache_reset()
+    assign("budget", budget, envir = qtl2mr:::qtl2mr_state)
+    on.exit(assign("budget", NULL, envir = qtl2mr:::qtl2mr_state), add = TRUE)
+    perf_capture_all(run_qtl2mr_batch(f$resources, f$pairs, inst, min_samples = 20L, progress = TRUE,
+      n_workers = workers))
+  }
+  sequential <- run(1L)
+  forked <- run(2L)
+  small <- run(2L, budget = 2e5)
+  # The planner makes several waves of at least two groups for the small budget.
+  plan <- qtl2mr:::qtl2mr_batch_plan(f$resources, small$value$pairs,
+    qtl2mr:::qtl2mr_normalize_instruments(inst, f$resources), "own_complete")
+  groups <- unname(split(seq_len(nrow(f$pairs)), factor(f$pairs$exposure, levels = unique(f$pairs$exposure))))
+  assign("budget", 2e5, envir = qtl2mr:::qtl2mr_state)
+  waves <- qtl2mr:::qtl2mr_batch_waves(plan, groups, 0.5 * qtl2mr:::qtl2mr_cache_budget(),
+    qtl2mr:::qtl2mr_batch_entry_sizes(f$resources), min_units = 2L)
+  assign("budget", NULL, envir = qtl2mr:::qtl2mr_state)
+  expect_gt(length(waves), 1L)
+  expect_true(all(vapply(waves, function(w) sum(vapply(groups, function(g) all(g %in% w), logical(1))),
+    integer(1)) >= 2L))
+  # As in 0.6.1.9001: groups run in forked workers, so their progress lines and
+  # warnings are not signalled here, while the sequential run signals them.
+  expect_true(any(startsWith(sequential$conditions, "M [qtl2mr batch]")))
+  expect_true(any(grepl("Dropping linearly dependent covariate", sequential$conditions)))
+  expect_identical(forked$conditions, character())
+  expect_identical(small$conditions, character())
+  expect_identical(small$value$run_manifest$parallel_backend, "parallel::mclapply")
+  expect_true(perf_same(small$value, forked$value))
+  drop <- "run_manifest"
+  expect_true(perf_same(small$value[setdiff(names(small$value), drop)],
+    sequential$value[setdiff(names(sequential$value), drop)]))
+})
+
+test_that("a planned wave fits the cache budget, so no fit is computed twice", {
+  f <- perf_fixture()
+  inst <- suppressWarnings(qtl2mr_select_instruments(f$resources, f$scan, max_loci = 2L, progress = FALSE))
+  sizes <- qtl2mr:::qtl2mr_batch_entry_sizes(f$resources)
+  run <- function(budget) {
+    qtl2mr:::qtl2mr_cache_reset()
+    assign("budget", budget, envir = qtl2mr:::qtl2mr_state)
+    on.exit(assign("budget", NULL, envir = qtl2mr:::qtl2mr_state), add = TRUE)
+    batch <- suppressWarnings(run_qtl2mr_batch(f$resources, f$pairs, inst, min_samples = 20L, progress = FALSE))
+    reg <- qtl2mr:::qtl2mr_registry()
+    fits <- Filter(function(id) startsWith(id, "fit:"), ls(reg$entries))
+    plan <- qtl2mr:::qtl2mr_batch_plan(f$resources, batch$pairs,
+      qtl2mr:::qtl2mr_normalize_instruments(inst, f$resources), "own_complete")
+    list(batch = batch, computed = qtl2mr:::qtl2mr_state$computed[["fit"]], distinct = length(fits),
+      fit_bytes = max(vapply(fits, function(id) reg$entries[[id]]$bytes, numeric(1))),
+      waves = length(qtl2mr:::qtl2mr_batch_waves(plan, as.list(seq_len(nrow(batch$pairs))),
+        0.5 * qtl2mr:::qtl2mr_cache_budget(), sizes)))
+  }
+  ref <- run(NULL)
+  expect_identical(ref$waves, 1L)
+  expect_identical(ref$computed, as.numeric(ref$distinct))
+  # The planner charges entries as the registry does.
+  expect_gte(sizes$fit, ref$fit_bytes)
+  expect_lte(sizes$fit, 1.05 * ref$fit_bytes)
+  for (budget in c(4e6, 2e6, 1.6e6, 1.2e6)) {
+    r <- run(budget)
+    expect_true(perf_same(r$batch, ref$batch))
+    expect_identical(r$computed, ref$computed)
+  }
+  expect_gt(run(1.2e6)$waves, 2L)
 })
 
 test_that("the session cache stays within its budget and keeps pinned entries", {
