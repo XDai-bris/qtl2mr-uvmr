@@ -362,9 +362,12 @@ test_that("batch rows equal single analyses under both sample policies", {
         f$pairs$outcome[[i]], sample_policy = policy), output_dir = tempfile("v062-policy-"), make_html = FALSE,
         make_figures = FALSE, verbose = FALSE, heterogeneity_method = "chisq", diagnostic_bootstrap_B = 0L,
         run_loo_mr = FALSE, run_instrument_sensitivity = FALSE))
-      row <- batch$main_results[i, cols]
-      ref <- single$pilot$summary[1L, cols]
-      rownames(row) <- rownames(ref) <- NULL
+      # rbind() of batch rows can promote an integer median to double (as in 0.6.1.9001); compare those by value.
+      row <- as.list(batch$main_results[i, cols])
+      ref <- as.list(single$pilot$summary[1L, cols])
+      num <- vapply(row, is.numeric, logical(1)) & vapply(ref, is.numeric, logical(1))
+      row[num] <- lapply(row[num], as.double)
+      ref[num] <- lapply(ref[num], as.double)
       expect_identical(row, ref)
     }
     results[[length(results) + 1L]] <- batch
