@@ -49,7 +49,8 @@ test_that("one batch entry point remains and retired arguments are rejected", {
     expect_false(old %in% ns)
   }
   expect_true(all(c("qtl2mr_select_instruments", "qtl2mr_pair_input") %in% ns))
-  expect_error(run_qtl2mr_batch(f$resources, f$pairs, f$instruments, sample_policy = "batch_common_complete"), "unused argument")
+  # sample_policy returned in 0.6.1.9002 with "own_complete" and "pair_common_complete" only.
+  expect_error(run_qtl2mr_batch(f$resources, f$pairs, f$instruments, sample_policy = "batch_common_complete"), "should be one of")
   expect_error(run_qtl2mr_batch(f$resources, f$pairs, f$instruments, fit_options = list()), "unused argument")
   expect_error(run_qtl2mr_batch(f$resources, f$pairs, f$instruments, force = TRUE), "unused argument")
   expect_error(run_qtl2mr_batch(f$resources, f$pairs), "instruments is required")

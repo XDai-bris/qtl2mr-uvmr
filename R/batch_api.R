@@ -227,13 +227,27 @@ qtl2mr_is_autosome <- function(chr) {
 # Prepared input built from resources, shared by instrument selection, batch
 # pairs and qtl2mr_pair_input() so that every route fits the same samples.
 qtl2mr_resources_input <- function(resources, selected_loci, exposure = NULL, outcome = NULL,
-                                   metadata = resources$metadata) {
+                                   metadata = resources$metadata, samples = NULL) {
   as_qtl2mr_prepared_input(
     allele_probs = resources$allele_probs, pheno = resources$pheno, covar = resources$covar,
     kinship = resources$kinship, marker_map = resources$marker_map, selected_loci = selected_loci,
-    exposure = exposure, outcome = outcome, metadata = metadata %||% list(),
-    probability_policy = resources$probability_policy %||% "strict"
+    exposure = exposure, outcome = outcome, exposure_samples = samples, outcome_samples = samples,
+    metadata = metadata %||% list(), probability_policy = resources$probability_policy %||% "strict"
   )
+}
+
+qtl2mr_sample_policies <- c("own_complete", "pair_common_complete")
+
+# Samples both traits of a pair are fitted on: NULL for each trait's own
+# complete samples, or the samples complete for both traits, the covariates
+# and every instrument chromosome (as the 0.5.0 batch did).
+qtl2mr_pair_samples <- function(resources, exposure, outcome, rows, sample_policy) {
+  if (identical(sample_policy, "own_complete")) return(NULL)
+  # Unknown or non-numeric traits are reported by input validation.
+  pheno <- resources$pheno
+  if (!all(c(exposure, outcome) %in% names(pheno)) ||
+      !all(vapply(c(exposure, outcome), function(t) is.numeric(pheno[[t]]), logical(1)))) return(NULL)
+  qtl2mr_complete_samples(resources, c(exposure, outcome), rows$chr)
 }
 
 # Exposure founder LMM at each candidate locus, fitted exactly as in the MR stage
@@ -472,18 +486,22 @@ qtl2mr_exposure_instruments <- function(instruments, exposure) {
   rows
 }
 
-qtl2mr_pair_prepared <- function(resources, rows, exposure, outcome, metadata = resources$metadata) {
+qtl2mr_pair_prepared <- function(resources, rows, exposure, outcome, metadata = resources$metadata,
+                                 sample_policy = "own_complete") {
   qtl2mr_resources_input(resources, data.frame(marker = rows$marker, chr = rows$chr, stringsAsFactors = FALSE),
-    exposure = exposure, outcome = outcome, metadata = metadata)
+    exposure = exposure, outcome = outcome, metadata = metadata,
+    samples = qtl2mr_pair_samples(resources, exposure, outcome, rows, sample_policy))
 }
 
-qtl2mr_pair_input <- function(resources, instruments, exposure, outcome) {
+qtl2mr_pair_input <- function(resources, instruments, exposure, outcome,
+                              sample_policy = c("own_complete", "pair_common_complete")) {
   if (!inherits(resources, "qtl2mr_resources")) stop("resources must come from qtl2mr_prepare_resources()", call. = FALSE)
+  sample_policy <- match.arg(sample_policy)
   for (name in c("exposure", "outcome")) {
     if (!qtl2mr_nonempty_string(get(name))) stop(name, " must be one non-empty trait name", call. = FALSE)
   }
   rows <- qtl2mr_exposure_instruments(qtl2mr_normalize_instruments(instruments, resources), exposure)
-  qtl2mr_pair_prepared(resources, rows, exposure, outcome)
+  qtl2mr_pair_prepared(resources, rows, exposure, outcome, sample_policy = sample_policy)
 }
 
 qtl2mr_resources_kinship <- function(kinship, chr) {
@@ -599,7 +617,8 @@ qtl2mr_batch_probability_table <- function(pair, pilot) {
   cbind(pair_id = pair$pair_id, adjustments, stringsAsFactors = FALSE)
 }
 
-qtl2mr_batch_preflight <- function(resources, pairs, instruments, min_loci, min_samples, fail_fast) {
+qtl2mr_batch_preflight <- function(resources, pairs, instruments, min_loci, min_samples, fail_fast,
+                                   sample_policy = "own_complete") {
   errors <- lapply(seq_len(nrow(pairs)), function(i) {
     pair <- pairs[i, , drop = FALSE]
     tryCatch({
@@ -611,12 +630,20 @@ qtl2mr_batch_preflight <- function(resources, pairs, instruments, min_loci, min_
       probe <- resources
       probe$selected_loci <- rows$marker
       validate_qtl2mr_input(probe, exposure = pair$exposure, outcome = pair$outcome, require_selected_loci = TRUE)
-      n <- vapply(c(pair$exposure, pair$outcome), function(trait) {
-        length(qtl2mr_complete_samples(resources, trait, rows$chr))
-      }, integer(1))
-      if (any(n < min_samples)) {
-        stop(sprintf("too_few_samples: %d complete samples for the exposure and %d for the outcome, below min_samples = %d",
-          n[[1L]], n[[2L]], min_samples), call. = FALSE)
+      if (identical(sample_policy, "pair_common_complete")) {
+        n <- length(qtl2mr_complete_samples(resources, c(pair$exposure, pair$outcome), rows$chr))
+        if (n < min_samples) {
+          stop(sprintf("too_few_samples: %d samples complete for both traits, below min_samples = %d",
+            n, min_samples), call. = FALSE)
+        }
+      } else {
+        n <- vapply(c(pair$exposure, pair$outcome), function(trait) {
+          length(qtl2mr_complete_samples(resources, trait, rows$chr))
+        }, integer(1))
+        if (any(n < min_samples)) {
+          stop(sprintf("too_few_samples: %d complete samples for the exposure and %d for the outcome, below min_samples = %d",
+            n[[1L]], n[[2L]], min_samples), call. = FALSE)
+        }
       }
       rows$marker
     }, error = function(e) {
@@ -1026,12 +1053,12 @@ qtl2mr_batch_append_pair <- function(batch, result) {
 # qtl2mr_pair_input(resources, instruments, exposure, outcome). Errors are
 # returned as error rows; the caller applies fail_fast.
 qtl2mr_batch_fit_pair <- function(resources, pair, instruments, settings, context_cache, fit_cache,
-                                  write_locus_blocks = FALSE) {
+                                  sample_policy = "own_complete", write_locus_blocks = FALSE) {
   t0 <- proc.time()[["elapsed"]]
   tryCatch({
     rows <- qtl2mr_exposure_instruments(instruments, pair$exposure)
     prepared <- qtl2mr_pair_prepared(resources, rows, pair$exposure, pair$outcome,
-      metadata = c(resources$metadata, list(pair_id = pair$pair_id)))
+      metadata = c(resources$metadata, list(pair_id = pair$pair_id)), sample_policy = sample_policy)
     pilot <- qtl2mr_fit_prepared(prepared, pair$exposure, pair$outcome, settings, verbose = FALSE,
       context_cache = context_cache, fit_cache = fit_cache)
     if (pilot$summary$n_loci[[1L]] < settings$min_loci) {
@@ -1051,7 +1078,7 @@ qtl2mr_batch_fit_pair <- function(resources, pair, instruments, settings, contex
       warnings = warn,
       probability = qtl2mr_batch_probability_table(pair, pilot), error = NULL
     )
-    if (isTRUE(write_locus_blocks)) result$blocks <- qtl2mr_strip_locus_blocks(pair, pilot)
+    if (isTRUE(write_locus_blocks)) result$blocks <- qtl2mr_strip_locus_blocks(pair, pilot, sample_policy)
     result
   }, error = function(e) {
     runtime <- proc.time()[["elapsed"]] - t0
@@ -1066,7 +1093,7 @@ qtl2mr_batch_fit_pair <- function(resources, pair, instruments, settings, contex
 # fit_multilocus_founder_mr() needs to refit the pair, the first-stage and
 # Steiger statistics of the locus table, fit sizes and hsq. fit_x and fit_y
 # keep df, n and hsq only, as read by qtl2mr_locus_first_stage().
-qtl2mr_strip_locus_blocks <- function(pair, pilot) {
+qtl2mr_strip_locus_blocks <- function(pair, pilot, sample_policy) {
   blocks <- pilot$locus_blocks
   first <- pilot$locus_first_stage %||% qtl2mr_locus_first_stage(blocks)
   selected <- pilot$selected_loci %||% data.frame(marker = character())
@@ -1091,7 +1118,7 @@ qtl2mr_strip_locus_blocks <- function(pair, pilot) {
   })
   names(out) <- names(blocks)
   attr(out, "qtl2mr_locus_blocks") <- list(schema = "qtl2mr-locus-blocks-v1", pair_id = pair$pair_id,
-    exposure = pair$exposure, outcome = pair$outcome,
+    exposure = pair$exposure, outcome = pair$outcome, sample_policy = sample_policy,
     cross_cov_model = pilot$summary$cross_cov_model[[1L]],
     standardize_phenotypes = pilot$summary$standardize_phenotypes[[1L]], ridge = 1e-10)
   out
@@ -1196,7 +1223,8 @@ run_qtl2mr_batch <- function(resources,
                              overwrite = FALSE,
                              output_dir = NULL,
                              progress = TRUE,
-                             write_locus_blocks = FALSE) {
+                             write_locus_blocks = FALSE,
+                             sample_policy = c("own_complete", "pair_common_complete")) {
   if (!inherits(resources, "qtl2mr_resources")) stop("resources must come from qtl2mr_prepare_resources()", call. = FALSE)
   if (missing(instruments)) {
     stop("instruments is required; select them with qtl2mr_select_instruments() or supply a table with exposure and marker columns", call. = FALSE)
@@ -1207,6 +1235,7 @@ run_qtl2mr_batch <- function(resources,
   progress <- qtl2mr_check_flag(progress, "progress")
   n_workers <- qtl2mr_check_count(n_workers, "n_workers")
   write_locus_blocks <- qtl2mr_check_flag(write_locus_blocks, "write_locus_blocks")
+  sample_policy <- match.arg(sample_policy)
   if (write_locus_blocks && is.null(output_dir)) stop("write_locus_blocks = TRUE requires output_dir", call. = FALSE)
   settings <- qtl2mr_fit_settings(
     on_nonestimable_locus = match.arg(on_nonestimable_locus),
@@ -1222,13 +1251,14 @@ run_qtl2mr_batch <- function(resources,
   instruments <- qtl2mr_normalize_instruments(instruments, resources)
   config <- settings
   # Options that change outputs are recorded, and fingerprinted, only when used.
+  if (!identical(sample_policy, "own_complete")) config$sample_policy <- sample_policy
   if (write_locus_blocks) config$write_locus_blocks <- TRUE
 
   # Destination, pair preflight and the checkpoint are all checked before
   # anything in output_dir is written or removed.
   qtl2mr_check_batch_destination(output_dir, resume, overwrite)
   preflight <- qtl2mr_batch_preflight(resources, pairs, instruments, settings$min_loci,
-    settings$min_samples, fail_fast)
+    settings$min_samples, fail_fast, sample_policy = sample_policy)
   valid <- preflight$valid
   batch <- qtl2mr_empty_batch(resources, valid, instruments, c(config, list(
     batch_traits = unique(c(valid$exposure, valid$outcome)), created_at = as.character(Sys.time()))))
@@ -1250,7 +1280,7 @@ run_qtl2mr_batch <- function(resources,
   fit_one <- function(i, context_cache, fit_cache) {
     pair <- todo[i, , drop = FALSE]
     result <- qtl2mr_batch_fit_pair(resources, pair, instruments, settings, context_cache, fit_cache,
-      write_locus_blocks = write_locus_blocks)
+      sample_policy = sample_policy, write_locus_blocks = write_locus_blocks)
     if (!is.null(output_dir) && is.null(result$error)) {
       qtl2mr_write_pair_record(output_dir, pair_index[[i]], pair$pair_id, fingerprint, result)
     }
@@ -1265,7 +1295,7 @@ run_qtl2mr_batch <- function(resources,
   # Waves: whole exposure groups when groups run in workers, consecutive pairs
   # otherwise. Each wave's trait fits are computed first (in parallel by trait
   # when n_workers > 1), then its pairs are fitted as before.
-  plan <- qtl2mr_batch_plan(resources, todo, instruments)
+  plan <- qtl2mr_batch_plan(resources, todo, instruments, sample_policy)
   waves <- qtl2mr_batch_waves(plan, if (use_fork) unname(groups) else as.list(seq_len(nrow(todo))),
     qtl2mr_batch_max_fits(resources))
   wave_items <- lapply(waves, function(idx) qtl2mr_batch_release_items(plan[idx]))

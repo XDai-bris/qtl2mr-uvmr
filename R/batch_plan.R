@@ -10,14 +10,18 @@
 # the registry budget. After a wave, its entries that no later wave reads are
 # released.
 
-# Per-pair demand: the two traits, their sample set (NULL: each trait's own
-# complete samples) and the instruments.
-qtl2mr_batch_plan <- function(resources, todo, instruments) {
+# Per-pair demand: the two traits, their common sample set under
+# sample_policy = "pair_common_complete" (NULL otherwise), and the instruments.
+qtl2mr_batch_plan <- function(resources, todo, instruments, sample_policy) {
   lapply(seq_len(nrow(todo)), function(i) {
     pair <- todo[i, , drop = FALSE]
     rows <- instruments[instruments$exposure == pair$exposure, , drop = FALSE]
-    list(traits = c(pair$exposure, pair$outcome), samples = NULL, sig = "",
-      marker = as.character(rows$marker), chr = as.character(rows$chr))
+    tryCatch({
+      samples <- qtl2mr_pair_samples(resources, pair$exposure, pair$outcome, rows, sample_policy)
+      list(traits = c(pair$exposure, pair$outcome), samples = samples,
+        sig = if (is.null(samples)) "" else qtl2mr_fingerprint_object(samples),
+        marker = as.character(rows$marker), chr = as.character(rows$chr))
+    }, error = function(e) NULL)
   })
 }
 
