@@ -106,7 +106,8 @@ test_that("four-to-six decimal probabilities have disclosed bounded normalizatio
     adjust <- abs(sums - 1) > 1e-6 + 16 * .Machine$double.eps
     expect_equal(rowSums(normalized$allele_probs[[1]][adjust, , "m1"]), rep(1, sum(adjust)), ignore_attr = TRUE)
     expect_identical(normalized$allele_probs[[1]][!adjust, , "m1"], original[[1]][!adjust, , "m1"])
-    expect_identical(normalized$allele_probs[[1]][, , "m2"], original[[1]][, , "m2"])
+    # Only the requested markers are copied (0.6.1.9002); other markers stay in the input arrays.
+    expect_identical(dimnames(normalized$allele_probs[[1]])[[3L]], "m1")
     expect_identical(input$allele_probs, original)
     expect_error(do.call(as_qtl2mr_prepared_input, c(raw, list(probability_policy = "strict"))), "sum to 1")
   }

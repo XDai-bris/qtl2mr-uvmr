@@ -37,8 +37,8 @@ as_qtl2mr_prepared_input <- function(allele_probs,
     probability_policy = probability_policy
   )
   class(input) <- c("qtl2mr_prepared_input", "list")
-  validate_qtl2mr_input(input)
-  input <- qtl2mr_record_probability_policy(input, warn = TRUE)
+  marker_info <- qtl2mr_validate_input_table(input)
+  input <- qtl2mr_record_probability_policy(input, warn = TRUE, marker_info = marker_info)
   input$sample_alignment <- qtl2mr_input_alignment(input)
   qtl2mr_warn_alignment(input$sample_alignment)
   input
@@ -153,7 +153,7 @@ qtl2mr_allele_prob_markers <- function(allele_probs, markers_to_validate = NULL,
   if (!is.list(allele_probs) || !length(allele_probs)) stop("allele_probs must be a non-empty qtl2-style list of 3D arrays", call. = FALSE)
   qtl2mr_validate_ids(names(allele_probs), "allele_probs chromosome names")
   chr_names <- names(allele_probs) %||% as.character(seq_along(allele_probs))
-  rows <- list()
+  marker_names <- vector("list", length(allele_probs))
   adjustments <- list()
   for (i in seq_along(allele_probs)) {
     arr <- allele_probs[[i]]
@@ -179,7 +179,11 @@ qtl2mr_allele_prob_markers <- function(allele_probs, markers_to_validate = NULL,
         stop(sprintf("allele_probs must lie in [0, 1] up to floating-point error (1e-8); observed range [%.10g, %.10g]",
           min(chunk), max(chunk)), call. = FALSE)
       }
-      deviations <- abs(apply(chunk, c(1L, 3L), sum) - 1)
+      # Founder sums per sample and marker. rowSums() over the founders, the last
+      # dimension after aperm(), accumulates the same values in the same order
+      # and precision as sum() and gives the same sample x marker matrix as
+      # apply(chunk, c(1, 3), sum), without one interpreted call per entry.
+      deviations <- abs(rowSums(aperm(chunk, c(1L, 3L, 2L)), dims = 2L) - 1)
       sum_tolerance <- if (probability_policy == "strict") 1e-6 else dim(arr)[2L] * 5e-5
       if (any(deviations > sum_tolerance + 16 * .Machine$double.eps)) {
         stop(sprintf(paste0("allele_probs must sum to 1 over founders: maximum observed |sum - 1|=%.8g; ",
@@ -193,10 +197,10 @@ qtl2mr_allele_prob_markers <- function(allele_probs, markers_to_validate = NULL,
     if (i > 1L && !identical(dn[[2L]], dimnames(allele_probs[[1L]])[[2L]])) {
       stop("allele_probs founder names and order must match across chromosomes", call. = FALSE)
     }
-    markers <- dn[[3L]]
-    rows[[length(rows) + 1L]] <- data.frame(marker = markers, chr = chr_names[[i]], stringsAsFactors = FALSE)
+    marker_names[[i]] <- dn[[3L]]
   }
-  out <- do.call(rbind, rows)
+  out <- data.frame(marker = unlist(marker_names, use.names = FALSE),
+    chr = rep(chr_names, lengths(marker_names)), stringsAsFactors = FALSE)
   qtl2mr_validate_ids(out$marker, "allele_probs marker names")
   attr(out, "probability_normalization") <- do.call(rbind, adjustments)
   out
@@ -216,11 +220,13 @@ qtl2mr_probability_policy_disclosed <- function(previous, current) {
   identical(old, now)
 }
 
-qtl2mr_record_probability_policy <- function(input, markers = NULL, warn = FALSE) {
+# marker_info may pass the table that validation already computed with the same
+# markers and policy, so the probabilities are checked only once.
+qtl2mr_record_probability_policy <- function(input, markers = NULL, warn = FALSE, marker_info = NULL) {
   previous <- input$metadata$probability_normalization
   policy <- input$probability_policy %||% "strict"
   if (is.null(markers)) markers <- if (is.data.frame(input$selected_loci)) input$selected_loci$marker else input$selected_loci
-  marker_info <- qtl2mr_allele_prob_markers(input$allele_probs, markers, probability_policy = policy)
+  if (is.null(marker_info)) marker_info <- qtl2mr_allele_prob_markers(input$allele_probs, markers, probability_policy = policy)
   adjustment <- attr(marker_info, "probability_normalization") %||% data.frame(
     chr = character(), marker = character(), n_normalized = integer(),
     max_abs_sum_deviation = numeric(), stringsAsFactors = FALSE)
@@ -244,7 +250,10 @@ qtl2mr_prepared_probability_copy <- function(input, markers) {
     warning("Founder probability rounding normalized for analysis; inspect prepared_metadata$probability_normalization. Original input arrays are unchanged.", call. = FALSE)
   }
   for (chr in unique(record$adjustments$chr)) {
+    # Only the requested markers are read from the prepared copy, so only they
+    # are copied; the values are normalized exactly as before.
     arr <- input$allele_probs[[chr]]
+    arr <- arr[, , dimnames(arr)[[3L]] %in% markers, drop = FALSE]
     for (marker in record$adjustments$marker[record$adjustments$chr == chr]) {
       values <- arr[, , marker, drop = FALSE]
       sums <- apply(values, 1L, sum)
@@ -275,6 +284,19 @@ validate_qtl2mr_input <- function(input,
                                   require_selected_loci = FALSE,
                                   exposure = NULL,
                                   outcome = NULL) {
+  qtl2mr_validate_input_table(input, founder_dim = founder_dim, require_selected_loci = require_selected_loci,
+    exposure = exposure, outcome = outcome)
+  invisible(TRUE)
+}
+
+# The checks of validate_qtl2mr_input(); returns the allele probability marker
+# table (with its probability_normalization record) so that callers recording
+# the probability policy for the same markers need not check them again.
+qtl2mr_validate_input_table <- function(input,
+                                        founder_dim = 8L,
+                                        require_selected_loci = FALSE,
+                                        exposure = NULL,
+                                        outcome = NULL) {
   if (!inherits(input, "qtl2mr_prepared_input") && !is.list(input)) {
     stop("input must be a qtl2mr_prepared_input or compatible list", call. = FALSE)
   }
@@ -364,10 +386,9 @@ validate_qtl2mr_input <- function(input,
   if (any(gp_markers$chr != marker_tab$chr[match(gp_markers$marker, marker_tab$marker)])) stop("marker_map chromosome assignments disagree with allele_probs", call. = FALSE)
   if (!is.null(input$kinship)) {
     kinships <- qtl2mr_prepared_kinship_list(input$kinship)
-    selected_chr <- unique(qtl2mr_marker_map_table(input$marker_map)$chr)
+    selected_chr <- unique(marker_tab$chr)
     if (!is.null(selected_markers)) {
-      map0 <- qtl2mr_marker_map_table(input$marker_map)
-      selected_chr <- unique(map0$chr[match(selected_markers, map0$marker)])
+      selected_chr <- unique(marker_tab$chr[match(selected_markers, marker_tab$marker)])
     }
     if (is.list(input$kinship) && !is.matrix(input$kinship) && !is.data.frame(input$kinship)) {
       missing_chr <- setdiff(as.character(selected_chr), names(kinships))
@@ -382,17 +403,22 @@ validate_qtl2mr_input <- function(input,
     if (!length(role_ids)) role_ids <- intersect(ids, rownames(pheno))
     for (nm in names(kinships) %||% as.character(seq_along(kinships))) {
       K <- as.matrix(kinships[[nm]])
-      if (!is.numeric(K) || nrow(K) != ncol(K) || any(!is.finite(K))) stop("kinship must be a finite numeric square matrix", call. = FALSE)
-      qtl2mr_validate_ids(rownames(K), "kinship row names")
-      qtl2mr_validate_ids(colnames(K), "kinship column names")
-      if (!identical(rownames(K), colnames(K))) stop("kinship row and column names must have the same order", call. = FALSE)
-      if (!isTRUE(all.equal(K, t(K), tolerance = 1e-8))) stop("kinship must be symmetric", call. = FALSE)
-      if (is.null(rownames(K)) || is.null(colnames(K))) stop("kinship matrices must have row and column names", call. = FALSE)
+      # These checks depend on the matrix alone; a matrix identical to one that
+      # passed them before passes them again.
+      if (!qtl2mr_kinship_checked(K)) {
+        if (!is.numeric(K) || nrow(K) != ncol(K) || any(!is.finite(K))) stop("kinship must be a finite numeric square matrix", call. = FALSE)
+        qtl2mr_validate_ids(rownames(K), "kinship row names")
+        qtl2mr_validate_ids(colnames(K), "kinship column names")
+        if (!identical(rownames(K), colnames(K))) stop("kinship row and column names must have the same order", call. = FALSE)
+        if (!isTRUE(all.equal(K, t(K), tolerance = 1e-8))) stop("kinship must be symmetric", call. = FALSE)
+        if (is.null(rownames(K)) || is.null(colnames(K))) stop("kinship matrices must have row and column names", call. = FALSE)
+        qtl2mr_kinship_checked_add(K)
+      }
       missing_k <- setdiff(role_ids, intersect(rownames(K), colnames(K)))
       if (length(missing_k)) stop("kinship ", nm, " is missing sample IDs: ", paste(utils::head(missing_k, 5L), collapse = ", "), call. = FALSE)
     }
   }
-  invisible(TRUE)
+  invisible(gp_markers)
 }
 
 qtl2mr_prepared_role_filter <- function(input, role) {

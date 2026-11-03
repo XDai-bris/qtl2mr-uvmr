@@ -52,8 +52,9 @@ qtl2mr_prepare_resources <- function(allele_probs,
     probability_policy = probability_policy
   )
   class(out) <- c("qtl2mr_resources", "list")
-  validate_qtl2mr_input(out)
-  out <- qtl2mr_record_probability_policy(out, warn = TRUE)
+  # One genome-wide probability check serves validation and the record.
+  marker_info <- qtl2mr_validate_input_table(out)
+  out <- qtl2mr_record_probability_policy(out, warn = TRUE, marker_info = marker_info)
   out$sample_alignment <- qtl2mr_input_alignment(out)
   qtl2mr_warn_alignment(out$sample_alignment)
   out
