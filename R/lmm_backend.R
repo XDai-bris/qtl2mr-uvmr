@@ -124,7 +124,14 @@ qtl2mr_hsq_profile <- function(h,
   if (qr_design$rank != p || n <= p) return(Inf)
   residual <- qr.resid(qr_design, y_weighted)
   rss <- as.numeric(crossprod(residual))
-  if (!is.finite(rss) || rss <= .Machine$double.eps * sum(y_weighted^2)) return(Inf)
+  # The zero-residual check is relative to the spread around the fitted
+  # intercept (the first design column), so it does not depend on the trait's
+  # location or units. A trait that is constant to rounding error is refused too.
+  intercept <- design_weighted[, 1L]
+  centred <- y_weighted - intercept * (sum(intercept * y_weighted) / sum(intercept^2))
+  centred_ss <- sum(centred^2)
+  rounding_ss <- n * (64 * .Machine$double.eps * max(abs(y_weighted)))^2
+  if (!is.finite(rss) || centred_ss <= rounding_ss || rss <= .Machine$double.eps * centred_ss) return(Inf)
   if (isTRUE(reml)) {
     logdet_weighted <- as.numeric(determinant(crossprod(design_weighted), logarithm = TRUE)$modulus)
     if (!is.finite(logdet_weighted)) return(Inf)

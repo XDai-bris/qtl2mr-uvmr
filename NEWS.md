@@ -331,6 +331,11 @@ ordinary scans; MR estimates for a given instrument set are unchanged.
 - Markers with a missing or non-finite LOD are skipped by every rule instead of
   splitting a peak region. A peak region that reaches the first or last marker
   of a chromosome is handled by every rule.
+- The REML heritability profile no longer fails for a trait with a large
+  constant offset when `standardize_phenotypes = FALSE` and a kinship matrix is
+  used (introduced in 0.6.1). The check for a zero residual sum of squares is
+  now relative to the trait's spread around its mean rather than its raw sum
+  of squares; estimates for ordinary inputs are unchanged.
 
 # qtl2mr 0.6.1
 
