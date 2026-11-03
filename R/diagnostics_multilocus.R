@@ -129,14 +129,29 @@ qtl2mr_bootstrap_scalar_sensitivities <- function(theta,
     median <- rep(NA_real_, B)
     mode <- rep(NA_real_, B)
     n <- length(theta)
-    for (b in seq_len(B)) {
-      tb <- theta + se * stats::rnorm(n)
-      if (any(!is.finite(tb))) next
-      median[[b]] <- qtl2mr_weighted_median(tb, w)
-      mode[[b]] <- tryCatch(
+    draw <- function(tb) {
+      if (any(!is.finite(tb))) return(c(NA_real_, NA_real_))
+      c(qtl2mr_weighted_median(tb, w), tryCatch(
         qtl2mr_weighted_mode(tb, w, bandwidth = mode_bandwidth),
         error = function(e) NA_real_
-      )
+      ))
+    }
+    if (qtl2mr_can_fork(qtl2mr_current_workers(), B)) {
+      # All draws are taken here, in the order of the sequential loop below.
+      draws <- lapply(seq_len(B), function(b) theta + se * stats::rnorm(n))
+      values <- qtl2mr_ordered_lapply(draws, draw)
+      median <- vapply(values, `[[`, numeric(1), 1L)
+      mode <- vapply(values, `[[`, numeric(1), 2L)
+    } else {
+      for (b in seq_len(B)) {
+        tb <- theta + se * stats::rnorm(n)
+        if (any(!is.finite(tb))) next
+        median[[b]] <- qtl2mr_weighted_median(tb, w)
+        mode[[b]] <- tryCatch(
+          qtl2mr_weighted_mode(tb, w, bandwidth = mode_bandwidth),
+          error = function(e) NA_real_
+        )
+      }
     }
     data.frame(median = median, mode = mode)
   })

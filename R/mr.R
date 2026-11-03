@@ -137,8 +137,25 @@ qtl2mr_so_coordinates <- function(blocks, allow_cross_cov, ridge) {
   list(blocks = normalized, scale = scale, evaluate = evaluate)
 }
 
+# Objective values at the search anchors. An anchor equal to a grid point is
+# that grid point (unique() keeps the first copy), and evaluate() is a
+# deterministic function of alpha, so its grid value is reused; only the
+# refined extrema are evaluated.
+qtl2mr_anchor_values <- function(anchors, grid, values, evaluate) {
+  idx <- match(anchors, grid)
+  out <- numeric(length(anchors))
+  on_grid <- !is.na(idx)
+  out[on_grid] <- values[idx[on_grid]]
+  out[!on_grid] <- vapply(anchors[!on_grid], evaluate, numeric(1))
+  out
+}
+
+# q_only = TRUE returns list(Q = ...) only, for Q-simulation draws: the search
+# and the minimum are those of the full fit. The profile set is still formed,
+# because its root finding can signal warnings; the curvature, the profile
+# p-value and the result fields are skipped.
 qtl2mr_so_fit <- function(locus_blocks, allow_cross_cov = TRUE, ridge = 1e-10,
-                         theta_grid = NULL) {
+                         theta_grid = NULL, q_only = FALSE) {
   coordinates <- qtl2mr_so_coordinates(locus_blocks, allow_cross_cov, ridge)
   scale <- coordinates$scale
   nonfinite_interior <- FALSE
@@ -207,10 +224,14 @@ qtl2mr_so_fit <- function(locus_blocks, allow_cross_cov = TRUE, ridge = 1e-10,
     if (opt$objective < min(values[ii])) minima <- c(minima, opt$minimum)
   }
   anchors <- sort(unique(c(grid, minima, maxima)))
-  q_anchor <- vapply(anchors, evaluate, numeric(1))
+  q_anchor <- qtl2mr_anchor_values(anchors, grid, values, evaluate)
   best <- which.min(q_anchor)
   alpha_hat <- anchors[[best]]
   q_min <- q_anchor[[best]]
+  if (isTRUE(q_only)) {
+    qtl2mr_profile_set(evaluate, anchors, q_anchor, q_min, scale)
+    return(list(Q = q_min))
+  }
   tails <- c(negative = values[[1L]], positive = values[[length(values)]])
   at_infinity <- best %in% c(1L, length(anchors)) ||
     min(tails) <= q_min + 1e-10 * max(1, abs(q_min))
@@ -285,8 +306,8 @@ second_order_gls_ivw <- function(beta_x, beta_y, Sigma_x, Sigma_y,
 }
 
 qtl2mr_fit_multilocus_once <- function(locus_blocks, allow_cross_cov = TRUE,
-                                       ridge = 1e-10, theta_grid = NULL) {
-  qtl2mr_so_fit(locus_blocks, allow_cross_cov, ridge, theta_grid)
+                                       ridge = 1e-10, theta_grid = NULL, q_only = FALSE) {
+  qtl2mr_so_fit(locus_blocks, allow_cross_cov, ridge, theta_grid, q_only = q_only)
 }
 
 calibrate_multilocus_q <- function(locus_blocks,
@@ -357,25 +378,41 @@ calibrate_multilocus_q <- function(locus_blocks,
     report_every <- max(1L, ceiling(nsim / 10L))
     qtl2mr_progress(progress_callback, 2L, "Simulate heterogeneity Q",
       sprintf("0/%d draws; each draw refits the common-effect model", nsim))
-    for (s in seq_len(nsim)) {
-      sim_blocks <- lapply(sim_info, function(info) {
-        b <- info$block
-        by <- theta0 * info$beta_x +
-          as.numeric(info$vectors %*% (info$scales * stats::rnorm(length(info$beta_x))))
-        names(by) <- info$beta_y_names
-        b$beta_y <- by
-        b
-      })
-      q_sim[[s]] <- qtl2mr_fit_multilocus_once(
-        locus_blocks = sim_blocks,
-        allow_cross_cov = allow_cross_cov,
-        ridge = ridge,
-        theta_grid = theta_grid
-      )$Q
+    report <- function(s) {
       if (s %% report_every == 0L || s == nsim) {
         qtl2mr_progress(progress_callback, 2L, "Simulate heterogeneity Q",
           sprintf("%d/%d draws; %.1f s elapsed", s, nsim,
             proc.time()[["elapsed"]] - started))
+      }
+    }
+    draw_q <- function(z) {
+      sim_blocks <- lapply(seq_along(sim_info), function(j) {
+        info <- sim_info[[j]]
+        b <- info$block
+        by <- theta0 * info$beta_x + as.numeric(info$vectors %*% (info$scales * z[[j]]))
+        names(by) <- info$beta_y_names
+        b$beta_y <- by
+        b
+      })
+      qtl2mr_fit_multilocus_once(
+        locus_blocks = sim_blocks,
+        allow_cross_cov = allow_cross_cov,
+        ridge = ridge,
+        theta_grid = theta_grid,
+        q_only = TRUE
+      )$Q
+    }
+    if (qtl2mr_can_fork(qtl2mr_current_workers(), nsim)) {
+      # The normal draws are taken here in the order of the sequential loop
+      # below; the workers only refit.
+      z <- lapply(seq_len(nsim), function(s) {
+        lapply(sim_info, function(info) stats::rnorm(length(info$beta_x)))
+      })
+      q_sim <- unlist(qtl2mr_ordered_lapply(z, draw_q, after = report), use.names = FALSE)
+    } else {
+      for (s in seq_len(nsim)) {
+        q_sim[[s]] <- draw_q(lapply(sim_info, function(info) stats::rnorm(length(info$beta_x))))
+        report(s)
       }
     }
     exceed <- sum(q_sim >= q_obs, na.rm = TRUE)

@@ -45,7 +45,7 @@ loo_multilocus_founder_mr <- function(fit,
     class(out) <- c("qtl2mr_loo_mr", "data.frame")
     return(out)
   }
-  rows <- lapply(seq_along(blocks), function(i) {
+  rows <- qtl2mr_ordered_lapply(seq_along(blocks), function(i) {
     b <- blocks[[i]]
     marker <- b$marker %||% names(blocks)[[i]] %||% paste0("locus_", i)
     keep <- blocks[-i]
@@ -299,7 +299,7 @@ fit_instrument_set_sensitivity <- function(result,
   }
   if (!is.list(sets) || !length(sets)) stop("sets must be a non-empty named list of marker vectors", call. = FALSE)
   if (is.null(names(sets)) || any(!nzchar(names(sets)))) names(sets) <- paste0("set_", seq_along(sets))
-  rows <- lapply(seq_along(sets), function(i) {
+  rows <- qtl2mr_ordered_lapply(seq_along(sets), function(i) {
     nm <- names(sets)[[i]]
     refit <- tryCatch(
       refit_qtl2mr_subset(

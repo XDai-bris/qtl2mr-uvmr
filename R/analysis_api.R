@@ -1774,10 +1774,16 @@ run_qtl2mr_analysis <- function(input,
                                 cross_cov_model = c("star", "raw", "zero"),
                                 run_loo_mr = TRUE,
                                 run_instrument_sensitivity = TRUE,
-                                progress = NULL) {
+                                progress = NULL,
+                                n_workers = 1L) {
   if (!inherits(input, "qtl2mr_prepared_input")) {
     stop("input must be created by as_qtl2mr_prepared_input() or qtl2mr_pair_input()", call. = FALSE)
   }
+  n_workers <- qtl2mr_check_count(n_workers, "n_workers")
+  # Refits of the Q simulation, bootstrap, LOO and instrument-set sensitivity
+  # may run in forked workers; random numbers are drawn in this process.
+  old_workers <- qtl2mr_set_workers(n_workers)
+  on.exit(qtl2mr_set_workers(old_workers), add = TRUE)
   settings <- qtl2mr_fit_settings(
     on_nonestimable_locus = match.arg(on_nonestimable_locus),
     reported_estimator_policy = match.arg(reported_estimator_policy),
