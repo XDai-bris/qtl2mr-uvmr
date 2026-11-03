@@ -141,8 +141,8 @@ if (requireNamespace("qtl2", quietly = TRUE)) {
 ```
 
 The invented genotypes have no recombination, so LOD is flat along each
-chromosome and the selector keeps one peak per above-threshold region; real
-scans have sharper peaks. The table records the exposure block F of each
+chromosome and the selector keeps at most one peak per chromosome; real scans have
+sharper peaks. The table records the exposure block F of each
 candidate and whether it was selected.
 
 ## Decide the instruments, then fit both traits at those loci
@@ -176,9 +176,10 @@ usable information for the Y LMM to be estimable. A union of X and Y peaks
 is a different instrument-selection rule, not something the package silently
 adds. Reverse-direction MR needs its own prespecified instrument choice.
 
-The selector picks one maximum per contiguous above-threshold region on
-each chromosome. This is not LD pruning, a permutation-derived significance
-threshold, or evidence that different selected loci are independent.
+The selector uses the qtl2 peak rule on each chromosome: a second peak needs
+the LOD to drop by more than `peakdrop` (default 1.5) between the two. This is
+not LD pruning, a permutation-derived significance threshold, or evidence that
+different selected loci are independent.
 
 ## Many exposure-outcome pairs
 

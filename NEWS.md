@@ -1,3 +1,29 @@
+# qtl2mr 0.6.1.9000 (development)
+
+Not released. Instrument selection changes for ordinary scans; MR estimates for
+a given instrument set are unchanged.
+
+- `qtl2mr_select_instruments()` now finds LOD peaks with the qtl2 peak rule
+  (`peak_rule = "peakdrop"`, the new default): on each chromosome, a second
+  peak needs the LOD to fall by more than `peakdrop` (default 1.5) below the
+  current peak and rise again by more than `peakdrop`, as in
+  `qtl2::find_peaks()`. Each peak is represented by its maximum-LOD marker. A
+  marker exactly at `lod_thresh` still counts as above it. Earlier versions
+  took the maximum of every contiguous run with LOD ≥ `lod_thresh`, so a QTL
+  whose LOD hovered around the threshold was split into several nearby
+  candidates with nearly identical founder effects, and a separate peak inside
+  a long above-threshold run was missed.
+- Two other rules are available: `peak_rule = "spacing"` keeps the old
+  candidates in decreasing LOD and drops any within `min_spacing` (default
+  1 Mb, in marker-map units) of one already kept, as a sensitivity analysis;
+  `peak_rule = "legacy"` gives the 0.6.1 selection, for reproducing earlier
+  results only. No rule is LD pruning.
+- The instrument table records the rule: `selected_by`, `peak_rule`,
+  `peakdrop`, `min_spacing` and `rule_version`.
+- Markers with a missing or non-finite LOD are skipped by every rule instead of
+  splitting a peak region. A peak region that reaches the first or last marker
+  of a chromosome is handled by every rule.
+
 # qtl2mr 0.6.1
 
 A patch release from a post-release audit. Estimates for ordinary inputs are

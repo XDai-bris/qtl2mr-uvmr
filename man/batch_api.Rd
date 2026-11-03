@@ -18,8 +18,9 @@ qtl2mr_prepare_resources(allele_probs, kinship, pheno, covar,
   probability_policy = c("normalize_rounding", "strict"))
 
 qtl2mr_select_instruments(resources, qtl_scan, exposures = NULL,
-  lod_thresh = 4, exclude_chr = "X", max_loci = NULL, F_X_min = NULL,
-  n_workers = 1L, progress = TRUE)
+  lod_thresh = 4, peak_rule = c("peakdrop", "spacing", "legacy"),
+  peakdrop = 1.5, min_spacing = 1, exclude_chr = "X", max_loci = NULL,
+  F_X_min = NULL, n_workers = 1L, progress = TRUE)
 
 qtl2mr_pair_input(resources, instruments, exposure, outcome)
 
@@ -58,10 +59,19 @@ copy, with a warning and an adjustment record; \code{"strict"} rejects them.}
 a marker-named LOD vector for one trait.}
 \item{exposures}{Traits to select instruments for; \code{NULL} uses every trait
 in \code{qtl_scan}. Each must be a numeric column of \code{pheno}.}
-\item{lod_thresh}{LOD threshold for peak picking: within each chromosome, the
-maximum of each contiguous region above the threshold, in map order (marker
-positions, or map rows when positions are missing), is a candidate. It is a
-selection rule, not a significance calibration.}
+\item{lod_thresh}{LOD threshold for peak picking: only markers with
+LOD \eqn{\ge} \code{lod_thresh} can be peaks. It is a selection rule, not a
+significance calibration.}
+\item{peak_rule}{How LOD peaks become candidates; see Details.
+\code{"peakdrop"} (default) is the qtl2 peak rule; \code{"spacing"} is a
+sensitivity rule; \code{"legacy"} reproduces qtl2mr 0.6.1 and earlier and is
+meant only for reproducing earlier results.}
+\item{peakdrop}{For \code{peak_rule = "peakdrop"}: the LOD drop that separates
+two peaks on one chromosome (default 1.5). \code{Inf} keeps one peak per
+chromosome.}
+\item{min_spacing}{For \code{peak_rule = "spacing"}: the minimum distance
+between kept candidates on one chromosome, in the units of the marker map
+positions (Mb for a qtl2 physical map; default 1).}
 \item{exclude_chr}{Chromosomes left out of the candidate table (default
 \code{"X"}; only autosomal loci can be fitted).}
 \item{max_loci}{Optional cap on the number of selected loci per exposure,
@@ -111,8 +121,25 @@ written by \code{run_qtl2mr_batch()} are removed.}
 }
 \details{
 \if{latex}{\out{\sloppy}}
-\code{qtl2mr_select_instruments()} works on the exposure only. For every LOD
-candidate it fits the exposure founder LMM with the same samples, covariates,
+\code{qtl2mr_select_instruments()} works on the exposure only. LOD candidates
+are found separately on each chromosome, in map order (marker positions, then
+marker map rows; map rows alone when positions are missing), and never across
+a chromosome boundary. Markers with a missing or non-finite LOD are skipped.
+With \code{peak_rule = "peakdrop"}, as in \code{qtl2::find_peaks()} without
+intervals, a new peak starts only after the LOD has fallen by more than
+\code{peakdrop} below the current peak and risen again by more than
+\code{peakdrop}; otherwise a higher LOD moves the current peak. Each peak is
+represented by its maximum-LOD marker (the first in map order when tied).
+Unlike qtl2, a marker exactly at \code{lod_thresh} counts as above the
+threshold. With \code{peak_rule = "legacy"} the candidates are the maxima of
+each contiguous run of markers with LOD \eqn{\ge} \code{lod_thresh}, so a
+QTL whose LOD dips below the threshold is split into several candidates; this
+was the only rule before qtl2mr 0.7.0. \code{peak_rule = "spacing"} takes the
+legacy candidates in decreasing LOD and drops any within \code{min_spacing} of
+one already kept on the same chromosome. No rule is LD pruning: nearby peaks
+can still carry correlated founder haplotypes.
+
+For every LOD candidate it fits the exposure founder LMM with the same samples, covariates,
 LOCO kinship and null-model hsq as the MR analysis and records the block F,
 \code{F_X_block}: the joint Wald statistic of the seven founder contrasts
 divided by 7 (see the README for its scale). It equals the block F of every pair
@@ -162,7 +189,11 @@ report, including the Steiger direction check.
 candidate: \code{exposure}, \code{marker}, \code{chr}, \code{pos}, \code{lod},
 \code{F_X_block}, \code{n_x}, \code{hsq_x}, \code{selected},
 \code{drop_reason}, \code{locus_rank} (rank among selected loci by LOD),
-\code{selected_by} and the settings \code{lod_thresh}, \code{F_X_min},
+\code{selected_by} (\code{"lod_peakdrop_max"},
+\code{"lod_island_max_min_spacing"} or \code{"contiguous_lod_island_max"}) and
+the settings \code{lod_thresh}, \code{peak_rule}, \code{peakdrop} and
+\code{min_spacing} (each \code{NA} when the rule does not use it),
+\code{rule_version} (\code{"tophit_v1"} or \code{"legacy"}), \code{F_X_min},
 \code{max_loci} and \code{exclude_chr}.
 
 \code{qtl2mr_pair_input()} returns a \code{qtl2mr_prepared_input} for

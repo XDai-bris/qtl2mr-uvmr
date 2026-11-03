@@ -67,6 +67,22 @@ qtl2mr_validate_lod_thresh <- function(lod_thresh) {
   as.numeric(lod_thresh)
 }
 
+qtl2mr_validate_peakdrop <- function(peakdrop) {
+  if (!is.numeric(peakdrop) || is.logical(peakdrop) || length(peakdrop) != 1L ||
+      is.na(peakdrop) || peakdrop <= 0) {
+    stop("peakdrop must be one numeric value > 0 (Inf keeps one peak per chromosome)", call. = FALSE)
+  }
+  as.numeric(peakdrop)
+}
+
+qtl2mr_validate_min_spacing <- function(min_spacing) {
+  if (!is.numeric(min_spacing) || is.logical(min_spacing) || length(min_spacing) != 1L ||
+      !is.finite(min_spacing) || min_spacing <= 0) {
+    stop("min_spacing must be one finite numeric value > 0", call. = FALSE)
+  }
+  as.numeric(min_spacing)
+}
+
 qtl2mr_check_count <- function(x, name, allow_null = FALSE) {
   if (allow_null && is.null(x)) return(NULL)
   if (!is.numeric(x) || length(x) != 1L || !is.finite(x) || x < 1 || x != as.integer(x)) {
@@ -153,10 +169,27 @@ qtl2mr_lod_vector_from_scan <- function(qtl_scan, trait) {
   lod
 }
 
-# LOD peaks of one trait: the maximum of each contiguous above-threshold region,
-# defined in map order (positions, or map rows when positions are missing) within
-# a chromosome, never across a chromosome boundary.
-qtl2mr_scan_candidates <- function(qtl_scan, marker_map, trait, lod_thresh, exclude_chr) {
+qtl2mr_peak_rules <- c("peakdrop", "spacing", "legacy")
+
+# How each peak rule is recorded in the instrument table.
+qtl2mr_peak_rule_record <- function(peak_rule, peakdrop, min_spacing) {
+  list(
+    selected_by = switch(peak_rule, peakdrop = "lod_peakdrop_max",
+      spacing = "lod_island_max_min_spacing", legacy = "contiguous_lod_island_max"),
+    peakdrop = if (identical(peak_rule, "peakdrop")) peakdrop else NA_real_,
+    min_spacing = if (identical(peak_rule, "spacing")) min_spacing else NA_real_,
+    rule_version = if (identical(peak_rule, "legacy")) "legacy" else "tophit_v1"
+  )
+}
+
+# LOD peaks of one trait, found in map order (positions, then map rows; map rows
+# alone when positions are missing) within a chromosome, never across a
+# chromosome boundary. "peakdrop" is the qtl2 peak rule, "spacing" keeps the
+# legacy candidates at least min_spacing apart, and "legacy" is the contiguous
+# LOD-island rule of qtl2mr 0.6.1 and earlier.
+qtl2mr_scan_candidates <- function(qtl_scan, marker_map, trait, lod_thresh, exclude_chr,
+                                   peak_rule = "peakdrop", peakdrop = 1.5, min_spacing = 1) {
+  peak_rule <- match.arg(peak_rule, qtl2mr_peak_rules)
   lod <- qtl2mr_lod_vector_from_scan(qtl_scan, trait)
   mm <- marker_map
   map_idx <- match(names(lod), mm$marker)
@@ -164,8 +197,17 @@ qtl2mr_scan_candidates <- function(qtl_scan, marker_map, trait, lod_thresh, excl
   peak_idx <- unlist(lapply(unique(mm$chr[map_idx]), function(chr) {
     idx <- which(mm$chr[map_idx] == chr)
     pos <- mm$pos[map_idx[idx]]
-    idx <- if (all(is.finite(pos))) idx[order(pos, map_idx[idx])] else idx[order(map_idx[idx])]
-    idx[qtl2mr_get_tophits(lod[idx], lod_thresh = lod_thresh)]
+    has_pos <- !is.null(pos) && all(is.finite(pos))
+    idx <- if (has_pos) idx[order(pos, map_idx[idx])] else idx[order(map_idx[idx])]
+    rule <- if (identical(peak_rule, "peakdrop")) "peakdrop" else "lod_island"
+    peaks <- qtl2mr_get_tophits(lod[idx], lod_thresh = lod_thresh, rule = rule, peakdrop = peakdrop)
+    if (identical(peak_rule, "spacing") && length(peaks) > 1L) {
+      if (!has_pos) {
+        stop("peak_rule = \"spacing\" needs finite marker positions in marker_map", call. = FALSE)
+      }
+      peaks <- qtl2mr_space_peaks(peaks, lod[idx], mm$pos[map_idx[idx]], min_spacing)
+    }
+    idx[peaks]
   }), use.names = FALSE)
   idx <- match(names(lod)[peak_idx], mm$marker)
   out <- data.frame(exposure = rep(trait, length(peak_idx)), marker = names(lod)[peak_idx],
@@ -248,7 +290,7 @@ qtl2mr_empty_instruments <- function() {
 
 # Candidates arrive sorted by LOD. Non-autosomal and non-estimable loci can never
 # be used; the F rule and then max_loci decide among the rest.
-qtl2mr_instrument_rows <- function(candidates, first_stage, F_X_min, max_loci) {
+qtl2mr_instrument_rows <- function(candidates, first_stage, F_X_min, max_loci, selected_by) {
   if (!nrow(candidates)) return(qtl2mr_empty_instruments())
   reason <- rep("", nrow(candidates))
   reason[!qtl2mr_is_autosome(candidates$chr)] <- "non_autosomal"
@@ -264,13 +306,16 @@ qtl2mr_instrument_rows <- function(candidates, first_stage, F_X_min, max_loci) {
   data.frame(candidates, F_X_block = first_stage$F_X_block, n_x = first_stage$n_x,
     hsq_x = first_stage$hsq_x, selected = selected, drop_reason = reason,
     locus_rank = ifelse(selected, cumsum(selected), NA_integer_),
-    selected_by = rep("contiguous_lod_island_max", nrow(candidates)), stringsAsFactors = FALSE)
+    selected_by = rep(selected_by, nrow(candidates)), stringsAsFactors = FALSE)
 }
 
 qtl2mr_select_instruments <- function(resources,
                                       qtl_scan,
                                       exposures = NULL,
                                       lod_thresh = 4,
+                                      peak_rule = c("peakdrop", "spacing", "legacy"),
+                                      peakdrop = 1.5,
+                                      min_spacing = 1,
                                       exclude_chr = "X",
                                       max_loci = NULL,
                                       F_X_min = NULL,
@@ -278,6 +323,15 @@ qtl2mr_select_instruments <- function(resources,
                                       progress = TRUE) {
   if (!inherits(resources, "qtl2mr_resources")) stop("resources must come from qtl2mr_prepare_resources()", call. = FALSE)
   lod_thresh <- qtl2mr_validate_lod_thresh(lod_thresh)
+  peak_rule <- match.arg(peak_rule)
+  peakdrop <- qtl2mr_validate_peakdrop(peakdrop)
+  min_spacing <- qtl2mr_validate_min_spacing(min_spacing)
+  rule_record <- qtl2mr_peak_rule_record(peak_rule, peakdrop, min_spacing)
+  map_pos <- suppressWarnings(as.numeric(resources$marker_map$pos))
+  if (identical(peak_rule, "spacing") && any(is.finite(map_pos) & map_pos > 1e4)) {
+    warning("marker_map positions exceed 10,000, which looks like base pairs; min_spacing is in ",
+      "the units of marker_map positions (Mb for a qtl2 physical map)", call. = FALSE)
+  }
   max_loci <- qtl2mr_check_count(max_loci, "max_loci", allow_null = TRUE)
   if (!is.null(F_X_min) && (!is.numeric(F_X_min) || length(F_X_min) != 1L || !is.finite(F_X_min) || F_X_min < 0)) {
     stop("F_X_min must be NULL or one non-negative number", call. = FALSE)
@@ -296,7 +350,8 @@ qtl2mr_select_instruments <- function(resources,
       "use a scan with trait column names or one exposure per call", call. = FALSE)
   }
   candidates <- lapply(exposures, function(trait) {
-    qtl2mr_scan_candidates(qtl_scan, resources$marker_map, trait, lod_thresh, exclude_chr)
+    qtl2mr_scan_candidates(qtl_scan, resources$marker_map, trait, lod_thresh, exclude_chr,
+      peak_rule = peak_rule, peakdrop = peakdrop, min_spacing = min_spacing)
   })
   markers <- unique(unlist(lapply(candidates, function(d) d$marker[qtl2mr_is_autosome(d$chr)]), use.names = FALSE))
   input <- NULL
@@ -313,7 +368,7 @@ qtl2mr_select_instruments <- function(resources,
     if (any(auto)) {
       first_stage[auto, ] <- qtl2mr_exposure_first_stage(input, exposures[[i]], cand[auto, , drop = FALSE])
     }
-    qtl2mr_instrument_rows(cand, first_stage, F_X_min, max_loci)
+    qtl2mr_instrument_rows(cand, first_stage, F_X_min, max_loci, rule_record$selected_by)
   }
   index <- seq_along(exposures)
   if (n_workers > 1L && length(exposures) > 1L && identical(.Platform$OS.type, "unix")) {
@@ -330,6 +385,10 @@ qtl2mr_select_instruments <- function(resources,
   }
   out <- do.call(rbind, c(list(qtl2mr_empty_instruments()), rows))
   out$lod_thresh <- rep(lod_thresh, nrow(out))
+  out$peak_rule <- rep(peak_rule, nrow(out))
+  out$peakdrop <- rep(rule_record$peakdrop, nrow(out))
+  out$min_spacing <- rep(rule_record$min_spacing, nrow(out))
+  out$rule_version <- rep(rule_record$rule_version, nrow(out))
   out$F_X_min <- rep(F_X_min %||% NA_real_, nrow(out))
   out$max_loci <- rep(max_loci %||% NA_integer_, nrow(out))
   out$exclude_chr <- rep(paste(exclude_chr, collapse = ","), nrow(out))

@@ -118,9 +118,14 @@ detail <- run_qtl2mr_analysis(qtl2mr_pair_input(resources, instruments, "x", "z"
                               output_dir = "x-to-z")
 ```
 
-`qtl2mr_select_instruments()` takes, for each exposure, one peak per
-contiguous above-threshold region per chromosome and fits the exposure at each
-candidate to report its block F (`F_X_block`). `F_X_min` optionally drops weak
+`qtl2mr_select_instruments()` finds the exposure's LOD peaks on each
+chromosome with the qtl2 peak rule (LOD ≥ `lod_thresh`, default 4; a new peak
+needs a drop of more than `peakdrop`, default 1.5, as in `qtl2::find_peaks()`)
+and fits the exposure at each peak to report its block F (`F_X_block`).
+`peak_rule = "spacing"` (candidates at least `min_spacing` Mb apart) is a
+sensitivity rule, and `peak_rule = "legacy"` reproduces the selection of qtl2mr
+0.6.1 and earlier, which split a QTL wherever its LOD dipped below the
+threshold. `F_X_min` optionally drops weak
 candidates; it is off by default. The table keeps every candidate with
 `selected` and `drop_reason`, so you can inspect it, edit it or write your own
 (only `exposure` and `marker` are required).
