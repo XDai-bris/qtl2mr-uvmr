@@ -26,7 +26,8 @@ run_qtl2mr_analysis(input, exposure = NULL, outcome = NULL,
   heterogeneity_nsim = 1000L, heterogeneity_seed = 1L,
   diagnostic_bootstrap_B = 500L, diagnostic_bootstrap_seed = 1L,
   standardize_phenotypes = TRUE, cross_cov_model = c("star", "raw", "zero"),
-  run_loo_mr = TRUE, run_instrument_sensitivity = TRUE, progress = NULL)
+  run_loo_mr = TRUE, run_instrument_sensitivity = TRUE, progress = NULL,
+  n_workers = 1L)
 
 \method{summary}{qtl2mr_analysis_result}(object, ...)
 
@@ -105,6 +106,12 @@ Steiger direction check (see Details).}
 \item{progress}{\code{NULL} follows \code{verbose}; \code{TRUE} prints progress
 messages and writes \code{logs/progress.log}; \code{"log"} only writes the log;
 \code{FALSE} disables both.}
+\item{n_workers}{Number of processes for the refits of the heterogeneity
+simulation, the diagnostic bootstrap, leave-one-locus-out and the
+instrument-set sensitivity. On Unix they run in parallel with
+\code{parallel::mclapply()}; elsewhere sequentially. Random numbers are drawn
+in the calling process in the same order as with one process, so results,
+warnings and the random number stream do not depend on \code{n_workers}.}
 \item{result}{A \code{qtl2mr_analysis_result}; for \code{report_qtl2mr_locus()}
 also a path to its \code{result_object.rds}.}
 \item{detail}{For \code{qtl2mr_output_paths()}, return the full file manifest

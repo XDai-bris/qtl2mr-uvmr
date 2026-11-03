@@ -22,7 +22,8 @@ qtl2mr_select_instruments(resources, qtl_scan, exposures = NULL,
   peakdrop = 1.5, min_spacing = 1, exclude_chr = "X", max_loci = NULL,
   F_X_min = NULL, n_workers = 1L, progress = TRUE)
 
-qtl2mr_pair_input(resources, instruments, exposure, outcome)
+qtl2mr_pair_input(resources, instruments, exposure, outcome,
+  sample_policy = c("own_complete", "pair_common_complete"))
 
 run_qtl2mr_batch(resources, pairs, instruments,
   on_nonestimable_locus = c("fail", "drop"),
@@ -32,7 +33,9 @@ run_qtl2mr_batch(resources, pairs, instruments,
   diagnostic_bootstrap_B = 0L, diagnostic_bootstrap_seed = 1L,
   standardize_phenotypes = TRUE, cross_cov_model = c("star", "raw", "zero"),
   min_samples = 50L, min_loci = 1L, n_workers = 1L, fail_fast = FALSE,
-  resume = FALSE, overwrite = FALSE, output_dir = NULL, progress = TRUE)
+  resume = FALSE, overwrite = FALSE, output_dir = NULL, progress = TRUE,
+  write_locus_blocks = FALSE,
+  sample_policy = c("own_complete", "pair_common_complete"))
 }
 \arguments{
 \if{latex}{\out{\sloppy}}
@@ -78,10 +81,11 @@ positions (Mb for a qtl2 physical map; default 1).}
 keeping the highest LOD peaks among those that pass the other rules.}
 \item{F_X_min}{Optional minimum block F for the exposure. \code{NULL} (default)
 does not filter on F.}
-\item{n_workers}{Number of processes. On Unix, exposures (selection) or groups
-of pairs sharing an exposure (batch) run in parallel with
-\code{parallel::mclapply()}; elsewhere they run sequentially. Results do not
-depend on \code{n_workers}.}
+\item{n_workers}{Number of processes. On Unix, exposures (selection) run in
+parallel with \code{parallel::mclapply()}; in a batch, the trait LMM fits are
+computed in parallel by trait and, when there are several exposures, the groups
+of pairs sharing an exposure run in parallel. Elsewhere everything runs
+sequentially. Results do not depend on \code{n_workers}.}
 \item{progress}{Print one progress line per exposure (selection) or per pair
 (batch; per exposure group when running in parallel).}
 \item{instruments}{Instrument table, or the path of a CSV file holding one,
@@ -118,6 +122,16 @@ but every exposure group is still run before the error is raised.}
 \item{overwrite}{Replace existing batch outputs in \code{output_dir}. Only files
 written by \code{run_qtl2mr_batch()} are removed.}
 \item{output_dir}{Optional output directory for CSV tables and resume records.}
+\item{write_locus_blocks}{Also write the per-locus founder blocks of every
+completed pair (requires \code{output_dir}); see Details. The default writes
+and returns nothing extra.}
+\item{sample_policy}{Samples each pair is fitted on. \code{"own_complete"}
+(default): the exposure and the outcome each use their own complete samples.
+\code{"pair_common_complete"}: both traits use the samples complete for both
+traits, the covariates and every instrument chromosome, as the 0.5.0 batch did;
+\code{min_samples} then applies to that common sample. For
+\code{qtl2mr_pair_input()} the same choice sets the samples of the single-pair
+input, so that a batch row equals the single analysis under either policy.}
 }
 \details{
 \if{latex}{\out{\sloppy}}
@@ -159,11 +173,36 @@ outcome))} with the same settings: the exposure and the outcome each use their
 own complete samples and their overlap enters the star-space covariance. The
 columns of \code{main_results} other than \code{pair_id}, \code{status},
 \code{error_message}, \code{locus_fit_status} and \code{runtime_sec} are
-identical to the same columns of the single-pair \code{main_result}. Locus fits
-that share a trait, chromosome, marker and sample set are computed once and
-reused across pairs; with \code{n_workers > 1} this reuse happens only within
-each exposure group. Pairs whose exposure has no selected instrument are recorded as
-\code{no_instruments} errors.
+identical to the same columns of the single-pair \code{main_result}. With
+\code{sample_policy = "pair_common_complete"} both traits use the pair's common
+complete samples instead, in the batch and in \code{qtl2mr_pair_input()} alike.
+Locus fits that share a trait, chromosome, marker, sample set and phenotype
+values are computed once and reused across pairs: the batch first fits, trait by
+trait, every locus its pairs need, then fits the pairs in order. Fits are kept
+for the R session (also those of \code{qtl2mr_select_instruments()} and of
+single analyses), within a fixed memory bound, and are released once no
+remaining pair of a batch needs them; reuse never changes a result. Pairs whose
+exposure has no selected instrument are recorded as \code{no_instruments}
+errors.
+
+With \code{write_locus_blocks = TRUE}, \code{batch_locus_blocks/pair_<index>.rds}
+holds, for each completed pair, a named list of per-locus blocks with
+\code{marker}, \code{chr}, \code{pos}, \code{beta_x}, \code{beta_y} (founder
+contrasts), \code{Sigma_x}, \code{Sigma_y}, \code{Sigma_xy} (as used by the
+estimator), \code{F_X_block}, \code{F_Y_block}, \code{partial_R2_X_block},
+\code{partial_R2_Y_block}, \code{steiger_pass}, \code{df_x}, \code{df_y},
+\code{n_x}, \code{n_y}, \code{n_overlap}, \code{hsq_x}, \code{hsq_y},
+\code{rho_xy}, \code{cross_cov_model}, \code{joint_psd_status} and short
+\code{fit_x}/\code{fit_y} lists (\code{df}, \code{n}, \code{hsq}); the
+attribute \code{qtl2mr_locus_blocks} records the pair and settings. The list can
+be passed to \code{\link{fit_multilocus_founder_mr}()}:
+\code{fit_multilocus_founder_mr(blocks, allow_cross_cov = TRUE, ridge = 1e-10,
+heterogeneity_method = "chisq")} reproduces the pair's \code{theta}, \code{se},
+\code{Q} and \code{Q_p_chisq}, and a subset of the list refits the pair on those
+loci.
+\code{batch_locus_blocks_manifest.csv} lists the files in pair order. The files
+belong to the batch output: they are removed by \code{overwrite = TRUE}, and on
+resume they are written again from the pair records.
 
 When \code{output_dir} is given, every completed pair is saved as one record in
 \code{batch_pair_records/}. With \code{resume = TRUE} the run continues from
@@ -211,7 +250,8 @@ and exclusion reason), \code{probability_normalization},
 \code{"complete"} or \code{"stopped_fail_fast"}). Each table has the same
 columns whether or not it has rows. The list also holds \code{config},
 \code{resources_metadata} and \code{pairs}; the run configuration is written to
-\code{batch_config.json}.
+\code{batch_config.json}. With \code{write_locus_blocks = TRUE} it also holds
+\code{locus_blocks_manifest}.
 }
 \seealso{
 \code{\link{run_qtl2mr_analysis}} for one pair with a full report;

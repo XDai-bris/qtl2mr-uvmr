@@ -131,7 +131,10 @@ candidates; it is off by default. The table keeps every candidate with
 (only `exposure` and `marker` are required).
 
 Each pair is fitted with the exposure and the outcome on their own complete
-samples, exactly as in `run_qtl2mr_analysis()`. If a run is interrupted, call
+samples, exactly as in `run_qtl2mr_analysis()` (see `?run_qtl2mr_batch` for
+the opt-in common-sample policy). With `write_locus_blocks = TRUE` the batch also
+writes each pair's per-locus founder blocks, which
+`fit_multilocus_founder_mr()` can refit. If a run is interrupted, call
 it again with `resume = TRUE`: completed pairs are kept, the output folder may
 have been moved, and `n_workers` may differ. A resume is refused if the
 inputs, instruments, options or qtl2mr code changed (for example after an
@@ -244,9 +247,13 @@ fit once per draw (the locus LMMs are not refitted). On a laptop, the bundled
   instrument-set sensitivity (`run_instrument_sensitivity = TRUE`, the
   default) and is a sensitivity analysis; the primary estimate is not
   filtered.
-- **Parallel batches.** With `n_workers > 1`, pairs sharing an exposure run in
-  one process; fits are reused within an exposure group but not across groups.
-  See `?run_qtl2mr_batch`.
+- **Parallel runs and reuse.** In a batch, each trait's locus fits are computed
+  once and shared by all its pairs, and within an R session fits made by
+  `qtl2mr_select_instruments()` and earlier analyses are reused; results never
+  depend on this. With `n_workers > 1` the batch fits traits, and exposure
+  groups, in parallel processes, and `run_qtl2mr_analysis(n_workers = )` runs
+  its simulation, bootstrap and sensitivity refits in parallel, with the same
+  results. See `?run_qtl2mr_batch`.
 - **Follow-up refits.** `refit_qtl2mr_subset()` and
   `fit_instrument_set_sensitivity()` re-estimate an analysis on locus subsets
   without refitting the LMMs.

@@ -1,3 +1,40 @@
+# qtl2mr 0.6.1.9002 (development)
+
+Not released. A speed build: every result, table and warning is the same
+as in 0.6.1.9001 at the same settings, for any worker count. Defaults are
+unchanged; three arguments are added.
+
+- `qtl2mr_prepare_resources()` checks the founder probabilities once instead of
+  twice, and the sum-to-one check no longer calls `sum()` once per sample and
+  marker; the checks, tolerances and the normalization record are unchanged.
+  Validation of a kinship matrix that already passed is not repeated, and when
+  rounding is normalized only the markers in use are copied.
+- Each fit of the second-order estimator reuses the objective values of its
+  search grid instead of evaluating them again; heterogeneity-simulation draws
+  skip the parts of the fit that they do not report.
+- `run_qtl2mr_analysis(n_workers = 1L)`: on Unix, the refits of the
+  heterogeneity simulation, the diagnostic bootstrap, leave-one-locus-out and
+  the instrument-set sensitivity can run in several processes. Random numbers
+  are drawn in the calling process in the same order, so results do not depend
+  on `n_workers`.
+- LMM contexts and locus fits are reused across the R session: fits made by
+  `qtl2mr_select_instruments()` serve the MR stage, and single analyses and
+  batches share them. They are keyed by trait, chromosome, sample set,
+  phenotype and covariate values, kinship and marker probabilities, so only
+  identical fits are shared. The kinship decomposition is computed once per
+  chromosome and sample set, and the overlap products once per pair. The cache
+  has a fixed memory bound.
+- `run_qtl2mr_batch()` first fits, trait by trait (in parallel with
+  `n_workers > 1`, also for a single exposure), every locus its pairs need, then
+  fits the pairs as before; fits no later pair needs are released.
+- `run_qtl2mr_batch(write_locus_blocks = FALSE)`: with `TRUE`, the per-locus
+  founder blocks of each pair are written to `batch_locus_blocks/` with a
+  manifest; `fit_multilocus_founder_mr()` refits a pair from them.
+- `sample_policy = c("own_complete", "pair_common_complete")` in
+  `run_qtl2mr_batch()` and `qtl2mr_pair_input()`: the default keeps each trait
+  on its own complete samples; `"pair_common_complete"` fits both traits on the
+  pair's common complete samples, as the 0.5.0 batch did.
+
 # qtl2mr 0.6.1.9001 (development)
 
 Not released. A selection-only build: instrument selection changes for
