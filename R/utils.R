@@ -118,12 +118,20 @@ make_overlap_matrix <- function(sample_ids_x, sample_ids_y, overlap_ids = NULL) 
   O_xy
 }
 
+qtl2mr_overlap_products <- function(O_xy) {
+  O_xy <- as.matrix(O_xy)
+  list(D_x = O_xy %*% t(O_xy), D_y = t(O_xy) %*% O_xy)
+}
+
+# D_x and D_y, when given, are qtl2mr_overlap_products(O_xy) for this O_xy.
 estimate_rho_star <- function(resid_x_star,
                               resid_y_star,
                               O_xy,
                               center = TRUE,
                               min_overlap_warn = 10L,
-                              eps = 1e-12) {
+                              eps = 1e-12,
+                              D_x = NULL,
+                              D_y = NULL) {
   O_xy <- as.matrix(O_xy)
   rx <- as.numeric(resid_x_star)
   ry <- as.numeric(resid_y_star)
@@ -152,8 +160,11 @@ estimate_rho_star <- function(resid_x_star,
     stop("Residual vectors must be finite", call. = FALSE)
   }
 
-  D_x <- O_xy %*% t(O_xy)
-  D_y <- t(O_xy) %*% O_xy
+  if (is.null(D_x) || is.null(D_y)) {
+    products <- qtl2mr_overlap_products(O_xy)
+    D_x <- products$D_x
+    D_y <- products$D_y
+  }
   one_x <- rep(1, nrow(O_xy))
   one_y <- rep(1, ncol(O_xy))
   denom_mean_x <- as.numeric(t(one_x) %*% D_x %*% one_x)

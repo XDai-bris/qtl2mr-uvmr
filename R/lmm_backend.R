@@ -135,11 +135,14 @@ qtl2mr_hsq_profile <- function(h,
   }
 }
 
+# decompose, when given, returns qtl2mr_decompose_kinship(kinship, sample_ids =
+# names(pheno)) and is called where that decomposition is needed.
 qtl2mr_estimate_lmm_hsq <- function(pheno,
                                     kinship,
                                     addcovar = NULL,
                                     reml = TRUE,
-                                    tol = 1e-12) {
+                                    tol = 1e-12,
+                                    decompose = NULL) {
   pheno <- qtl2mr_as_named_numeric(pheno)
   ids <- names(pheno)
   if (any(!is.finite(pheno))) stop("pheno must contain only finite values for hsq estimation", call. = FALSE)
@@ -147,7 +150,7 @@ qtl2mr_estimate_lmm_hsq <- function(pheno,
   if (ncol(addcovar) && any(!is.finite(addcovar))) {
     stop("addcovar must contain only finite values for hsq estimation", call. = FALSE)
   }
-  decomposition <- qtl2mr_decompose_kinship(kinship, sample_ids = ids)
+  decomposition <- if (is.null(decompose)) qtl2mr_decompose_kinship(kinship, sample_ids = ids) else decompose()
   design <- cbind(`(Intercept)` = 1, addcovar)
   if (qr(design, tol = tol)$rank != ncol(design)) {
     stop("hsq fixed-effect design is rank deficient after covariate filtering", call. = FALSE)

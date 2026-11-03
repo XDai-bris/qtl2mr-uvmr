@@ -4,6 +4,10 @@ qtl2mr_chr_option <- function(x, chr) {
   x
 }
 
+# Exact key of an LMM context: every input that can change the context or the
+# warnings it signals. The kinship enters through the fingerprint of its
+# sample-set submatrix, and covariate_source holds the covariates as supplied,
+# whose dependent columns are named in warnings.
 qtl2mr_lmm_context_key <- function(trait_name,
                                    chr,
                                    sample_ids,
@@ -13,14 +17,18 @@ qtl2mr_lmm_context_key <- function(trait_name,
                                    kinship,
                                    phenotype = NULL,
                                    reml = TRUE,
-                                   tol = 1e-12) {
-  qtl2mr_fingerprint_object(list(schema = "lmm-context-v040-1", trait_name = trait_name,
+                                   tol = 1e-12,
+                                   covariate_source = NULL) {
+  qtl2mr_fingerprint_object(list(schema = "lmm-context-v062-1", trait_name = trait_name,
     chr = chr, sample_ids = sample_ids, covariates = covariates,
     phenotype = phenotype, standardize_pheno = standardize_pheno,
-    hsq = hsq, kinship = if (is.null(kinship)) NULL else as.matrix(kinship)[sample_ids, sample_ids, drop = FALSE],
-    reml = reml, tol = tol))
+    hsq = hsq, kinship = qtl2mr_kinship_fingerprint(kinship, sample_ids),
+    reml = reml, tol = tol, covariate_source = covariate_source))
 }
 
+# A cache scope counts hits and misses as one batch run (or exposure-group
+# worker) sees them: a key is a miss the first time the scope asks for it.
+# The values themselves live in the session registry, shared by every scope.
 qtl2mr_context_cache_new <- function() {
   cache <- new.env(parent = emptyenv())
   cache$.stats <- list(hits = 0L, misses = 0L)
@@ -47,6 +55,46 @@ qtl2mr_context_cache_bump <- function(cache, field) {
   invisible(NULL)
 }
 
+qtl2mr_cache_seen <- function(cache, key) {
+  is.environment(cache) && exists(key, envir = cache, inherits = FALSE)
+}
+
+qtl2mr_cache_mark <- function(cache, key) {
+  if (is.environment(cache)) assign(key, TRUE, envir = cache)
+  invisible(key)
+}
+
+qtl2mr_context_lookup_key <- function(pheno, kinship, addcovar, hsq, sample_ids, standardize_pheno,
+                                      reml, trait_name, chr, tol) {
+  pheno0 <- qtl2mr_as_named_numeric(pheno, trait_name %||% "phenotype")
+  ids <- if (is.null(sample_ids)) names(pheno0) else as.character(sample_ids)
+  ids <- ids[ids %in% names(pheno0)]
+  if (!is.null(addcovar) && nrow(as.matrix(addcovar))) {
+    ids <- ids[ids %in% rownames(as.matrix(addcovar))]
+  }
+  if (!is.null(kinship)) ids <- ids[ids %in% rownames(as.matrix(kinship))]
+  addcovar_key <- qtl2mr_as_addcovar(addcovar, ids = ids, tol = tol)
+  qtl2mr_lmm_context_key(
+    trait_name = trait_name,
+    chr = chr,
+    sample_ids = ids,
+    covariates = addcovar_key,
+    standardize_pheno = standardize_pheno,
+    hsq = hsq,
+    kinship = kinship,
+    phenotype = pheno0[ids], reml = reml, tol = tol,
+    covariate_source = if (is.null(addcovar)) NULL else addcovar[ids, , drop = FALSE]
+  )
+}
+
+# LMM context of one trait on one chromosome. With a cache scope this behaves
+# as the batch cache always did (the key is computed, warnings included, and
+# hits and misses are counted); without one, as a direct prepare_lmm_context()
+# call. Either way an identical context computed earlier in the session is
+# reused, and the warnings its computation signalled are signalled again
+# wherever the computation would have run. A reused context is returned
+# without its n x n matrices; fit_founder_lmm_blocks_batch() rebuilds them only
+# when a fit is missing.
 qtl2mr_prepare_lmm_context_cached <- function(pheno,
                                              kinship = NULL,
                                              addcovar = NULL,
@@ -58,43 +106,51 @@ qtl2mr_prepare_lmm_context_cached <- function(pheno,
                                              chr = NULL,
                                              tol = 1e-12,
                                              context_cache = NULL) {
-  if (is.null(context_cache)) {
-    return(prepare_lmm_context(
-      pheno = pheno, kinship = kinship, addcovar = addcovar, hsq = hsq,
-      sample_ids = sample_ids, standardize_pheno = standardize_pheno,
-      reml = reml, trait_name = trait_name, chr = chr, tol = tol
-    ))
-  }
-  pheno0 <- qtl2mr_as_named_numeric(pheno, trait_name %||% "phenotype")
-  ids <- if (is.null(sample_ids)) names(pheno0) else as.character(sample_ids)
-  ids <- ids[ids %in% names(pheno0)]
-  if (!is.null(addcovar) && nrow(as.matrix(addcovar))) {
-    ids <- ids[ids %in% rownames(as.matrix(addcovar))]
-  }
-  if (!is.null(kinship)) ids <- ids[ids %in% rownames(as.matrix(kinship))]
-  addcovar_key <- qtl2mr_as_addcovar(addcovar, ids = ids, tol = tol)
-  key <- qtl2mr_lmm_context_key(
-    trait_name = trait_name,
-    chr = chr,
-    sample_ids = ids,
-    covariates = addcovar_key,
-    standardize_pheno = standardize_pheno,
-    hsq = hsq,
-    kinship = kinship,
-    phenotype = pheno0[ids], reml = reml, tol = tol
-  )
-  if (exists(key, envir = context_cache, inherits = FALSE)) {
-    qtl2mr_context_cache_bump(context_cache, "hits")
-    return(get(key, envir = context_cache, inherits = FALSE))
-  }
-  ctx <- prepare_lmm_context(
+  compute <- function() prepare_lmm_context(
     pheno = pheno, kinship = kinship, addcovar = addcovar, hsq = hsq,
     sample_ids = sample_ids, standardize_pheno = standardize_pheno,
     reml = reml, trait_name = trait_name, chr = chr, tol = tol
   )
-  assign(key, ctx, envir = context_cache)
-  qtl2mr_context_cache_bump(context_cache, "misses")
-  ctx
+  scoped <- is.environment(context_cache)
+  lookup <- function() qtl2mr_context_lookup_key(pheno, kinship, addcovar, hsq, sample_ids,
+    standardize_pheno, reml, trait_name, chr, tol)
+  # Without a scope the earlier code computed no key, so the key adds no
+  # warnings or errors here; if it cannot be formed the context is computed
+  # directly and fails exactly as before.
+  key <- if (scoped) lookup() else tryCatch(qtl2mr_quietly(lookup()), error = function(e) NULL)
+  if (is.null(key)) return(compute())
+  reuse <- function(ctx) {
+    ctx$materialise <- function() qtl2mr_quietly(compute())
+    ctx
+  }
+  if (scoped && qtl2mr_cache_seen(context_cache, key)) {
+    qtl2mr_context_cache_bump(context_cache, "hits")
+    entry <- qtl2mr_registry_get("context", key)
+    if (!is.null(entry)) return(reuse(entry$value))
+    # A hit whose stored value was released: recompute it silently, since a hit
+    # signals nothing.
+    rec <- qtl2mr_recording(compute(), muffle = TRUE)
+    qtl2mr_registry_put("context", key, qtl2mr_compact_context(rec$value), conditions = rec$conditions,
+      info = list(trait = trait_name, chr = as.character(chr %||% NA_character_), marker = NA_character_))
+    return(rec$value)
+  }
+  entry <- qtl2mr_registry_get("context", key)
+  if (!is.null(entry)) {
+    qtl2mr_replay_conditions(entry$conditions)
+    if (scoped) {
+      qtl2mr_cache_mark(context_cache, key)
+      qtl2mr_context_cache_bump(context_cache, "misses")
+    }
+    return(reuse(entry$value))
+  }
+  rec <- qtl2mr_recording(compute())
+  qtl2mr_registry_put("context", key, qtl2mr_compact_context(rec$value), conditions = rec$conditions,
+    info = list(trait = trait_name, chr = as.character(chr %||% NA_character_), marker = NA_character_))
+  if (scoped) {
+    qtl2mr_cache_mark(context_cache, key)
+    qtl2mr_context_cache_bump(context_cache, "misses")
+  }
+  rec$value
 }
 
 prepare_lmm_context <- function(pheno,
@@ -149,10 +205,13 @@ prepare_lmm_context <- function(pheno,
     hsq_fit <- NA_real_
   } else {
     kinship0 <- as.matrix(kinship)[ids, ids, drop = FALSE]
-    if (is.null(hsq)) hsq <- estimate_founder_lmm_hsq(y, kinship0, addcovar0, reml = reml)
+    # The hsq fit and the transform decompose the same matrix; the
+    # decomposition is computed once and shared with traits on the same samples.
+    decompose <- function() qtl2mr_decompose_kinship_cached(kinship, ids, kinship0)
+    if (is.null(hsq)) hsq <- qtl2mr_estimate_lmm_hsq(y, kinship0, addcovar0, reml = reml, decompose = decompose)
     hsq_status <- attr(hsq, "status") %||% "fixed"
     hsq_fit <- qtl2mr_validate_hsq(hsq)
-    kinship_decomp <- qtl2mr_decompose_kinship(kinship0, sample_ids = ids)
+    kinship_decomp <- decompose()
     eigenvec <- kinship_decomp$vectors
     wts <- 1 / sqrt(hsq_fit * kinship_decomp$values + (1 - hsq_fit))
     raw_transform <- diag(wts, nrow = length(wts)) %*% eigenvec
@@ -191,7 +250,7 @@ prepare_lmm_context <- function(pheno,
     hsq_status = if (is.null(kinship)) "not_applicable" else hsq_status,
     lmm_backend = if (is.null(kinship)) "ordinary_least_squares" else "internal_base_lmm",
     kinship_decomp = kinship_decomp,
-    kinship = if (is.null(kinship)) NULL else as.matrix(kinship)[ids, ids, drop = FALSE],
+    kinship = if (is.null(kinship)) NULL else kinship0,
     standardize_pheno = isTRUE(standardize_pheno),
     key = qtl2mr_lmm_context_key(trait_name, chr, ids, addcovar0, standardize_pheno, hsq, kinship,
                                phenotype = pheno0[ids], reml = reml, tol = tol)
@@ -253,6 +312,10 @@ qtl2mr_lmm_marker_error_row <- function(x) {
   )
 }
 
+# Founder LMM fits of one context at the given markers. Fits are keyed by the
+# context, the marker and its probabilities; with a cache scope hits and misses
+# are counted as before. A fit computed earlier in the session is reused, and
+# the full context is rebuilt only if some fit has to be computed.
 fit_founder_lmm_blocks_batch <- function(genoprobs_chr,
                                          markers,
                                          context,
@@ -269,6 +332,13 @@ fit_founder_lmm_blocks_batch <- function(genoprobs_chr,
   if (is.null(allele_names)) allele_names <- rownames(contrasts)
   contrasts <- contrasts[allele_names, , drop = FALSE]
   validate_founder_contrasts(contrasts, rownames(contrasts))
+  scoped <- is.environment(fit_cache)
+  full <- NULL
+  compute <- function(design, marker) {
+    if (is.null(full)) full <<- qtl2mr_full_context(context)
+    qtl2mr_fit_founder_lmm_marker(design, marker, full, contrasts, allele_names, fallback_genoprobs, fc_cols, tol)
+  }
+  info <- function(marker) list(trait = context$trait_name, chr = as.character(context$chr), marker = marker)
   out <- vector("list", length(markers))
   names(out) <- markers
   for (i in seq_along(markers)) {
@@ -277,110 +347,29 @@ fit_founder_lmm_blocks_batch <- function(genoprobs_chr,
       design <- qtl2mr_batch_marker_design(genoprobs_chr, marker, sample_ids, contrasts)
       fit_key <- qtl2mr_fingerprint_object(list(schema = "lmm-fit-v040-1", context = context$key,
         marker = marker, fc_cols = fc_cols, probabilities = design$gp_raw, contrasts = contrasts, tol = tol))
-      if (!is.null(fit_cache) && exists(fit_key, envir = fit_cache, inherits = FALSE)) {
+      entry <- qtl2mr_registry_get("fit", fit_key)
+      if (scoped && qtl2mr_cache_seen(fit_cache, fit_key)) {
         qtl2mr_context_cache_bump(fit_cache, "hits")
-        get(fit_key, envir = fit_cache, inherits = FALSE)
-      } else {
-        if (!all(is.finite(design$gp_raw))) {
-          if (is.null(fallback_genoprobs)) {
-            stop("Non-finite founder probabilities at marker ", marker, "; fallback_genoprobs is required", call. = FALSE)
-          }
-          fit <- fit_founder_lmm_block(
-            genoprobs = fallback_genoprobs,
-            pheno = context$y_raw,
-            kinship = context$kinship,
-            addcovar = context$addcovar,
-            contrasts = contrasts,
-            hsq = if (is.na(context$hsq)) NULL else context$hsq,
-            marker = marker,
-            sample_ids = sample_ids,
-            standardize_pheno = context$standardize_pheno,
-            fc_cols = fc_cols,
-            tol = tol
-          )
-          if (!is.null(fit_cache)) {
-            assign(fit_key, fit, envir = fit_cache)
-            qtl2mr_context_cache_bump(fit_cache, "misses")
-          }
-          fit
-        } else {
-          qtl_design <- design$qtl_design
-          Zstar <- context$raw_transform %*% qtl_design
-          rownames(Zstar) <- sample_ids
-          colnames(Zstar) <- colnames(qtl_design)
-          Xstar <- cbind(Zstar, context$Cstar)
-          colnames(Xstar) <- make.names(colnames(Xstar), unique = TRUE)
-          colnames(Xstar)[seq_len(ncol(qtl_design))] <- colnames(qtl_design)
-          missing_fc <- setdiff(fc_cols, colnames(Xstar))
-          if (length(missing_fc)) stop("Missing founder contrast columns: ", paste(missing_fc, collapse = ", "), call. = FALSE)
-
-          q <- qr(Xstar, tol = tol)
-          beta_full <- as.numeric(qr.coef(q, context$ystar))
-          names(beta_full) <- colnames(Xstar)
-          fitted_star <- as.numeric(qr.fitted(q, context$ystar))
-          residual_star_fit <- context$ystar - fitted_star
-          df <- length(context$ystar) - q$rank
-          if (df <= 0L) stop("Non-positive residual degrees of freedom at marker ", marker, call. = FALSE)
-          sigma2 <- as.numeric(crossprod(residual_star_fit)) / df
-          sigma <- sqrt(sigma2)
-          coef_map_star <- qr.coef(q, diag(nrow(Xstar)))
-          rownames(coef_map_star) <- colnames(Xstar)
-          colnames(coef_map_star) <- sample_ids
-          if (any(!is.finite(coef_map_star[fc_cols, , drop = FALSE])) ||
-              any(!is.finite(beta_full[fc_cols]))) {
-            stop("Founder contrast coefficients are not estimable at marker ", marker, call. = FALSE)
-          }
-          C_full <- coef_map_star %*% t(coef_map_star)
-          dimnames(C_full) <- list(colnames(Xstar), colnames(Xstar))
-          vcov_full <- sigma2 * C_full
-          vcov_fc <- qtl2mr_sym(vcov_full[fc_cols, fc_cols, drop = FALSE])
-          beta_fc <- stats::setNames(as.numeric(beta_full[fc_cols]), fc_cols)
-          se_fc <- stats::setNames(sqrt(diag(vcov_fc)), fc_cols)
-          influence_raw <- coef_map_star[fc_cols, , drop = FALSE] %*% context$raw_transform
-          colnames(influence_raw) <- sample_ids
-          rownames(influence_raw) <- fc_cols
-          influence_star <- coef_map_star[fc_cols, , drop = FALSE] %*% context$star_rotation
-          colnames(influence_star) <- sample_ids
-          rownames(influence_star) <- fc_cols
-          residual_raw <- context$inverse_residual(residual_star_fit)
-          residual_star <- as.numeric(t(context$star_rotation) %*% as.numeric(residual_star_fit))
-          fit <- list(
-            marker = marker,
-            chr = as.character(context$chr),
-            founders = allele_names,
-            contrasts = contrasts,
-            founder_H = contrasts[, fc_cols, drop = FALSE],
-            qtl_design = qtl_design,
-            beta_fc = beta_fc,
-            se_fc = se_fc,
-            vcov_fc = vcov_fc,
-            beta_full = beta_full,
-            vcov_full = vcov_full,
-            sigma = sigma,
-            sigma2 = sigma2,
-            residual_raw = residual_raw,
-            residual_star = stats::setNames(residual_star, sample_ids),
-            residual_star_fit = stats::setNames(as.numeric(residual_star_fit), sample_ids),
-            influence_raw = influence_raw,
-            influence_star = influence_star,
-            influence_star_fit = coef_map_star[fc_cols, , drop = FALSE],
-            hsq = context$hsq,
-            hsq_status = context$hsq_status,
-            lmm_backend = context$lmm_backend,
-            n = length(sample_ids),
-            df = df,
-            rank = q$rank,
-            sample_ids = sample_ids,
-            design_colnames = colnames(Xstar),
-            fc_cols = fc_cols,
-            standardize_pheno = context$standardize_pheno
-          )
-          if (!is.null(fit_cache)) {
-            assign(fit_key, fit, envir = fit_cache)
-            qtl2mr_context_cache_bump(fit_cache, "misses")
-          }
-          fit
+        if (!is.null(entry)) entry$value else {
+          rec <- qtl2mr_recording(compute(design, marker), muffle = TRUE)
+          qtl2mr_registry_put("fit", fit_key, rec$value, conditions = rec$conditions, info = info(marker))
+          rec$value
         }
+      } else if (!is.null(entry)) {
+        qtl2mr_replay_conditions(entry$conditions)
+        if (scoped) {
+          qtl2mr_cache_mark(fit_cache, fit_key)
+          qtl2mr_context_cache_bump(fit_cache, "misses")
+        }
+        entry$value
+      } else {
+        rec <- qtl2mr_recording(compute(design, marker))
+        qtl2mr_registry_put("fit", fit_key, rec$value, conditions = rec$conditions, info = info(marker))
+        if (scoped) {
+          qtl2mr_cache_mark(fit_cache, fit_key)
+          qtl2mr_context_cache_bump(fit_cache, "misses")
+        }
+        rec$value
       }
     }, error = function(e) {
       if (!isTRUE(allow_marker_errors)) stop(e)
@@ -388,6 +377,105 @@ fit_founder_lmm_blocks_batch <- function(genoprobs_chr,
     })
   }
   out
+}
+
+
+# One founder LMM fit at one marker, given the full context.
+qtl2mr_fit_founder_lmm_marker <- function(design, marker, context, contrasts, allele_names, fallback_genoprobs,
+                                          fc_cols, tol) {
+  sample_ids <- context$sample_ids
+  if (!all(is.finite(design$gp_raw))) {
+    if (is.null(fallback_genoprobs)) {
+      stop("Non-finite founder probabilities at marker ", marker, "; fallback_genoprobs is required", call. = FALSE)
+    }
+    fit <- fit_founder_lmm_block(
+      genoprobs = fallback_genoprobs,
+      pheno = context$y_raw,
+      kinship = context$kinship,
+      addcovar = context$addcovar,
+      contrasts = contrasts,
+      hsq = if (is.na(context$hsq)) NULL else context$hsq,
+      marker = marker,
+      sample_ids = sample_ids,
+      standardize_pheno = context$standardize_pheno,
+      fc_cols = fc_cols,
+      tol = tol
+    )
+    fit
+  } else {
+    qtl_design <- design$qtl_design
+    Zstar <- context$raw_transform %*% qtl_design
+    rownames(Zstar) <- sample_ids
+    colnames(Zstar) <- colnames(qtl_design)
+    Xstar <- cbind(Zstar, context$Cstar)
+    colnames(Xstar) <- make.names(colnames(Xstar), unique = TRUE)
+    colnames(Xstar)[seq_len(ncol(qtl_design))] <- colnames(qtl_design)
+    missing_fc <- setdiff(fc_cols, colnames(Xstar))
+    if (length(missing_fc)) stop("Missing founder contrast columns: ", paste(missing_fc, collapse = ", "), call. = FALSE)
+
+    q <- qr(Xstar, tol = tol)
+    beta_full <- as.numeric(qr.coef(q, context$ystar))
+    names(beta_full) <- colnames(Xstar)
+    fitted_star <- as.numeric(qr.fitted(q, context$ystar))
+    residual_star_fit <- context$ystar - fitted_star
+    df <- length(context$ystar) - q$rank
+    if (df <= 0L) stop("Non-positive residual degrees of freedom at marker ", marker, call. = FALSE)
+    sigma2 <- as.numeric(crossprod(residual_star_fit)) / df
+    sigma <- sqrt(sigma2)
+    coef_map_star <- qr.coef(q, diag(nrow(Xstar)))
+    rownames(coef_map_star) <- colnames(Xstar)
+    colnames(coef_map_star) <- sample_ids
+    if (any(!is.finite(coef_map_star[fc_cols, , drop = FALSE])) ||
+        any(!is.finite(beta_full[fc_cols]))) {
+      stop("Founder contrast coefficients are not estimable at marker ", marker, call. = FALSE)
+    }
+    C_full <- coef_map_star %*% t(coef_map_star)
+    dimnames(C_full) <- list(colnames(Xstar), colnames(Xstar))
+    vcov_full <- sigma2 * C_full
+    vcov_fc <- qtl2mr_sym(vcov_full[fc_cols, fc_cols, drop = FALSE])
+    beta_fc <- stats::setNames(as.numeric(beta_full[fc_cols]), fc_cols)
+    se_fc <- stats::setNames(sqrt(diag(vcov_fc)), fc_cols)
+    influence_raw <- coef_map_star[fc_cols, , drop = FALSE] %*% context$raw_transform
+    colnames(influence_raw) <- sample_ids
+    rownames(influence_raw) <- fc_cols
+    influence_star <- coef_map_star[fc_cols, , drop = FALSE] %*% context$star_rotation
+    colnames(influence_star) <- sample_ids
+    rownames(influence_star) <- fc_cols
+    residual_raw <- context$inverse_residual(residual_star_fit)
+    residual_star <- as.numeric(t(context$star_rotation) %*% as.numeric(residual_star_fit))
+    fit <- list(
+      marker = marker,
+      chr = as.character(context$chr),
+      founders = allele_names,
+      contrasts = contrasts,
+      founder_H = contrasts[, fc_cols, drop = FALSE],
+      qtl_design = qtl_design,
+      beta_fc = beta_fc,
+      se_fc = se_fc,
+      vcov_fc = vcov_fc,
+      beta_full = beta_full,
+      vcov_full = vcov_full,
+      sigma = sigma,
+      sigma2 = sigma2,
+      residual_raw = residual_raw,
+      residual_star = stats::setNames(residual_star, sample_ids),
+      residual_star_fit = stats::setNames(as.numeric(residual_star_fit), sample_ids),
+      influence_raw = influence_raw,
+      influence_star = influence_star,
+      influence_star_fit = coef_map_star[fc_cols, , drop = FALSE],
+      hsq = context$hsq,
+      hsq_status = context$hsq_status,
+      lmm_backend = context$lmm_backend,
+      n = length(sample_ids),
+      df = df,
+      rank = q$rank,
+      sample_ids = sample_ids,
+      design_colnames = colnames(Xstar),
+      fc_cols = fc_cols,
+      standardize_pheno = context$standardize_pheno
+    )
+    fit
+  }
 }
 
 qtl2mr_assemble_mr_locus_block <- function(marker,
@@ -400,13 +488,16 @@ qtl2mr_assemble_mr_locus_block <- function(marker,
                                            ridge = 1e-10,
                                            fc_cols = paste0("FC", 1:7),
                                            enforce_psd = TRUE,
-                                           stop_on_invalid_psd = TRUE) {
+                                           stop_on_invalid_psd = TRUE,
+                                           overlap_products = NULL) {
   cross_cov_model <- match.arg(cross_cov_model)
   if (is.null(O_xy)) {
     O_xy <- make_overlap_matrix(fit_x$sample_ids, fit_y$sample_ids, overlap_ids = overlap_ids)
   }
-  cross_raw <- qtl2mr_lmm_cross_covariance(fit_x, fit_y, fc_cols, space = "raw", O_xy = O_xy)
-  cross_star <- qtl2mr_lmm_cross_covariance(fit_x, fit_y, fc_cols, space = "star", O_xy = O_xy)
+  cross_raw <- qtl2mr_lmm_cross_covariance(fit_x, fit_y, fc_cols, space = "raw", O_xy = O_xy,
+    overlap_products = overlap_products)
+  cross_star <- qtl2mr_lmm_cross_covariance(fit_x, fit_y, fc_cols, space = "star", O_xy = O_xy,
+    overlap_products = overlap_products)
   cross_zero <- qtl2mr_lmm_cross_covariance(fit_x, fit_y, fc_cols, space = "zero", O_xy = O_xy)
   selected_cross <- switch(cross_cov_model, raw = cross_raw, star = cross_star, zero = cross_zero)
   Sigma_x <- fit_x$vcov_fc
@@ -513,6 +604,17 @@ fit_mr_locus_blocks_batch <- function(genoprobs,
   if (is.null(contrasts)) contrasts <- make_founder_contrasts(founders)
   out <- list()
   dropped <- list()
+  # The overlap matrix and its products D_x = O O', D_y = O'O depend only on the
+  # two fitted sample sets, which are the same at every locus of a chromosome
+  # and usually of a pair; they are formed once per distinct pair of sets.
+  overlaps <- list()
+  overlap_for <- function(ids_x, ids_y) {
+    for (o in overlaps) if (identical(o$ids_x, ids_x) && identical(o$ids_y, ids_y)) return(o)
+    O <- make_overlap_matrix(ids_x, ids_y)
+    o <- list(ids_x = ids_x, ids_y = ids_y, O_xy = O, products = qtl2mr_overlap_products(O))
+    overlaps[[length(overlaps) + 1L]] <<- o
+    o
+  }
   for (chr in unique(as.character(selected_loci$chr))) {
     rows <- which(as.character(selected_loci$chr) == chr)
     markers <- selected_loci$marker[rows]
@@ -571,14 +673,17 @@ fit_mr_locus_blocks_batch <- function(genoprobs,
         dropped[[length(dropped) + 1L]] <- do.call(rbind, err_rows)
         next
       }
+      overlap <- overlap_for(fits_x[[marker]]$sample_ids, fits_y[[marker]]$sample_ids)
       block <- qtl2mr_assemble_mr_locus_block(
         marker = marker,
         chr = chr,
         fit_x = fits_x[[marker]],
         fit_y = fits_y[[marker]],
         cross_cov_model = cross_cov_model,
+        O_xy = overlap$O_xy,
         ridge = ridge,
-        fc_cols = fc_cols
+        fc_cols = fc_cols,
+        overlap_products = overlap$products
       )
       out[[marker]] <- block
     }

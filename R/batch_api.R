@@ -374,13 +374,20 @@ qtl2mr_select_instruments <- function(resources,
   index <- seq_along(exposures)
   if (n_workers > 1L && length(exposures) > 1L && identical(.Platform$OS.type, "unix")) {
     chunks <- split(index, (index - 1L) %% min(n_workers, length(exposures)))
-    out <- parallel::mclapply(chunks, function(idx) lapply(idx, select_one),
-      mc.cores = length(chunks), mc.preschedule = FALSE)
-    failed <- !vapply(out, is.list, logical(1))
+    # Workers return the contexts and fits of the selected loci, so that the MR
+    # stage in this session reuses them as it does after sequential selection.
+    out <- parallel::mclapply(chunks, function(idx) {
+      reg <- qtl2mr_registry()
+      reg$journal <- new.env(parent = emptyenv())
+      rows <- lapply(idx, select_one)
+      list(rows = rows, entries = qtl2mr_selected_entries(reg, rows))
+    }, mc.cores = length(chunks), mc.preschedule = FALSE)
+    failed <- !vapply(out, function(o) is.list(o) && is.list(o$rows), logical(1))
     if (any(failed)) {
       stop("qtl2mr_select_instruments() worker failed: ", as.character(out[failed][[1L]]), call. = FALSE)
     }
-    rows <- unlist(out, recursive = FALSE)[order(unlist(chunks, use.names = FALSE))]
+    for (o in out) qtl2mr_registry_import(o$entries)
+    rows <- unlist(lapply(out, `[[`, "rows"), recursive = FALSE)[order(unlist(chunks, use.names = FALSE))]
   } else {
     rows <- lapply(index, select_one)
   }
@@ -395,6 +402,17 @@ qtl2mr_select_instruments <- function(resources,
   out$exclude_chr <- rep(paste(exclude_chr, collapse = ","), nrow(out))
   rownames(out) <- NULL
   out
+}
+
+# Registry entries created in a selection worker for the selected loci: their
+# fits, and the contexts of their chromosomes.
+qtl2mr_selected_entries <- function(reg, rows) {
+  rows <- do.call(rbind, c(list(qtl2mr_empty_instruments()), rows))
+  rows <- rows[rows$selected %in% TRUE, , drop = FALSE]
+  keep <- c(paste(rows$exposure, rows$chr, rows$marker, sep = "\r"), paste(rows$exposure, rows$chr, sep = "\r"))
+  ids <- ls(reg$journal, all.names = TRUE)
+  entries <- mget(ids, envir = reg$entries, ifnotfound = list(NULL))
+  entries[vapply(entries, function(e) !is.null(e) && qtl2mr_registry_item(e$info) %in% keep, logical(1))]
 }
 
 # Instrument tables are keyed by exposure. Rows with selected = FALSE are kept
@@ -1162,6 +1180,29 @@ run_qtl2mr_batch <- function(resources,
   backend <- "sequential"
   groups <- split(seq_len(nrow(todo)), factor(todo$exposure, levels = unique(todo$exposure)))
   use_fork <- n_workers > 1L && length(groups) > 1L && identical(.Platform$OS.type, "unix")
+  # Waves: whole exposure groups when groups run in workers, consecutive pairs
+  # otherwise. Each wave's trait fits are computed first (in parallel by trait
+  # when n_workers > 1), then its pairs are fitted as before.
+  plan <- qtl2mr_batch_plan(resources, todo, instruments)
+  waves <- qtl2mr_batch_waves(plan, if (use_fork) unname(groups) else as.list(seq_len(nrow(todo))),
+    qtl2mr_batch_max_fits(resources))
+  wave_items <- lapply(waves, function(idx) qtl2mr_batch_release_items(plan[idx]))
+  last_wave <- integer()
+  for (w in seq_along(waves)) last_wave[wave_items[[w]]] <- w
+  pinned <- character()
+  on.exit(qtl2mr_registry_unpin(pinned), add = TRUE)
+  wave_start <- function(w) {
+    qtl2mr_batch_prefill(resources, plan[waves[[w]]], settings, n_workers)
+    pinned <<- qtl2mr_batch_registry_ids(wave_items[[w]])
+    qtl2mr_registry_pin(pinned)
+  }
+  # Entries this wave read and no later wave reads are released.
+  wave_end <- function(w) {
+    qtl2mr_registry_unpin(pinned)
+    pinned <<- character()
+    items <- wave_items[[w]]
+    qtl2mr_registry_remove(qtl2mr_batch_registry_ids(items[last_wave[items] == w]))
+  }
   if (use_fork) {
     backend <- "parallel::mclapply"
     # Each exposure group runs in one worker. With fail_fast, a worker stops at
@@ -1177,26 +1218,31 @@ run_qtl2mr_batch <- function(resources,
       }
       list(results = out, stats = list(qtl2mr_context_cache_stats(context_cache), qtl2mr_context_cache_stats(fit_cache)))
     }
-    group_out <- parallel::mclapply(groups, function(idx) tryCatch(run_group(idx), error = function(e) e),
-      mc.cores = min(n_workers, length(groups)), mc.preschedule = FALSE)
-    for (g in seq_along(groups)) {
-      value <- group_out[[g]]
-      idx <- groups[[g]]
-      if (is.list(value) && !inherits(value, "condition") && is.list(value$results)) {
-        results[idx] <- value$results
-        cache_stats[[length(cache_stats) + 1L]] <- value$stats
-        next
+    for (w in seq_along(waves)) {
+      wave_start(w)
+      wave_groups <- Filter(function(g) all(g %in% waves[[w]]), groups)
+      group_out <- parallel::mclapply(wave_groups, function(idx) tryCatch(run_group(idx), error = function(e) e),
+        mc.cores = min(n_workers, length(wave_groups)), mc.preschedule = FALSE)
+      for (g in seq_along(wave_groups)) {
+        value <- group_out[[g]]
+        idx <- wave_groups[[g]]
+        if (is.list(value) && !inherits(value, "condition") && is.list(value$results)) {
+          results[idx] <- value$results
+          cache_stats[[length(cache_stats) + 1L]] <- value$stats
+          next
+        }
+        # A worker that died or errored outside a pair: keep its fully written
+        # records and report the remaining pairs of the group as errors.
+        message_text <- if (inherits(value, "condition")) conditionMessage(value) else
+          if (inherits(value, "try-error")) as.character(value) else "parallel worker returned no result"
+        failure <- qtl2mr_batch_worker_failure_rows(todo[idx, , drop = FALSE],
+          paste("parallel worker failed:", message_text))
+        for (k in seq_along(idx)) {
+          saved <- qtl2mr_read_pair_record(output_dir, pair_index[[idx[[k]]]], todo$pair_id[[idx[[k]]]], fingerprint)
+          results[[idx[[k]]]] <- saved %||% list(main = failure$main[k, , drop = FALSE], error = failure$error[k, , drop = FALSE])
+        }
       }
-      # A worker that died or errored outside a pair: keep its fully written
-      # records and report the remaining pairs of the group as errors.
-      message_text <- if (inherits(value, "condition")) conditionMessage(value) else
-        if (inherits(value, "try-error")) as.character(value) else "parallel worker returned no result"
-      failure <- qtl2mr_batch_worker_failure_rows(todo[idx, , drop = FALSE],
-        paste("parallel worker failed:", message_text))
-      for (k in seq_along(idx)) {
-        saved <- qtl2mr_read_pair_record(output_dir, pair_index[[idx[[k]]]], todo$pair_id[[idx[[k]]]], fingerprint)
-        results[[idx[[k]]]] <- saved %||% list(main = failure$main[k, , drop = FALSE], error = failure$error[k, , drop = FALSE])
-      }
+      wave_end(w)
     }
     if (fail_fast) {
       failed <- which(vapply(results, function(r) !is.null(r$error), logical(1)))
@@ -1205,14 +1251,19 @@ run_qtl2mr_batch <- function(resources,
   } else {
     context_cache <- qtl2mr_context_cache_new()
     fit_cache <- qtl2mr_context_cache_new()
-    for (i in seq_len(nrow(todo))) {
-      if (progress) message(sprintf("[qtl2mr batch] %d/%d %s: %s -> %s", i, nrow(todo), todo$pair_id[[i]],
-        todo$exposure[[i]], todo$outcome[[i]]))
-      results[[i]] <- fit_one(i, context_cache, fit_cache)
-      if (fail_fast && !is.null(results[[i]]$error)) {
-        first_failure <- results[[i]]$error
-        break
+    for (w in seq_along(waves)) {
+      wave_start(w)
+      for (i in waves[[w]]) {
+        if (progress) message(sprintf("[qtl2mr batch] %d/%d %s: %s -> %s", i, nrow(todo), todo$pair_id[[i]],
+          todo$exposure[[i]], todo$outcome[[i]]))
+        results[[i]] <- fit_one(i, context_cache, fit_cache)
+        if (fail_fast && !is.null(results[[i]]$error)) {
+          first_failure <- results[[i]]$error
+          break
+        }
       }
+      wave_end(w)
+      if (!is.null(first_failure)) break
     }
     cache_stats[[1L]] <- list(qtl2mr_context_cache_stats(context_cache), qtl2mr_context_cache_stats(fit_cache))
   }

@@ -254,7 +254,8 @@ qtl2mr_lmm_cross_covariance <- function(fit_x,
                                         fc_cols,
                                         space = c("star", "raw", "zero"),
                                         O_xy = NULL,
-                                        overlap_ids = NULL) {
+                                        overlap_ids = NULL,
+                                        overlap_products = NULL) {
   space <- match.arg(space)
   residual_slot <- if (identical(space, "star")) "residual_star" else "residual_raw"
   influence_slot <- if (identical(space, "star")) "influence_star" else "influence_raw"
@@ -299,7 +300,8 @@ qtl2mr_lmm_cross_covariance <- function(fit_x,
                 n_overlap = n_overlap, O_xy_summary = O_summary))
   }
 
-  rho_xy <- estimate_rho_star(fit_x[[residual_slot]], fit_y[[residual_slot]], O_xy)
+  rho_xy <- estimate_rho_star(fit_x[[residual_slot]], fit_y[[residual_slot]], O_xy,
+    D_x = overlap_products$D_x, D_y = overlap_products$D_y)
   if (!is.finite(rho_xy)) stop("Residual cross-trait correlation is not finite in ", space, " space", call. = FALSE)
   if (!all(rownames(O_xy) %in% colnames(fit_x[[influence_slot]]))) {
     stop("Exposure influence matrix does not contain all O_xy row IDs", call. = FALSE)

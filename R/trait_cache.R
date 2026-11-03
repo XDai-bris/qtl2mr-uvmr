@@ -1,7 +1,24 @@
-# Session state for reusing exact intermediate results. The state lives in the
-# package namespace, never in resources or results, so saveRDS() of user
-# objects is unchanged and nothing here outlives the session.
+# Session state for reusing exact intermediate results: trait-level LMM
+# contexts and per-locus fits, kinship decompositions, key fingerprints and
+# kinship checks. Every entry is keyed by the full content of its inputs, so a
+# result is reused only where recomputing it would give the same value. The
+# state lives in the package namespace, never in resources or results, so
+# saveRDS() of user objects is unchanged and nothing here outlives the session.
 qtl2mr_state <- new.env(parent = emptyenv())
+
+# Bound on cached contexts and fits (bytes, as estimated by object.size()).
+# Least recently used entries are released first; a running batch pins the
+# entries of the exposure groups it is fitting.
+qtl2mr_cache_budget_bytes <- 2 * 1024^3
+
+qtl2mr_cache_budget <- function() qtl2mr_state$budget %||% qtl2mr_cache_budget_bytes
+
+# Forget everything cached in this session (as in a new R process). Internal;
+# used by tests.
+qtl2mr_cache_reset <- function() {
+  rm(list = ls(qtl2mr_state, all.names = TRUE), envir = qtl2mr_state)
+  invisible(NULL)
+}
 
 qtl2mr_memo_list <- function(name) qtl2mr_state[[name]] %||% list()
 
@@ -21,6 +38,132 @@ qtl2mr_kinship_checked <- function(K) {
 
 qtl2mr_kinship_checked_add <- function(K) {
   qtl2mr_memo_push("kinship_checked", K, 64L)
+}
+
+# Fingerprint of a kinship matrix restricted to a sample set. The context keys
+# include it in place of the matrix itself, so the matrix is serialized once per
+# (kinship, sample set) instead of at every key.
+qtl2mr_kinship_fingerprint <- function(kinship, sample_ids) {
+  if (is.null(kinship)) return(NULL)
+  for (e in qtl2mr_memo_list("kinship_fp")) {
+    if (identical(e$ids, sample_ids) && identical(e$kinship, kinship)) return(e$fp)
+  }
+  fp <- qtl2mr_fingerprint_object(as.matrix(kinship)[sample_ids, sample_ids, drop = FALSE])
+  qtl2mr_memo_push("kinship_fp", list(kinship = kinship, ids = sample_ids, fp = fp), 512L)
+  fp
+}
+
+# Eigendecomposition of 2K on a sample set, shared by the hsq fit and the
+# transform of one context and by traits fitted on the same samples. The
+# decomposition is a deterministic function of the matrix and the samples.
+qtl2mr_decompose_kinship_cached <- function(kinship, sample_ids, kinship0) {
+  for (e in qtl2mr_memo_list("kinship_decomp")) {
+    if (identical(e$ids, sample_ids) && identical(e$kinship, kinship)) return(e$decomp)
+  }
+  decomp <- qtl2mr_decompose_kinship(kinship0, sample_ids = sample_ids)
+  qtl2mr_memo_push("kinship_decomp", list(kinship = kinship, ids = sample_ids, decomp = decomp), 8L)
+  decomp
+}
+
+qtl2mr_registry <- function() {
+  reg <- qtl2mr_state$registry
+  if (is.null(reg)) {
+    reg <- new.env(parent = emptyenv())
+    reg$entries <- new.env(parent = emptyenv())
+    reg$pins <- new.env(parent = emptyenv())
+    reg$bytes <- 0
+    reg$tick <- 0
+    reg$journal <- NULL
+    assign("registry", reg, envir = qtl2mr_state)
+  }
+  reg
+}
+
+qtl2mr_registry_key <- function(kind, key) paste0(kind, ":", key)
+
+qtl2mr_registry_get <- function(kind, key) {
+  reg <- qtl2mr_registry()
+  id <- qtl2mr_registry_key(kind, key)
+  entry <- reg$entries[[id]]
+  if (is.null(entry)) return(NULL)
+  reg$tick <- reg$tick + 1
+  entry$tick <- reg$tick
+  assign(id, entry, envir = reg$entries)
+  entry
+}
+
+qtl2mr_registry_put <- function(kind, key, value, conditions = list(), info = list()) {
+  reg <- qtl2mr_registry()
+  id <- qtl2mr_registry_key(kind, key)
+  old <- reg$entries[[id]]
+  if (!is.null(old)) reg$bytes <- reg$bytes - old$bytes
+  reg$tick <- reg$tick + 1
+  entry <- list(value = value, conditions = conditions, info = info,
+    bytes = as.numeric(utils::object.size(value)), tick = reg$tick)
+  assign(id, entry, envir = reg$entries)
+  reg$bytes <- reg$bytes + entry$bytes
+  if (is.environment(reg$journal)) assign(id, TRUE, envir = reg$journal)
+  qtl2mr_registry_evict(reg)
+  invisible(entry)
+}
+
+qtl2mr_registry_import <- function(entries) {
+  reg <- qtl2mr_registry()
+  for (id in names(entries)) {
+    old <- reg$entries[[id]]
+    if (!is.null(old)) reg$bytes <- reg$bytes - old$bytes
+    reg$tick <- reg$tick + 1
+    entry <- entries[[id]]
+    entry$tick <- reg$tick
+    assign(id, entry, envir = reg$entries)
+    reg$bytes <- reg$bytes + entry$bytes
+    if (is.environment(reg$journal)) assign(id, TRUE, envir = reg$journal)
+  }
+  qtl2mr_registry_evict(reg)
+  invisible(names(entries))
+}
+
+qtl2mr_registry_remove <- function(ids) {
+  reg <- qtl2mr_registry()
+  ids <- ids[vapply(ids, exists, logical(1), envir = reg$entries, inherits = FALSE)]
+  for (id in ids) reg$bytes <- reg$bytes - reg$entries[[id]]$bytes
+  if (length(ids)) rm(list = ids, envir = reg$entries)
+  invisible(ids)
+}
+
+# Over budget, release least recently used unpinned entries down to 90%.
+qtl2mr_registry_evict <- function(reg = qtl2mr_registry()) {
+  if (reg$bytes <= qtl2mr_cache_budget()) return(invisible(character()))
+  ids <- setdiff(ls(reg$entries, all.names = TRUE), ls(reg$pins, all.names = TRUE))
+  if (!length(ids)) return(invisible(character()))
+  ticks <- vapply(ids, function(id) reg$entries[[id]]$tick, numeric(1))
+  bytes <- vapply(ids, function(id) reg$entries[[id]]$bytes, numeric(1))
+  ord <- order(ticks)
+  excess <- reg$bytes - 0.9 * qtl2mr_cache_budget()
+  k <- which(cumsum(bytes[ord]) >= excess)[1L]
+  if (is.na(k)) k <- length(ord)
+  drop <- ids[ord][seq_len(k)]
+  qtl2mr_registry_remove(drop)
+}
+
+qtl2mr_registry_pin <- function(ids) {
+  reg <- qtl2mr_registry()
+  for (id in ids) assign(id, TRUE, envir = reg$pins)
+  invisible(ids)
+}
+
+qtl2mr_registry_unpin <- function(ids) {
+  reg <- qtl2mr_registry()
+  ids <- intersect(ids, ls(reg$pins, all.names = TRUE))
+  if (length(ids)) rm(list = ids, envir = reg$pins)
+  invisible(ids)
+}
+
+# Entries whose info matches the given (trait, chr, marker) items.
+qtl2mr_registry_ids_matching <- function(keep) {
+  reg <- qtl2mr_registry()
+  ids <- ls(reg$entries, all.names = TRUE)
+  ids[vapply(ids, function(id) keep(reg$entries[[id]]$info), logical(1))]
 }
 
 # Evaluate expr and record the warnings and messages it signals, in order.
@@ -131,3 +274,18 @@ qtl2mr_ordered_lapply <- function(X, FUN, after = NULL) {
   out
 }
 
+# Contexts are stored without their n x n matrices; a context rebuilt from the
+# same arguments is identical, so the matrices are recomputed only when a fit
+# is missing.
+qtl2mr_context_large_fields <- c("raw_transform", "star_rotation", "inverse_residual", "kinship_decomp", "kinship")
+
+qtl2mr_compact_context <- function(ctx) {
+  ctx[intersect(qtl2mr_context_large_fields, names(ctx))] <- NULL
+  ctx
+}
+
+qtl2mr_full_context <- function(context) {
+  if (!is.null(context$raw_transform)) return(context)
+  if (!is.function(context$materialise)) stop("Internal error: LMM context cannot be rebuilt", call. = FALSE)
+  context$materialise()
+}
