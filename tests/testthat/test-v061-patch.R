@@ -124,7 +124,10 @@ test_that("raw-unit results do not depend on a constant offset of the traits", {
     expect_equal(as.numeric(qtl2mr_estimate_lmm_hsq(y + shift * stats::sd(y), K, reml = TRUE)), h,
       tolerance = 1e-3, info = format(shift))
   }
-  # A trait that is constant to rounding error is still refused.
-  expect_error(qtl2mr_estimate_lmm_hsq(stats::setNames(rep(3, length(y)), names(y)), K), "not finite")
-  expect_error(qtl2mr_estimate_lmm_hsq(stats::setNames(rep(3e8, length(y)), names(y)), K), "not finite")
+  # A trait that is constant to rounding error is still refused (optimize() warns
+  # about the infinite objective on the way).
+  expect_error(suppressWarnings(qtl2mr_estimate_lmm_hsq(stats::setNames(rep(3, length(y)), names(y)), K)),
+    "not finite")
+  expect_error(suppressWarnings(qtl2mr_estimate_lmm_hsq(stats::setNames(rep(3e8, length(y)), names(y)), K)),
+    "not finite")
 })
