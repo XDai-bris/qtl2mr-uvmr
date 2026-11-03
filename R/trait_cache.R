@@ -227,8 +227,11 @@ qtl2mr_set_workers <- function(n_workers) {
   invisible(old)
 }
 
+# Under options(warn >= 2) a warning is an error that a caller's handler (for
+# example suppressWarnings()) may still muffle; that handler does not exist in
+# a forked worker, so refits then run in this process.
 qtl2mr_can_fork <- function(n_workers, n_tasks) {
-  n_workers > 1L && n_tasks > 1L && identical(.Platform$OS.type, "unix")
+  n_workers > 1L && n_tasks > 1L && identical(.Platform$OS.type, "unix") && getOption("warn", 0L) < 2L
 }
 
 # lapply() over X whose calls may run in forked workers. FUN must not draw
@@ -242,7 +245,7 @@ qtl2mr_ordered_lapply <- function(X, FUN, after = NULL) {
     if (!is.function(after)) return(lapply(X, FUN))
     out <- vector("list", length(X))
     for (i in seq_along(X)) {
-      out[i] <- list(FUN(X[[i]]))
+      out[i] <- lapply(X[i], FUN)
       after(i)
     }
     names(out) <- names(X)
@@ -250,18 +253,16 @@ qtl2mr_ordered_lapply <- function(X, FUN, after = NULL) {
   }
   index <- seq_along(X)
   chunks <- split(index, (index - 1L) %% min(n_workers, length(X)))
-  # Under options(warn >= 2) a warning is an error inside FUN, as in sequential
-  # code, so it is not intercepted.
-  capture_warnings <- getOption("warn", 0L) < 2L
   run_chunk <- function(idx) {
     assign("n_workers", 1L, envir = qtl2mr_state)
     lapply(idx, function(i) {
       conditions <- list()
       error <- NULL
+      # Through lapply(), so that conditions raised by FUN carry the same call
+      # as in a sequential lapply().
       value <- tryCatch(withCallingHandlers(
-        FUN(X[[i]]),
+        lapply(X[i], FUN)[[1L]],
         warning = function(w) {
-          if (!capture_warnings) return(invisible(NULL))
           conditions[[length(conditions) + 1L]] <<- w
           invokeRestart("muffleWarning")
         },
