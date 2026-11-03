@@ -685,9 +685,11 @@ qtl2mr_batch_owned_paths <- function(output_dir) {
   tables <- c("main_results", "method_comparison", "locus_results", "overlap_qc", "warnings", "errors",
     "run_manifest", "sample_exclusions", "probability_normalization", "input_alignment",
     "selected_loci", "first_stage_summary", "sample_qc", "first_stage_filter_results",
-    "mr_block_cache_manifest", "exact_group_plan", "sample_groups", "selected_loci_summary", "workload_summary")
+    "mr_block_cache_manifest", "exact_group_plan", "sample_groups", "selected_loci_summary", "workload_summary",
+    "locus_blocks_manifest")
   paths <- file.path(output_dir, c(paste0("batch_", tables, ".csv"),
-    "batch_config.json", "batch_resume_state.rds", "batch_pair_records", "mr_block_cache", "by_exposure"))
+    "batch_config.json", "batch_resume_state.rds", "batch_pair_records", "mr_block_cache", "by_exposure",
+    "batch_locus_blocks"))
   links <- Sys.readlink(paths)
   paths[file.exists(paths) | (!is.na(links) & nzchar(links))]
 }
@@ -696,8 +698,9 @@ qtl2mr_batch_owned_paths <- function(output_dir) {
 # write outside output_dir. Such folders are refused before anything is written.
 qtl2mr_batch_linked_paths <- function(output_dir) {
   paths <- qtl2mr_batch_owned_paths(output_dir)
-  records <- qtl2mr_batch_records_dir(output_dir)
-  if (dir.exists(records)) paths <- c(paths, list.files(records, all.files = TRUE, no.. = TRUE, full.names = TRUE))
+  for (records in c(qtl2mr_batch_records_dir(output_dir), qtl2mr_batch_blocks_dir(output_dir))) {
+    if (dir.exists(records)) paths <- c(paths, list.files(records, all.files = TRUE, no.. = TRUE, full.names = TRUE))
+  }
   links <- Sys.readlink(paths)
   paths[!is.na(links) & nzchar(links)]
 }
@@ -925,6 +928,8 @@ qtl2mr_check_flag <- function(x, name) {
 
 qtl2mr_batch_records_dir <- function(output_dir) file.path(output_dir, "batch_pair_records")
 
+qtl2mr_batch_blocks_dir <- function(output_dir) file.path(output_dir, "batch_locus_blocks")
+
 qtl2mr_atomic_save_rds <- function(object, path) {
   tmp <- paste0(path, ".tmp-", Sys.getpid())
   on.exit(if (file.exists(tmp)) unlink(tmp), add = TRUE)
@@ -1020,7 +1025,8 @@ qtl2mr_batch_append_pair <- function(batch, result) {
 # Fit one exposure-outcome pair exactly as run_qtl2mr_analysis() would fit
 # qtl2mr_pair_input(resources, instruments, exposure, outcome). Errors are
 # returned as error rows; the caller applies fail_fast.
-qtl2mr_batch_fit_pair <- function(resources, pair, instruments, settings, context_cache, fit_cache) {
+qtl2mr_batch_fit_pair <- function(resources, pair, instruments, settings, context_cache, fit_cache,
+                                  write_locus_blocks = FALSE) {
   t0 <- proc.time()[["elapsed"]]
   tryCatch({
     rows <- qtl2mr_exposure_instruments(instruments, pair$exposure)
@@ -1036,7 +1042,7 @@ qtl2mr_batch_fit_pair <- function(resources, pair, instruments, settings, contex
     warn <- qtl2mr_warning_table(pilot)
     if (nrow(warn)) warn <- cbind(pair_id = pair$pair_id, warn)
     overlap <- pilot$overlap_summary
-    list(
+    result <- list(
       main = qtl2mr_batch_main_row(pair, pilot, runtime),
       methods = cbind(pair_id = pair$pair_id, exposure = pair$exposure, outcome = pair$outcome,
         qtl2mr_method_comparison_table(pilot)),
@@ -1045,6 +1051,8 @@ qtl2mr_batch_fit_pair <- function(resources, pair, instruments, settings, contex
       warnings = warn,
       probability = qtl2mr_batch_probability_table(pair, pilot), error = NULL
     )
+    if (isTRUE(write_locus_blocks)) result$blocks <- qtl2mr_strip_locus_blocks(pair, pilot)
+    result
   }, error = function(e) {
     runtime <- proc.time()[["elapsed"]] - t0
     list(
@@ -1052,6 +1060,66 @@ qtl2mr_batch_fit_pair <- function(resources, pair, instruments, settings, contex
       error = qtl2mr_error_row(pair, "pair", e, runtime_sec = runtime)
     )
   })
+}
+
+# Per-locus blocks of one pair with the per-mouse parts removed: what
+# fit_multilocus_founder_mr() needs to refit the pair, the first-stage and
+# Steiger statistics of the locus table, fit sizes and hsq. fit_x and fit_y
+# keep df, n and hsq only, as read by qtl2mr_locus_first_stage().
+qtl2mr_strip_locus_blocks <- function(pair, pilot) {
+  blocks <- pilot$locus_blocks
+  first <- pilot$locus_first_stage %||% qtl2mr_locus_first_stage(blocks)
+  selected <- pilot$selected_loci %||% data.frame(marker = character())
+  out <- lapply(seq_along(blocks), function(i) {
+    b <- blocks[[i]]
+    marker <- b$marker %||% names(blocks)[[i]]
+    f <- first[match(marker, first$marker), , drop = FALSE]
+    pos <- if ("pos" %in% names(selected)) selected$pos[match(marker, selected$marker)] else NA_real_
+    list(
+      marker = marker, chr = as.character(b$chr), pos = as.numeric(pos),
+      beta_x = b$beta_x, beta_y = b$beta_y, Sigma_x = b$Sigma_x, Sigma_y = b$Sigma_y, Sigma_xy = b$Sigma_xy,
+      F_X_block = f$F_X_block, F_Y_block = f$F_Y_block,
+      partial_R2_X_block = f$partial_R2_X_block, partial_R2_Y_block = f$partial_R2_Y_block,
+      steiger_pass = f$steiger_pass,
+      df_x = f$df_x, df_y = f$df_y, n_x = f$n_x, n_y = f$n_y,
+      n_overlap = b$n_overlap %||% NA_integer_, hsq_x = f$hsq_x, hsq_y = f$hsq_y,
+      rho_xy = b$rho_xy %||% NA_real_, cross_cov_model = b$cross_cov_model %||% NA_character_,
+      joint_psd_status = b$joint_psd_status %||% NA_character_,
+      fit_x = list(df = b$fit_x$df, n = b$fit_x$n, hsq = b$fit_x$hsq),
+      fit_y = list(df = b$fit_y$df, n = b$fit_y$n, hsq = b$fit_y$hsq)
+    )
+  })
+  names(out) <- names(blocks)
+  attr(out, "qtl2mr_locus_blocks") <- list(schema = "qtl2mr-locus-blocks-v1", pair_id = pair$pair_id,
+    exposure = pair$exposure, outcome = pair$outcome,
+    cross_cov_model = pilot$summary$cross_cov_model[[1L]],
+    standardize_phenotypes = pilot$summary$standardize_phenotypes[[1L]], ridge = 1e-10)
+  out
+}
+
+qtl2mr_block_file_path <- function(output_dir, pair_index) {
+  file.path(qtl2mr_batch_blocks_dir(output_dir), sprintf("pair_%06d.rds", as.integer(pair_index)))
+}
+
+# One RDS per completed pair, from the pair payloads (new and resumed), and a
+# manifest in pair order.
+qtl2mr_write_locus_blocks <- function(output_dir, payloads, pairs) {
+  dir.create(qtl2mr_batch_blocks_dir(output_dir), recursive = TRUE, showWarnings = FALSE)
+  rows <- list()
+  for (id in pairs$pair_id) {
+    blocks <- payloads[[id]]$blocks
+    if (is.null(blocks)) next
+    index <- match(id, pairs$pair_id)
+    path <- qtl2mr_block_file_path(output_dir, index)
+    qtl2mr_atomic_save_rds(blocks, path)
+    rows[[length(rows) + 1L]] <- data.frame(pair_index = index, pair_id = id,
+      exposure = pairs$exposure[[index]], outcome = pairs$outcome[[index]], n_loci = length(blocks),
+      file = file.path("batch_locus_blocks", basename(path)), stringsAsFactors = FALSE)
+  }
+  manifest <- if (length(rows)) do.call(rbind, rows) else data.frame(pair_index = integer(), pair_id = character(),
+    exposure = character(), outcome = character(), n_loci = integer(), file = character(), stringsAsFactors = FALSE)
+  utils::write.csv(manifest, file.path(output_dir, "batch_locus_blocks_manifest.csv"), row.names = FALSE)
+  manifest
 }
 
 qtl2mr_batch_worker_failure_rows <- function(pairs, message) {
@@ -1073,13 +1141,21 @@ qtl2mr_batch_assemble <- function(batch, records, results, todo, pairs, prefligh
 
 # On a fail_fast stop, completed pairs are published so the user can inspect them;
 # their records already allow resume = TRUE to continue.
-qtl2mr_batch_publish_partial <- function(output_dir, records, results, todo, batch, pairs, preflight, manifest) {
+qtl2mr_batch_publish_partial <- function(output_dir, records, results, todo, batch, pairs, preflight, manifest,
+                                         write_locus_blocks = FALSE) {
   if (is.null(output_dir)) return(invisible(NULL))
   done <- !vapply(results, is.null, logical(1))
   batch <- qtl2mr_batch_assemble(batch, records, results[done], todo[done, , drop = FALSE], pairs, preflight)
   batch$run_manifest <- manifest(batch, "stopped_fail_fast")
   write_qtl2mr_batch_outputs(batch, output_dir)
+  if (isTRUE(write_locus_blocks)) {
+    qtl2mr_write_locus_blocks(output_dir, qtl2mr_batch_payloads(records, results[done], todo[done, , drop = FALSE]), pairs)
+  }
   invisible(output_dir)
+}
+
+qtl2mr_batch_payloads <- function(records, results, todo) {
+  c(lapply(records, function(r) r$payload), stats::setNames(results, todo$pair_id))
 }
 
 # Every table gets its documented columns first, in a fixed order, whether or
@@ -1119,7 +1195,8 @@ run_qtl2mr_batch <- function(resources,
                              resume = FALSE,
                              overwrite = FALSE,
                              output_dir = NULL,
-                             progress = TRUE) {
+                             progress = TRUE,
+                             write_locus_blocks = FALSE) {
   if (!inherits(resources, "qtl2mr_resources")) stop("resources must come from qtl2mr_prepare_resources()", call. = FALSE)
   if (missing(instruments)) {
     stop("instruments is required; select them with qtl2mr_select_instruments() or supply a table with exposure and marker columns", call. = FALSE)
@@ -1129,6 +1206,8 @@ run_qtl2mr_batch <- function(resources,
   overwrite <- qtl2mr_check_flag(overwrite, "overwrite")
   progress <- qtl2mr_check_flag(progress, "progress")
   n_workers <- qtl2mr_check_count(n_workers, "n_workers")
+  write_locus_blocks <- qtl2mr_check_flag(write_locus_blocks, "write_locus_blocks")
+  if (write_locus_blocks && is.null(output_dir)) stop("write_locus_blocks = TRUE requires output_dir", call. = FALSE)
   settings <- qtl2mr_fit_settings(
     on_nonestimable_locus = match.arg(on_nonestimable_locus),
     reported_estimator_policy = match.arg(reported_estimator_policy),
@@ -1142,6 +1221,8 @@ run_qtl2mr_batch <- function(resources,
   pairs <- qtl2mr_normalize_pairs(pairs)
   instruments <- qtl2mr_normalize_instruments(instruments, resources)
   config <- settings
+  # Options that change outputs are recorded, and fingerprinted, only when used.
+  if (write_locus_blocks) config$write_locus_blocks <- TRUE
 
   # Destination, pair preflight and the checkpoint are all checked before
   # anything in output_dir is written or removed.
@@ -1168,7 +1249,8 @@ run_qtl2mr_batch <- function(resources,
   pair_index <- match(todo$pair_id, pairs$pair_id)
   fit_one <- function(i, context_cache, fit_cache) {
     pair <- todo[i, , drop = FALSE]
-    result <- qtl2mr_batch_fit_pair(resources, pair, instruments, settings, context_cache, fit_cache)
+    result <- qtl2mr_batch_fit_pair(resources, pair, instruments, settings, context_cache, fit_cache,
+      write_locus_blocks = write_locus_blocks)
     if (!is.null(output_dir) && is.null(result$error)) {
       qtl2mr_write_pair_record(output_dir, pair_index[[i]], pair$pair_id, fingerprint, result)
     }
@@ -1287,7 +1369,8 @@ run_qtl2mr_batch <- function(resources,
     )
   }
   if (!is.null(first_failure)) {
-    qtl2mr_batch_publish_partial(output_dir, records, results, todo, batch, pairs, preflight, manifest)
+    qtl2mr_batch_publish_partial(output_dir, records, results, todo, batch, pairs, preflight, manifest,
+      write_locus_blocks = write_locus_blocks)
     stop(sprintf("Pair %s failed (fail_fast = TRUE): %s", first_failure$pair_id[[1L]],
       first_failure$error_message[[1L]]), call. = FALSE)
   }
@@ -1296,6 +1379,11 @@ run_qtl2mr_batch <- function(resources,
   batch$run_manifest <- manifest(batch, "complete")
   if (!is.null(output_dir)) {
     files <- write_qtl2mr_batch_outputs(batch, output_dir)
+    if (write_locus_blocks) {
+      batch$locus_blocks_manifest <- qtl2mr_write_locus_blocks(output_dir,
+        qtl2mr_batch_payloads(records, results, todo), pairs)
+      files <- c(files, "batch_locus_blocks_manifest.csv")
+    }
     hashes <- tools::md5sum(file.path(output_dir, files))
     names(hashes) <- files
     qtl2mr_write_resume_state(output_dir, fingerprint, hashes)
