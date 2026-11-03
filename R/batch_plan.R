@@ -6,8 +6,8 @@
 # and a planned fit is stored under the same exact key the pair looks up.
 #
 # Pairs are processed in waves (consecutive pairs, or whole exposure groups when
-# groups run in parallel workers) sized so that one wave's fits stay well within
-# the registry budget. After a wave, its entries that no later wave reads become
+# groups run in parallel workers) sized so that one wave's fits and contexts take
+# at most half the registry budget, measured as the registry measures them. After a wave, its entries that no later wave reads become
 # the first to be released when the budget is reached; within the budget they
 # stay available to later calls in the session.
 
@@ -49,31 +49,68 @@ qtl2mr_registry_item <- function(info) {
     paste(info$trait, info$chr, info$marker, sep = "\r")
 }
 
-# Waves of whole units (lists of pair indices), in order. A unit always fits in
-# a wave of its own.
-qtl2mr_batch_waves <- function(plan, units, max_fits) {
-  waves <- list()
-  current <- integer()
-  items <- character()
-  for (u in units) {
-    merged <- union(items, qtl2mr_batch_fit_items(plan[u]))
-    if (length(current) && length(merged) > max_fits) {
-      waves[[length(waves) + 1L]] <- current
-      current <- u
-      items <- qtl2mr_batch_fit_items(plan[u])
-    } else {
-      current <- c(current, u)
-      items <- merged
-    }
-  }
-  if (length(current)) waves[[length(waves) + 1L]] <- current
-  waves
+# Distinct contexts (trait, sample set, chromosome) a set of pairs reads.
+qtl2mr_batch_context_items <- function(plan) {
+  unique(unlist(lapply(plan, function(p) {
+    if (is.null(p)) return(character())
+    as.vector(outer(paste(p$traits, p$sig, sep = "\r"), unique(p$chr), paste, sep = "\r"))
+  }), use.names = FALSE))
 }
 
-# Fits per wave: half the registry budget, at the size of a fit for these samples.
-qtl2mr_batch_max_fits <- function(resources) {
+# Waves of whole units (lists of pair indices), in order: a wave closes before
+# a unit that would take its distinct fits and contexts, at the sizes the
+# registry charges, past max_bytes, once it holds at least min_units units. A
+# last wave with fewer than min_units units joins the one before, so that every
+# wave of exposure groups runs them in parallel workers.
+qtl2mr_batch_waves <- function(plan, units, max_bytes, sizes, min_units = 1L) {
+  waves <- list()
+  current <- list()
+  fits <- contexts <- character()
+  for (u in units) {
+    u_fits <- qtl2mr_batch_fit_items(plan[u])
+    u_contexts <- qtl2mr_batch_context_items(plan[u])
+    merged_fits <- union(fits, u_fits)
+    merged_contexts <- union(contexts, u_contexts)
+    bytes <- length(merged_fits) * sizes$fit + length(merged_contexts) * sizes$context
+    if (length(current) >= min_units && bytes > max_bytes) {
+      waves[[length(waves) + 1L]] <- current
+      current <- list()
+      merged_fits <- u_fits
+      merged_contexts <- u_contexts
+    }
+    current[[length(current) + 1L]] <- u
+    fits <- merged_fits
+    contexts <- merged_contexts
+  }
+  if (length(current)) {
+    if (length(current) < min_units && length(waves)) {
+      waves[[length(waves)]] <- c(waves[[length(waves)]], current)
+    } else waves[[length(waves) + 1L]] <- current
+  }
+  lapply(waves, function(w) unlist(w, use.names = FALSE))
+}
+
+# object.size() of one locus fit and one stored (compact) context on all the
+# samples, built with the package's own fitting code on a probe phenotype: the
+# measure the registry charges, and an upper bound for the batch's entries,
+# whose sample sets are subsets. Falls back to a conservative formula.
+qtl2mr_batch_entry_sizes <- function(resources) {
   n <- max(length(resources$sample_ids), 1L)
-  max(1L, as.integer(0.5 * qtl2mr_cache_budget() / (8 * n * 45 + 20000)))
+  fallback <- list(fit = 8 * n * 100 + 50000, context = 8 * n * 60 + 50000)
+  tryCatch(qtl2mr_quietly({
+    ids <- resources$sample_ids
+    probe <- stats::setNames(as.numeric(seq_along(ids) %% 7L) + 0.5, ids)
+    ctx <- prepare_lmm_context(probe, kinship = NULL, addcovar = qtl2mr_prepared_covar(resources),
+      sample_ids = ids, standardize_pheno = TRUE, trait_name = "size_probe", chr = "size_probe")
+    gp <- resources$allele_probs[[1L]]
+    marker <- dimnames(gp)[[3L]][[1L]]
+    contrasts <- make_founder_contrasts(dimnames(gp)[[2L]])
+    design <- qtl2mr_batch_marker_design(gp, marker, ctx$sample_ids, contrasts)
+    fit <- qtl2mr_fit_founder_lmm_marker(design, marker, ctx, contrasts, dimnames(gp)[[2L]], NULL,
+      paste0("FC", 1:7), 1e-12)
+    list(fit = as.numeric(utils::object.size(fit)),
+      context = as.numeric(utils::object.size(qtl2mr_compact_context(ctx))))
+  }), error = function(e) fallback)
 }
 
 # Work units of a wave: one per (trait, sample set), with the markers it needs
@@ -135,6 +172,11 @@ qtl2mr_batch_prefill <- function(resources, plan, settings, n_workers) {
     paste(c(u$samples %||% "", which(!is.finite(as.numeric(v)))), collapse = ",")
   }, character(1))
   units <- units[order(pattern, names(units))]
+  # Entries are pinned as they are made, so that filling a wave never releases
+  # an entry the same wave needs.
+  reg <- qtl2mr_registry()
+  reg$pin_new <- TRUE
+  on.exit(reg$pin_new <- NULL, add = TRUE)
   if (!qtl2mr_can_fork(n_workers, length(units))) return(qtl2mr_batch_prefill_run(input, units, settings))
   cost <- vapply(units, function(u) 50 * length(u$markers) + length(unlist(u$markers)), numeric(1))
   n <- min(n_workers, length(units))

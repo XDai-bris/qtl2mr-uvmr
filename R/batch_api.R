@@ -1292,12 +1292,14 @@ run_qtl2mr_batch <- function(resources,
   backend <- "sequential"
   groups <- split(seq_len(nrow(todo)), factor(todo$exposure, levels = unique(todo$exposure)))
   use_fork <- n_workers > 1L && length(groups) > 1L && identical(.Platform$OS.type, "unix")
-  # Waves: whole exposure groups when groups run in workers, consecutive pairs
-  # otherwise. Each wave's trait fits are computed first (in parallel by trait
-  # when n_workers > 1), then its pairs are fitted as before.
+  # Waves: whole exposure groups when groups run in workers (at least n_workers
+  # groups per wave, so that every wave forks its groups as before), consecutive
+  # pairs otherwise. Each wave's trait fits are computed first (in parallel by
+  # trait when n_workers > 1), then its pairs are fitted as before.
   plan <- qtl2mr_batch_plan(resources, todo, instruments, sample_policy)
   waves <- qtl2mr_batch_waves(plan, if (use_fork) unname(groups) else as.list(seq_len(nrow(todo))),
-    qtl2mr_batch_max_fits(resources))
+    0.5 * qtl2mr_cache_budget(), qtl2mr_batch_entry_sizes(resources),
+    min_units = if (use_fork) max(2L, n_workers) else 1L)
   wave_items <- lapply(waves, function(idx) qtl2mr_batch_release_items(plan[idx]))
   last_wave <- integer()
   for (w in seq_along(waves)) last_wave[wave_items[[w]]] <- w

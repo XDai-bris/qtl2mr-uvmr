@@ -130,6 +130,7 @@ qtl2mr_prepare_lmm_context_cached <- function(pheno,
     # A hit whose stored value was released: recompute it silently, since a hit
     # signals nothing.
     rec <- qtl2mr_recording(compute(), muffle = TRUE)
+    qtl2mr_count_computed("context")
     qtl2mr_registry_put("context", key, qtl2mr_compact_context(rec$value), conditions = rec$conditions,
       info = list(trait = trait_name, chr = as.character(chr %||% NA_character_), marker = NA_character_))
     return(rec$value)
@@ -144,6 +145,7 @@ qtl2mr_prepare_lmm_context_cached <- function(pheno,
     return(reuse(entry$value))
   }
   rec <- qtl2mr_recording(compute())
+  qtl2mr_count_computed("context")
   qtl2mr_registry_put("context", key, qtl2mr_compact_context(rec$value), conditions = rec$conditions,
     info = list(trait = trait_name, chr = as.character(chr %||% NA_character_), marker = NA_character_))
   if (scoped) {
@@ -336,7 +338,9 @@ fit_founder_lmm_blocks_batch <- function(genoprobs_chr,
   full <- NULL
   compute <- function(design, marker) {
     if (is.null(full)) full <<- qtl2mr_full_context(context)
-    qtl2mr_fit_founder_lmm_marker(design, marker, full, contrasts, allele_names, fallback_genoprobs, fc_cols, tol)
+    fit <- qtl2mr_fit_founder_lmm_marker(design, marker, full, contrasts, allele_names, fallback_genoprobs, fc_cols, tol)
+    qtl2mr_count_computed("fit")
+    fit
   }
   info <- function(marker) list(trait = context$trait_name, chr = as.character(context$chr), marker = marker)
   out <- vector("list", length(markers))

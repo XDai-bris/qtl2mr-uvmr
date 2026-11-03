@@ -103,6 +103,7 @@ qtl2mr_registry_put <- function(kind, key, value, conditions = list(), info = li
   assign(id, entry, envir = reg$entries)
   reg$bytes <- reg$bytes + entry$bytes
   if (is.environment(reg$journal)) assign(id, TRUE, envir = reg$journal)
+  if (isTRUE(reg$pin_new)) assign(id, TRUE, envir = reg$pins)
   qtl2mr_registry_evict(reg)
   invisible(entry)
 }
@@ -118,9 +119,18 @@ qtl2mr_registry_import <- function(entries) {
     assign(id, entry, envir = reg$entries)
     reg$bytes <- reg$bytes + entry$bytes
     if (is.environment(reg$journal)) assign(id, TRUE, envir = reg$journal)
+    if (isTRUE(reg$pin_new)) assign(id, TRUE, envir = reg$pins)
   }
   qtl2mr_registry_evict(reg)
   invisible(names(entries))
+}
+
+# Internal counts of computed (not reused) LMM contexts and fits, for tests.
+qtl2mr_count_computed <- function(kind) {
+  counts <- qtl2mr_state$computed %||% c(context = 0, fit = 0)
+  counts[[kind]] <- counts[[kind]] + 1
+  assign("computed", counts, envir = qtl2mr_state)
+  invisible(NULL)
 }
 
 qtl2mr_registry_remove <- function(ids) {
