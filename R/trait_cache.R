@@ -146,6 +146,18 @@ qtl2mr_registry_evict <- function(reg = qtl2mr_registry()) {
   qtl2mr_registry_remove(drop)
 }
 
+# Entries no longer needed are made the first to be released when the budget is
+# exceeded; until then a later call in the session can still reuse them.
+qtl2mr_registry_demote <- function(ids) {
+  reg <- qtl2mr_registry()
+  for (id in intersect(ids, ls(reg$entries, all.names = TRUE))) {
+    entry <- reg$entries[[id]]
+    entry$tick <- 0
+    assign(id, entry, envir = reg$entries)
+  }
+  invisible(ids)
+}
+
 qtl2mr_registry_pin <- function(ids) {
   reg <- qtl2mr_registry()
   for (id in ids) assign(id, TRUE, envir = reg$pins)

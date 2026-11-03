@@ -7,8 +7,9 @@
 #
 # Pairs are processed in waves (consecutive pairs, or whole exposure groups when
 # groups run in parallel workers) sized so that one wave's fits stay well within
-# the registry budget. After a wave, its entries that no later wave reads are
-# released.
+# the registry budget. After a wave, its entries that no later wave reads become
+# the first to be released when the budget is reached; within the budget they
+# stay available to later calls in the session.
 
 # Per-pair demand: the two traits, their common sample set under
 # sample_policy = "pair_common_complete" (NULL otherwise), and the instruments.

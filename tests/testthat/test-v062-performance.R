@@ -310,11 +310,18 @@ test_that("batch results do not depend on the session cache, worker count or wav
   keep <- c("parallel_backend", "context_cache_hits", "context_cache_misses", "lmm_fit_cache_hits", "lmm_fit_cache_misses")
   expect_identical(par_one$value$run_manifest[keep], seq_one$value$run_manifest[keep])
   expect_identical(par_one$warnings, seq_one$warnings)
-  # Nothing the batch planned stays cached after it.
+  # After the batch its entries are the first to be released, but a second call
+  # in the session reuses them (same results).
   reg <- qtl2mr:::qtl2mr_registry()
   traits <- unique(c(one_group$exposure, one_group$outcome))
   left <- Filter(function(id) reg$entries[[id]]$info$trait %in% traits, ls(reg$entries))
-  expect_length(left, 0L)
+  expect_gt(length(left), 0L)
+  expect_true(all(vapply(left, function(id) reg$entries[[id]]$tick, numeric(1)) == 0))
+  again <- perf_capture(run_qtl2mr_batch(f$resources, one_group, inst, min_samples = 20L, progress = FALSE))
+  expect_true(perf_same(again$value[setdiff(names(again$value), "run_manifest")],
+    seq_one$value[setdiff(names(seq_one$value), "run_manifest")]))
+  expect_identical(again$value$run_manifest[keep], seq_one$value$run_manifest[keep])
+  expect_identical(again$warnings, seq_one$warnings)
 })
 
 test_that("a batch in a fresh R process gives the same results", {
@@ -467,4 +474,9 @@ test_that("the session cache stays within its budget and keeps pinned entries", 
   expect_false(is.null(qtl2mr:::qtl2mr_registry_get("fit", "k12")))
   expect_null(qtl2mr:::qtl2mr_registry_get("fit", "k2"))
   expect_equal(reg$bytes, sum(vapply(ls(reg$entries), function(id) reg$entries[[id]]$bytes, numeric(1))))
+  # Demoted entries go first, even when recently used.
+  qtl2mr:::qtl2mr_registry_demote("fit:k12")
+  qtl2mr:::qtl2mr_registry_put("fit", "k13", value(13), info = list(trait = "a", chr = "1", marker = "m13"))
+  expect_null(qtl2mr:::qtl2mr_registry_get("fit", "k12"))
+  expect_false(is.null(qtl2mr:::qtl2mr_registry_get("fit", "k11")))
 })

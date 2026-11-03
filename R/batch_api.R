@@ -1308,12 +1308,13 @@ run_qtl2mr_batch <- function(resources,
     pinned <<- qtl2mr_batch_registry_ids(wave_items[[w]])
     qtl2mr_registry_pin(pinned)
   }
-  # Entries this wave read and no later wave reads are released.
+  # Entries this wave read and no later wave reads are released first when the
+  # cache budget is reached; the others stay for later waves.
   wave_end <- function(w) {
     qtl2mr_registry_unpin(pinned)
     pinned <<- character()
     items <- wave_items[[w]]
-    qtl2mr_registry_remove(qtl2mr_batch_registry_ids(items[last_wave[items] == w]))
+    qtl2mr_registry_demote(qtl2mr_batch_registry_ids(items[last_wave[items] == w]))
   }
   if (use_fork) {
     backend <- "parallel::mclapply"
