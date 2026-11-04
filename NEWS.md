@@ -19,7 +19,16 @@ the same as in 0.6.1.9002.
   (`locus_results`: `kept = FALSE`, `drop_reason = "founder_qc_outcome"`,
   `E_min_y`; `main_results`: `n_loci_dropped_founder_qc`), so it cannot stop the
   pair as non-estimable. `qtl2mr_pair_input()` applies the same QC, so a batch
-  row equals the single analysis.
+  row equals the single analysis. When the QC is on, these columns are always
+  present (0 or NA where no locus was checked).
+- The batch applies only the outcome-side rule. The exposure side is applied by
+  `qtl2mr_select_instruments()`, so an instrument table selected without the QC
+  is not re-checked for the exposure.
+- Because `max_loci` counts only loci that pass, a QC drop can bring in a
+  lower-LOD candidate that the QC-off selection left out (`max_loci`), and
+  `locus_rank` is renumbered over the passing loci. With `max_loci` unset, the
+  QC-on selection is the QC-off selection minus the QC drops (apart from
+  candidates that fail both the QC and estimation, now labelled `founder_qc`).
 
 # qtl2mr 0.6.1.9002 (development)
 

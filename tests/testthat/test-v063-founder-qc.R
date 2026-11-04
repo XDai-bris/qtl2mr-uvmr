@@ -258,3 +258,31 @@ test_that("the QC threshold is part of the batch fingerprint", {
   written <- utils::read.csv(file.path(dir, "batch_locus_results.csv"), stringsAsFactors = FALSE)
   expect_true("E_min_y" %in% names(written))
 })
+
+test_that("with the QC on, its columns are present even when no locus is dropped or checked", {
+  f <- fqc_fixture()
+  inst <- data.frame(exposure = c("x", "w"), marker = c("a1", "a3"))
+  pairs <- data.frame(exposure = c("x", "w"), outcome = c("w", "x"))
+  none <- suppressWarnings(run_qtl2mr_batch(f$resources, pairs, inst, min_samples = 20L, progress = FALSE,
+    min_founder_copies = 0))
+  expect_identical(none$main_results$n_loci_dropped_founder_qc, c(0L, 0L))
+  expect_true(is.double(none$locus_results$E_min_y) && all(is.finite(none$locus_results$E_min_y)))
+  expect_identical(none$locus_results$drop_reason, c("", ""))
+  # Every pair stops at preflight (no instruments for y): the columns are still there.
+  unchecked <- suppressWarnings(run_qtl2mr_batch(f$resources, data.frame(exposure = "y", outcome = "x"), inst,
+    min_samples = 20L, progress = FALSE, min_founder_copies = 5))
+  expect_identical(unchecked$main_results$status, "error")
+  expect_identical(unchecked$main_results$n_loci_dropped_founder_qc, NA_integer_)
+  expect_identical(nrow(unchecked$locus_results), 0L)
+  expect_true("E_min_y" %in% names(unchecked$locus_results))
+  dir <- tempfile("v063-schema-")
+  written <- suppressWarnings(run_qtl2mr_batch(f$resources, data.frame(exposure = "y", outcome = "x"), inst,
+    min_samples = 20L, progress = FALSE, min_founder_copies = 5, output_dir = dir))
+  expect_true("E_min_y" %in% names(utils::read.csv(file.path(dir, "batch_locus_results.csv"))))
+  expect_true("n_loci_dropped_founder_qc" %in% names(utils::read.csv(file.path(dir, "batch_main_results.csv"))))
+  # Off: neither column, in either case.
+  off <- suppressWarnings(run_qtl2mr_batch(f$resources, data.frame(exposure = "y", outcome = "x"), inst,
+    min_samples = 20L, progress = FALSE))
+  expect_false("n_loci_dropped_founder_qc" %in% names(off$main_results))
+  expect_false("E_min_y" %in% names(off$locus_results))
+})

@@ -196,7 +196,11 @@ ends as a \code{too_few_loci} error. \code{qtl2mr_pair_input()} with the same
 value gives the input of the remaining loci, so a batch row still equals the
 single analysis; the QC result is recorded in the input's
 \code{metadata$founder_qc_outcome}. Loci that pass the QC but are not estimable
-still follow \code{on_nonestimable_locus}.
+still follow \code{on_nonestimable_locus}. The batch applies only this
+outcome-side rule: the exposure side is applied by
+\code{qtl2mr_select_instruments()}, so an instrument table selected without the
+QC is used as given for the exposure. In selection, because \code{max_loci}
+counts only passing loci, a QC drop can bring in a lower-LOD candidate.
 
 \code{run_qtl2mr_batch()} fits each pair exactly as
 \code{run_qtl2mr_analysis(qtl2mr_pair_input(resources, instruments, exposure,
@@ -288,7 +292,9 @@ and exclusion reason), \code{probability_normalization},
 columns whether or not it has rows. With \code{min_founder_copies},
 \code{main_results} also has \code{n_loci_dropped_founder_qc} and
 \code{locus_results} also has \code{E_min_y} (the outcome's \eqn{E} at every
-instrument of the pair), and the threshold is recorded in \code{config}. The list also holds \code{config},
+instrument of the pair); both columns are present whenever the QC is on, with
+\code{NA} for pairs that stopped before it. The threshold is recorded in
+\code{config}. The list also holds \code{config},
 \code{resources_metadata} and \code{pairs}; the run configuration is written to
 \code{batch_config.json}. With \code{write_locus_blocks = TRUE} it also holds
 \code{locus_blocks_manifest}.

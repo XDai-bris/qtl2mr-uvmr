@@ -1292,6 +1292,15 @@ qtl2mr_batch_finalize <- function(batch, pairs) {
   if (nrow(main)) main <- main[order(match(main$pair_id, pairs$pair_id), na.last = TRUE), , drop = FALSE]
   rownames(main) <- NULL
   batch$main_results <- main
+  # With the founder QC on, its columns are present whatever the pairs reached.
+  if (!is.null(batch$config$min_founder_copies)) {
+    if (!"n_loci_dropped_founder_qc" %in% names(batch$main_results)) {
+      batch$main_results$n_loci_dropped_founder_qc <- rep(NA_integer_, nrow(batch$main_results))
+    }
+    if (!"E_min_y" %in% names(batch$locus_results)) {
+      batch$locus_results$E_min_y <- rep(NA_real_, nrow(batch$locus_results))
+    }
+  }
   batch
 }
 
