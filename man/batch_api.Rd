@@ -2,6 +2,7 @@
 \alias{run_qtl2mr_batch}
 \alias{qtl2mr_prepare_resources}
 \alias{qtl2mr_select_instruments}
+\alias{qtl2mr_instrument_summary}
 \alias{qtl2mr_pair_input}
 \title{Select instruments and run qtl2mr for many exposure-outcome pairs}
 \description{
@@ -21,6 +22,8 @@ qtl2mr_select_instruments(resources, qtl_scan, exposures = NULL,
   lod_thresh = 4, peak_rule = c("peakdrop", "spacing", "legacy"),
   peakdrop = 1.5, min_spacing = 1, exclude_chr = "X", max_loci = NULL,
   F_X_min = NULL, n_workers = 1L, progress = TRUE, min_founder_copies = NULL)
+
+qtl2mr_instrument_summary(instruments, F_breaks = c(1.5, 2, 5, 10))
 
 qtl2mr_pair_input(resources, instruments, exposure, outcome,
   sample_policy = c("own_complete", "pair_common_complete"),
@@ -100,7 +103,12 @@ be logical without missing values, and only rows with \code{selected = TRUE}
 are used. \code{chr} must agree with the marker map when given; other columns
 are ignored. Pass the table to \code{qtl2mr_pair_input()}, not as
 \code{selected_loci} of \code{\link{as_qtl2mr_prepared_input}()}, which refuses
-unselected rows and other exposures' rows.}
+unselected rows and other exposures' rows. \code{qtl2mr_instrument_summary()}
+needs the data frame returned by \code{qtl2mr_select_instruments()} (at least
+\code{exposure}, \code{selected}, \code{drop_reason} and \code{F_X_block}).}
+\item{F_breaks}{Block F values at which \code{qtl2mr_instrument_summary()}
+counts the fitted candidates reaching them (one column
+\code{n_F_ge_<break>} each); distinct finite numbers.}
 \item{exposure, outcome}{Trait names of one pair.}
 \item{pairs}{Data frame or CSV path with \code{exposure} and \code{outcome}
 columns and an optional unique \code{pair_id}. Each pair uses the instruments
@@ -308,6 +316,25 @@ the settings \code{lod_thresh}, \code{peak_rule}, \code{peakdrop} and
 \code{E_min_x} (after \code{hsq_x}; \code{NA} for loci that are not autosomal)
 and the setting \code{min_founder_copies}.
 
+\code{qtl2mr_instrument_summary()} returns one row per exposure, in table
+order: \code{exposure}; \code{n_candidates}; the number of candidates dropped
+for each reason, \code{n_dropped_non_autosomal}, \code{n_dropped_founder_qc}
+(only when the table was selected with \code{min_founder_copies}),
+\code{n_dropped_nonestimable_x}, \code{n_dropped_x_fit_error},
+\code{n_dropped_F}, \code{n_dropped_max_loci} and one column for any other
+reason present; \code{n_selected}; \code{F_min}, \code{F_q25},
+\code{F_median}, \code{F_mean}, \code{F_q75} and \code{F_max} of
+\code{F_X_block} over the selected loci (type-7 quantiles, as in the single
+analysis's \code{first_stage_summary.csv}; \code{NA} when no locus is
+selected); \code{n_F_ge_<break>}, the number of fitted candidates (finite
+\code{F_X_block}, selected or not) with \code{F_X_block} at least each break;
+and the settings columns of the table (\code{selected_by}, \code{lod_thresh},
+\code{peak_rule}, \code{peakdrop}, \code{min_spacing}, \code{rule_version},
+\code{F_X_min}, \code{max_loci}, \code{exclude_chr} and, when present,
+\code{min_founder_copies}). With \code{F_X_min = NULL} and no
+\code{max_loci}, \code{n_F_ge_<b>} is the number of loci a selection with
+\code{F_X_min = b} keeps.
+
 \code{qtl2mr_pair_input()} returns a \code{qtl2mr_prepared_input} for
 \code{\link{run_qtl2mr_analysis}}.
 
@@ -357,6 +384,8 @@ resources <- qtl2mr_prepare_resources(ex$allele_probs, ex$kinship, ex$pheno,
 instruments <- qtl2mr_select_instruments(resources, scan, lod_thresh = 3,
   progress = FALSE)
 instruments[, c("exposure", "marker", "lod", "F_X_block", "selected")]
+qtl2mr_instrument_summary(instruments)[, c("exposure", "n_candidates",
+  "n_selected", "F_median", "n_F_ge_1.5", "n_F_ge_2")]
 batch <- run_qtl2mr_batch(resources, data.frame(exposure = "x", outcome = "y"),
   instruments, min_samples = 20L, progress = FALSE)
 batch$main_results[, c("pair_id", "status", "theta", "profile_ci_lower",

@@ -5,6 +5,7 @@ export(as_qtl2mr_prepared_input)
 export(validate_qtl2mr_input)
 export(qtl2mr_prepare_resources)
 export(qtl2mr_select_instruments)
+export(qtl2mr_instrument_summary)
 export(qtl2mr_pair_input)
 # Result access and sharing
 export(qtl2mr_primary_result)

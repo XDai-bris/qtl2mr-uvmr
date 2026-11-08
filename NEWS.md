@@ -1,8 +1,8 @@
 # qtl2mr 0.6.1.9004 (development)
 
-Not released. Instrument subsets in one run, on top of 0.6.1.9003; with the
-default `subsets = NULL` every result, table, file and warning is the same as
-in 0.6.1.9003.
+Not released. Instrument subsets in one run and an F report of an instrument
+table, on top of 0.6.1.9003; with the default `subsets = NULL` every result,
+table, file and warning is the same as in 0.6.1.9003.
 
 - `subsets` in `run_qtl2mr_batch()` and `run_qtl2mr_analysis()`: a named list
   of rule lists, for example
@@ -37,6 +37,12 @@ in 0.6.1.9003.
 - Single analysis: `result$subset_results` and `data/subset_results.csv`, with
   the columns of `main_result.csv`. `instrument_sensitivity.csv`,
   `steiger_sensitivity.csv` and the default sensitivity sets are unchanged.
+- New exported `qtl2mr_instrument_summary(instruments, F_breaks = c(1.5, 2, 5, 10))`:
+  the F report of a `qtl2mr_select_instruments()` table, one row per exposure
+  with `n_candidates`, the count for each drop reason, `n_selected`, the
+  minimum, quartiles, median, mean and maximum of `F_X_block` over the selected
+  loci, `n_F_ge_<break>` over all fitted candidates, and the selection
+  settings. No existing function or output changes.
 
 # qtl2mr 0.6.1.9003 (development)
 
