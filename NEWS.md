@@ -26,7 +26,14 @@ table, file and warning is the same as in 0.6.1.9003.
   single analysis) gives status `too_few_loci`; a failing refit gives status
   `error` and, in the batch, an `errors` row with stage `"subset"`, without
   stopping the run or changing the pair's main row; pairs without a fit get
-  `pair_not_fitted`.
+  `pair_not_fitted`. A failure elsewhere in a pair's subset step (selecting the
+  loci or assembling the rows) gives every subset of that pair status `error`
+  in the same way, and the main row, the locus rows and the other outputs stay
+  as without subsets.
+- Warnings raised by the estimator itself (for example the warning that
+  simulation was selected with `heterogeneity_nsim = 0`) are raised again by
+  each subset refit, so they can appear several times on the console; they do
+  not enter any table.
 - Batch: new table `subset_results` (`batch_subset_results.csv`), one row per
   pair and subset with `pair_id`, `exposure`, `outcome`, `subset`, `rules`,
   `n_loci`, `status`, `same_loci_as`, `error_message` and the estimate and test

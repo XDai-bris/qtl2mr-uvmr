@@ -1916,9 +1916,13 @@ run_qtl2mr_analysis <- function(input,
     # Subset refits of the fitted loci with the run's settings; each row is
     # completed as write_qtl2mr_results() completes the main row (q_sim_n = NULL).
     qtl2mr_progress(progress_callback, 4L, "Refit instrument subsets", sprintf("%d subsets", length(subsets)))
-    subset_results <- qtl2mr_pair_subsets(pilot, subsets, settings, min_loci = 1L,
+    # A failure anywhere in this step gives "error" rows for every subset and
+    # leaves the main result and the other outputs unchanged.
+    subset_results <- tryCatch(qtl2mr_pair_subsets(pilot, subsets, settings, min_loci = 1L,
       progress_callback = progress_callback,
-      finish = function(p) qtl2mr_complete_q_reporting(p, q_sim_n = NULL)$summary)$rows
+      finish = function(p) qtl2mr_complete_q_reporting(p, q_sim_n = NULL)$summary)$rows,
+      error = function(e) qtl2mr_subset_failure_rows(subsets, exposure, outcome, conditionMessage(e),
+        pilot$summary[, setdiff(names(pilot$summary), qtl2mr_subset_dropped_summary), drop = FALSE]))
   }
 
   result <- structure(

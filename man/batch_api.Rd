@@ -288,7 +288,12 @@ of the maximal set or of an earlier subset copies that row and records it in
 \code{same_loci_as}. A subset with fewer than \code{min_loci} loci gets status
 \code{"too_few_loci"} and no estimate; a subset whose refit fails gets status
 \code{"error"} and an \code{errors} row with stage \code{"subset"}, and does
-not stop the run under \code{fail_fast} or change the pair's other rows. Pairs
+not stop the run under \code{fail_fast} or change the pair's other rows. A
+failure elsewhere in a pair's subset step (selecting the loci or assembling the
+rows) gives every subset of that pair status \code{"error"} in the same way,
+and the main row and locus rows stay as without subsets. Warnings raised by the
+estimator itself (for example for simulation with \code{heterogeneity_nsim = 0})
+are raised again by each subset refit, so they can appear several times. Pairs
 without a fit get status \code{"pair_not_fitted"}. The specification is part of
 the configuration and the resume fingerprint; subset rows are saved in the pair
 records, so they are restored on resume. The locus blocks written by

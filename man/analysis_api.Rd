@@ -120,7 +120,8 @@ keeps the fitted loci that pass its rules (judged on \code{F_X_block} and
 \code{steiger_pass} of \code{block_first_stage.csv}) and refits the multilocus
 combination with the analysis settings, including the heterogeneity simulation
 and the diagnostic bootstrap; the LMMs are not refitted. A subset needs at
-least one locus. The main result and the existing sensitivity tables
+least one locus. A subset that cannot be fitted, or a failure anywhere in this
+step, gives rows with status \code{"error"} and the message. The main result and the existing sensitivity tables
 (\code{instrument_sensitivity.csv}, \code{steiger_sensitivity.csv}) are not
 changed.}
 \item{result}{A \code{qtl2mr_analysis_result}; for \code{report_qtl2mr_locus()}

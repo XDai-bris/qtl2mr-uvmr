@@ -325,6 +325,71 @@ test_that("subset refits leave the caller's random number stream as without subs
   expect_identical(single_after(subsets = v064_subsets[c("F2", "SF")]), single_after())
 })
 
+test_that("a failure anywhere in the subset step gives error rows and leaves the main outputs unchanged", {
+  f <- v064_fixture()
+  subsets <- v064_subsets[c("F2", "SF")]
+  reference <- v064_batch(f, subsets = subsets)
+  off <- v064_batch(f)
+  main_cols <- names(off$locus_results)
+  real_pair <- qtl2mr:::qtl2mr_pair_subsets
+  # Row assembly fails for one pair: its rows lack a column the batch table needs.
+  b <- with_mocked_bindings(v064_batch(f, subsets = subsets), qtl2mr_pair_subsets = function(pilot, ...) {
+    out <- real_pair(pilot, ...)
+    if (identical(pilot$summary$outcome[[1L]], "w")) out$rows$theta <- NULL
+    out
+  })
+  expect_identical(v064_drop_runtime(b$main_results), v064_drop_runtime(reference$main_results))
+  expect_identical(v064_drop_runtime(b$main_results), v064_drop_runtime(off$main_results))
+  expect_identical(b$locus_results[main_cols], off$locus_results)
+  bad <- b$subset_results$pair_id == "x__to__w"
+  expect_identical(b$subset_results$status[bad], c("error", "error"))
+  expect_match(b$subset_results$error_message[bad], "undefined columns")
+  expect_true(all(is.na(b$subset_results$n_loci[bad]) & is.na(b$subset_results$theta[bad])))
+  expect_identical(b$subset_results$rules[bad], c("F_X_min>=2", "steiger"))
+  expect_identical(b$subset_results[!bad, ], reference$subset_results[!bad, ])
+  expect_true(all(is.na(unlist(b$locus_results[b$locus_results$pair_id == "x__to__w", c("in_subset_F2", "in_subset_SF")]))))
+  expect_identical(b$locus_results[b$locus_results$pair_id != "x__to__w", ],
+    reference$locus_results[reference$locus_results$pair_id != "x__to__w", ])
+  expect_identical(b$errors$stage, c("subset", "subset"))
+  expect_identical(b$errors$pair_id, c("x__to__w", "x__to__w"))
+  expect_match(b$errors$error_message, "^subset (F2|SF): .*undefined columns")
+  expect_identical(b$run_manifest$n_pairs_error, 0L)
+  # The whole step fails for every pair; pair records are still written.
+  dir <- tempfile("v064-stepfail-")
+  all_bad <- with_mocked_bindings(v064_batch(f, subsets = subsets, output_dir = dir),
+    qtl2mr_pair_subsets = function(...) stop("injected subset step failure"))
+  expect_identical(v064_drop_runtime(all_bad$main_results), v064_drop_runtime(off$main_results))
+  expect_identical(all_bad$locus_results[main_cols], off$locus_results)
+  expect_identical(all_bad$subset_results$status, rep("error", 6L))
+  expect_identical(all_bad$subset_results$error_message, rep("injected subset step failure", 6L))
+  expect_identical(names(all_bad$subset_results), qtl2mr:::qtl2mr_batch_subset_columns())
+  expect_identical(nrow(all_bad$errors), 6L)
+  expect_length(list.files(file.path(dir, "batch_pair_records")), 3L)
+  expect_identical(utils::read.csv(file.path(dir, "batch_subset_results.csv"), stringsAsFactors = FALSE)$status,
+    rep("error", 6L))
+  # Single analysis: error rows with the message, main outputs as without subsets.
+  run_single <- function(...) suppressWarnings(run_qtl2mr_analysis(qtl2mr_pair_input(f$resources, f$instruments, "x", "y"),
+    output_dir = tempfile("v064-stepfail-single-"), make_html = FALSE, make_figures = FALSE, verbose = FALSE,
+    heterogeneity_method = "chisq", diagnostic_bootstrap_B = 0L, ...))
+  single_off <- run_single()
+  single_ok <- run_single(subsets = subsets)
+  single_bad <- with_mocked_bindings(run_single(subsets = subsets),
+    qtl2mr_pair_subsets = function(...) stop("injected subset step failure"))
+  sub <- single_bad$subset_results
+  expect_identical(names(sub), names(single_ok$subset_results))
+  expect_identical(sub$subset, names(subsets))
+  expect_identical(sub$status, c("error", "error"))
+  expect_identical(sub$error_message, rep("injected subset step failure", 2L))
+  expect_true(all(is.na(sub$theta) & is.na(sub$n_loci)))
+  expect_true(file.exists(file.path(single_bad$output_dir, "data", "subset_results.csv")))
+  expect_identical(single_bad$pilot$summary, single_off$pilot$summary)
+  for (file in c("main_result.csv", "instrument_sensitivity.csv", "steiger_sensitivity.csv", "loo_mr.csv",
+                 "method_comparison.csv", "block_first_stage.csv", "warnings.csv", "q_calibration.csv")) {
+    expect_identical(unname(tools::md5sum(file.path(single_bad$output_dir, "data", file))),
+      unname(tools::md5sum(file.path(single_off$output_dir, "data", file))), label = file)
+  }
+})
+
 test_that("O1 locus blocks hold the maximal set whether or not subsets are requested", {
   f <- v064_fixture()
   a <- tempfile("v064-blocks-a-")

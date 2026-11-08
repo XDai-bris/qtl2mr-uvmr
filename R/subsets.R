@@ -175,30 +175,59 @@ qtl2mr_batch_subset_columns <- function() {
 
 qtl2mr_empty_subset_results <- function() qtl2mr_empty_dataframe(qtl2mr_batch_subset_columns())
 
+# Rows for every subset of a pair when the subset step itself fails (outside
+# the guard of a single refit): status "error" with the message, no estimates.
+# `template` is a one-row table whose columns follow the identification columns.
+qtl2mr_subset_failure_rows <- function(subsets, exposure, outcome, message, template) {
+  n <- length(subsets)
+  ids <- data.frame(exposure = rep(exposure, n), outcome = rep(outcome, n), subset = names(subsets),
+    rules = vapply(subsets, qtl2mr_subset_rules_text, character(1), USE.NAMES = FALSE),
+    n_loci = rep(NA_integer_, n), status = rep("error", n), same_loci_as = rep(NA_character_, n),
+    error_message = rep(message, n), stringsAsFactors = FALSE)
+  rest <- template[rep(NA_integer_, n), setdiff(names(template), names(ids)), drop = FALSE]
+  rownames(rest) <- NULL
+  cbind(ids, rest)
+}
+
+qtl2mr_subset_error_rows <- function(pair, errors) {
+  do.call(rbind, lapply(names(errors), function(nm) {
+    row <- qtl2mr_error_row(pair, "subset", errors[[nm]])
+    row$error_message <- paste0("subset ", nm, ": ", row$error_message)
+    row
+  }))
+}
+
 # A fitted batch pair: its subset rows, an in_subset_<name> column per subset on
 # its locus rows (NA on rows that were not fitted), and an errors row with
-# stage "subset" per failed subset. The pair's main row is not changed.
+# stage "subset" per failed subset. Everything is built first and attached only
+# when complete; if any part of the step fails, every subset of the pair gets an
+# "error" row and an errors row, and the pair's main row and locus rows are kept
+# as they are.
 qtl2mr_batch_add_subsets <- function(result, pair, pilot, subsets, settings) {
-  sub <- qtl2mr_pair_subsets(pilot, subsets, settings, min_loci = settings$min_loci)
-  rows <- sub$rows
-  rows$pair_id <- rep(pair$pair_id, nrow(rows))
-  result$subsets <- rows[, qtl2mr_batch_subset_columns(), drop = FALSE]
-  loci <- result$loci
-  idx <- match(loci$marker, sub$markers)
-  fitted <- loci$kept %in% TRUE & !is.na(idx)
-  for (nm in names(subsets)) {
-    value <- rep(NA, nrow(loci))
-    value[fitted] <- sub$membership[[nm]][idx[fitted]]
-    loci[[paste0("in_subset_", nm)]] <- value
-  }
-  result$loci <- loci
-  if (length(sub$errors)) {
-    result$subset_errors <- do.call(rbind, lapply(names(sub$errors), function(nm) {
-      row <- qtl2mr_error_row(pair, "subset", sub$errors[[nm]])
-      row$error_message <- paste0("subset ", nm, ": ", row$error_message)
-      row
-    }))
-  }
+  parts <- tryCatch({
+    sub <- qtl2mr_pair_subsets(pilot, subsets, settings, min_loci = settings$min_loci)
+    rows <- sub$rows
+    rows$pair_id <- rep(pair$pair_id, nrow(rows))
+    rows <- rows[, qtl2mr_batch_subset_columns(), drop = FALSE]
+    loci <- result$loci
+    idx <- match(loci$marker, sub$markers)
+    fitted <- loci$kept %in% TRUE & !is.na(idx)
+    for (nm in names(subsets)) {
+      value <- rep(NA, nrow(loci))
+      value[fitted] <- sub$membership[[nm]][idx[fitted]]
+      loci[[paste0("in_subset_", nm)]] <- value
+    }
+    list(rows = rows, loci = loci, errors = if (length(sub$errors)) qtl2mr_subset_error_rows(pair, sub$errors))
+  }, error = function(e) {
+    rows <- qtl2mr_subset_failure_rows(subsets, pair$exposure, pair$outcome, conditionMessage(e),
+      qtl2mr_empty_subset_results())
+    rows$pair_id <- rep(pair$pair_id, nrow(rows))
+    list(rows = rows[, qtl2mr_batch_subset_columns(), drop = FALSE], loci = NULL,
+      errors = qtl2mr_subset_error_rows(pair, stats::setNames(rep(list(e), length(subsets)), names(subsets))))
+  })
+  result$subsets <- parts$rows
+  if (!is.null(parts$loci)) result$loci <- parts$loci
+  if (!is.null(parts$errors)) result$subset_errors <- parts$errors
   result
 }
 
