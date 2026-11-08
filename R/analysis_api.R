@@ -1412,6 +1412,65 @@ write_qtl2mr_html_report <- function(result, file) {
   invisible(file)
 }
 
+# Completes the heterogeneity fields of a pilot (fit and summary) as the written
+# result reports them; with q_sim_n set, also runs a missing Q simulation.
+# write_qtl2mr_results() applies it to the main fit and run_qtl2mr_analysis() to
+# subset refits, so their rows are completed the same way.
+qtl2mr_complete_q_reporting <- function(pilot, q_sim_n = NULL, q_sim_seed = 1L, progress_callback = NULL) {
+  fit_q_method <- pilot$fit$Q_p_method %||%
+    if (length(pilot$locus_blocks %||% list()) == 1L) "chisq" else "simulation"
+  if (is.null(pilot$fit$Q_p_method)) pilot$fit$Q_p_method <- fit_q_method
+  if (is.null(pilot$fit$Q_chisq_df)) {
+    bx_len <- sum(vapply(pilot$locus_blocks %||% list(), function(b) length(b$beta_x %||% numeric()), integer(1L)))
+    pilot$fit$Q_chisq_df <- max(bx_len - 1L, 1L)
+  }
+  if (is.null(pilot$fit$Q_p_chisq) &&
+      is.finite(pilot$fit$Q %||% NA_real_) &&
+      is.finite(pilot$fit$Q_chisq_df %||% NA_integer_)) {
+    pilot$fit$Q_p_chisq <- stats::pchisq(
+      pilot$fit$Q,
+      df = pilot$fit$Q_chisq_df,
+      lower.tail = FALSE
+    )
+  }
+  if ((is.null(pilot$fit$Q_p_reported) || !is.finite(pilot$fit$Q_p_reported)) &&
+      identical(fit_q_method, "chisq")) {
+    pilot$fit$Q_p_reported <- pilot$fit$Q_p_chisq %||% NA_real_
+    pilot$fit$Q_p_note <- paste0("chi-square reference with df=", pilot$fit$Q_chisq_df %||% NA_integer_)
+  }
+  if (!is.null(q_sim_n) && identical(fit_q_method, "simulation") && isTRUE(as.integer(q_sim_n) > 0L) &&
+      (is.null(pilot$fit$Q_p_sim) || !is.finite(pilot$fit$Q_p_sim))) {
+    qtl2mr_progress(progress_callback, 5L, "Write outputs", sprintf("simulate heterogeneity Q calibration: nsim=%d", as.integer(q_sim_n)))
+    q_cal <- calibrate_multilocus_q(
+      locus_blocks = pilot$locus_blocks,
+      fit = pilot$fit,
+      nsim = as.integer(q_sim_n),
+      seed = q_sim_seed,
+      allow_cross_cov = TRUE,
+      keep_simulated = FALSE,
+      progress_callback = progress_callback
+    )
+    for (nm in setdiff(names(q_cal), "Q_sim_values")) {
+      pilot$fit[[nm]] <- q_cal[[nm]]
+    }
+    pilot$fit$Q_p_reported <- pilot$fit$Q_p_sim
+    pilot$fit$Q_p_note <- "conditional residual simulation under the fitted common-effect null"
+  }
+  if ((is.null(pilot$fit$Q_p_reported) || !is.finite(pilot$fit$Q_p_reported)) &&
+      identical(fit_q_method, "simulation") &&
+      is.finite(pilot$fit$Q_p_sim %||% NA_real_)) {
+    pilot$fit$Q_p_reported <- pilot$fit$Q_p_sim
+    pilot$fit$Q_p_note <- "conditional residual simulation under the fitted common-effect null"
+  }
+  if ((is.null(pilot$fit$Q_p_reported) || !is.finite(pilot$fit$Q_p_reported)) &&
+      identical(fit_q_method, "none")) {
+    pilot$fit$Q_p_reported <- NA_real_
+    pilot$fit$Q_p_note <- "heterogeneity p-value not reported"
+  }
+  pilot$summary <- qtl2mr_add_q_fields(pilot$summary, fit = pilot$fit)
+  pilot
+}
+
 write_qtl2mr_results <- function(result,
                                  output_dir = result$output_dir,
                                  overwrite = FALSE,
@@ -1441,57 +1500,8 @@ write_qtl2mr_results <- function(result,
   dir.create(log_dir, recursive = TRUE, showWarnings = FALSE)
   qtl2mr_progress(progress_callback, 5L, "Write outputs", "prepare tables and output folders")
 
-  fit_q_method <- result$pilot$fit$Q_p_method %||%
-    if (length(result$pilot$locus_blocks %||% list()) == 1L) "chisq" else "simulation"
-  if (is.null(result$pilot$fit$Q_p_method)) result$pilot$fit$Q_p_method <- fit_q_method
-  if (is.null(result$pilot$fit$Q_chisq_df)) {
-    bx_len <- sum(vapply(result$pilot$locus_blocks %||% list(), function(b) length(b$beta_x %||% numeric()), integer(1L)))
-    result$pilot$fit$Q_chisq_df <- max(bx_len - 1L, 1L)
-  }
-  if (is.null(result$pilot$fit$Q_p_chisq) &&
-      is.finite(result$pilot$fit$Q %||% NA_real_) &&
-      is.finite(result$pilot$fit$Q_chisq_df %||% NA_integer_)) {
-    result$pilot$fit$Q_p_chisq <- stats::pchisq(
-      result$pilot$fit$Q,
-      df = result$pilot$fit$Q_chisq_df,
-      lower.tail = FALSE
-    )
-  }
-  if ((is.null(result$pilot$fit$Q_p_reported) || !is.finite(result$pilot$fit$Q_p_reported)) &&
-      identical(fit_q_method, "chisq")) {
-    result$pilot$fit$Q_p_reported <- result$pilot$fit$Q_p_chisq %||% NA_real_
-    result$pilot$fit$Q_p_note <- paste0("chi-square reference with df=", result$pilot$fit$Q_chisq_df %||% NA_integer_)
-  }
-  if (!is.null(q_sim_n) && identical(fit_q_method, "simulation") && isTRUE(as.integer(q_sim_n) > 0L) &&
-      (is.null(result$pilot$fit$Q_p_sim) || !is.finite(result$pilot$fit$Q_p_sim))) {
-    qtl2mr_progress(progress_callback, 5L, "Write outputs", sprintf("simulate heterogeneity Q calibration: nsim=%d", as.integer(q_sim_n)))
-    q_cal <- calibrate_multilocus_q(
-      locus_blocks = result$pilot$locus_blocks,
-      fit = result$pilot$fit,
-      nsim = as.integer(q_sim_n),
-      seed = q_sim_seed,
-      allow_cross_cov = TRUE,
-      keep_simulated = FALSE,
-      progress_callback = progress_callback
-    )
-    for (nm in setdiff(names(q_cal), "Q_sim_values")) {
-      result$pilot$fit[[nm]] <- q_cal[[nm]]
-    }
-    result$pilot$fit$Q_p_reported <- result$pilot$fit$Q_p_sim
-    result$pilot$fit$Q_p_note <- "conditional residual simulation under the fitted common-effect null"
-  }
-  if ((is.null(result$pilot$fit$Q_p_reported) || !is.finite(result$pilot$fit$Q_p_reported)) &&
-      identical(fit_q_method, "simulation") &&
-      is.finite(result$pilot$fit$Q_p_sim %||% NA_real_)) {
-    result$pilot$fit$Q_p_reported <- result$pilot$fit$Q_p_sim
-    result$pilot$fit$Q_p_note <- "conditional residual simulation under the fitted common-effect null"
-  }
-  if ((is.null(result$pilot$fit$Q_p_reported) || !is.finite(result$pilot$fit$Q_p_reported)) &&
-      identical(fit_q_method, "none")) {
-    result$pilot$fit$Q_p_reported <- NA_real_
-    result$pilot$fit$Q_p_note <- "heterogeneity p-value not reported"
-  }
-  result$pilot$summary <- qtl2mr_add_q_fields(result$pilot$summary, fit = result$pilot$fit)
+  result$pilot <- qtl2mr_complete_q_reporting(result$pilot, q_sim_n = q_sim_n, q_sim_seed = q_sim_seed,
+    progress_callback = progress_callback)
   method_comparison <- qtl2mr_method_comparison_table(result$pilot)
   block_first_stage <- qtl2mr_block_first_stage_table(result$pilot)
   psd_cols <- intersect(c("marker", "chr", "joint_psd_valid", "joint_psd_status", "joint_min_eigenvalue",
@@ -1590,6 +1600,9 @@ write_qtl2mr_results <- function(result,
   utils::write.csv(result$pilot$founder_residual_scores_global %||% data.frame(), data_paths[["founder_residuals"]], row.names = FALSE)
   utils::write.csv(result$pilot$founder_coordinate_ratios %||% data.frame(), data_paths[["founder_coordinate_ratios"]], row.names = FALSE)
   utils::write.csv(warnings, data_paths[["warnings"]], row.names = FALSE)
+  if (!is.null(result$subset_results)) {
+    utils::write.csv(result$subset_results, file.path(data_dir, "subset_results.csv"), row.names = FALSE)
+  }
   writeLines(utils::capture.output(utils::sessionInfo()), file.path(data_dir, "session_info.txt"))
   qtl2mr_progress(progress_callback, 5L, "Write outputs", "data tables and session info")
 
@@ -1719,6 +1732,7 @@ write_qtl2mr_results <- function(result,
     loo_mr = "Leave-one-locus-out MR sensitivity table",
     instrument_sensitivity = "Instrument-set sensitivity refit table",
     steiger_sensitivity = "Primary estimate compared with the fit without loci whose partial R2_X < partial R2_Y",
+    subset_results = "Refits of the multilocus estimate on the requested instrument subsets",
     q_calibration = "Reported global Q heterogeneity p-value with chi-square and simulation-calibration fields",
     first_stage_summary = "Summary of block F_X (guide threshold F_X = 2)",
     founder_residuals = "Descriptive founder residual localization diagnostics",
@@ -1775,11 +1789,13 @@ run_qtl2mr_analysis <- function(input,
                                 run_loo_mr = TRUE,
                                 run_instrument_sensitivity = TRUE,
                                 progress = NULL,
-                                n_workers = 1L) {
+                                n_workers = 1L,
+                                subsets = NULL) {
   if (!inherits(input, "qtl2mr_prepared_input")) {
     stop("input must be created by as_qtl2mr_prepared_input() or qtl2mr_pair_input()", call. = FALSE)
   }
   n_workers <- qtl2mr_check_count(n_workers, "n_workers")
+  subsets <- qtl2mr_check_subsets(subsets)
   # Refits of the Q simulation, bootstrap, LOO and instrument-set sensitivity
   # may run in forked workers; random numbers are drawn in this process.
   old_workers <- qtl2mr_set_workers(n_workers)
@@ -1896,6 +1912,14 @@ run_qtl2mr_analysis <- function(input,
   } else {
     qtl2mr_progress(progress_callback, 4L, "Run instrument-set sensitivity", "skipped")
   }
+  if (!is.null(subsets)) {
+    # Subset refits of the fitted loci with the run's settings; each row is
+    # completed as write_qtl2mr_results() completes the main row (q_sim_n = NULL).
+    qtl2mr_progress(progress_callback, 4L, "Refit instrument subsets", sprintf("%d subsets", length(subsets)))
+    subset_results <- qtl2mr_pair_subsets(pilot, subsets, settings, min_loci = 1L,
+      progress_callback = progress_callback,
+      finish = function(p) qtl2mr_complete_q_reporting(p, q_sim_n = NULL)$summary)$rows
+  }
 
   result <- structure(
     list(
@@ -1914,6 +1938,7 @@ run_qtl2mr_analysis <- function(input,
     ),
     class = c("qtl2mr_analysis_result", "list")
   )
+  if (!is.null(subsets)) result$subset_results <- subset_results
   result <- write_qtl2mr_results(
     result,
     output_dir = output_dir,

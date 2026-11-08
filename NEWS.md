@@ -1,3 +1,43 @@
+# qtl2mr 0.6.1.9004 (development)
+
+Not released. Instrument subsets in one run, on top of 0.6.1.9003; with the
+default `subsets = NULL` every result, table, file and warning is the same as
+in 0.6.1.9003.
+
+- `subsets` in `run_qtl2mr_batch()` and `run_qtl2mr_analysis()`: a named list
+  of rule lists, for example
+  `list(F1.5 = list(F_X_min = 1.5), F1.5_SF = list(F_X_min = 1.5, steiger = TRUE))`.
+  `F_X_min` keeps loci with a finite exposure block F at least the value;
+  `steiger = TRUE` keeps loci with `steiger_pass = TRUE` (FALSE and NA are
+  dropped). Rules within a subset intersect. Names must be unique, use only
+  letters, digits, `.` and `_`, and not be `all`; unknown rules, empty rule
+  lists and invalid values are refused before anything is fitted.
+- Each pair is fitted as before on its instruments (the maximal set), and the
+  main row is unchanged. For each subset, the pair's fitted loci that pass the
+  rules, judged on that pair's own `F_X_block` and `steiger_pass`, are refitted
+  in the multilocus combination with the run's settings (heterogeneity method,
+  simulation draws and seed, diagnostic bootstrap, reported estimator policy,
+  cross-covariance model); the LMMs are not refitted. A subset row therefore
+  equals the main row of a separate run on that subset's loci. The main fit and
+  the subset refits share one internal function for the multilocus stage and
+  its summary row.
+- A subset whose loci equal those of the maximal set or of an earlier subset
+  copies that row (`same_loci_as`). Fewer loci than `min_loci` (one in the
+  single analysis) gives status `too_few_loci`; a failing refit gives status
+  `error` and, in the batch, an `errors` row with stage `"subset"`, without
+  stopping the run or changing the pair's main row; pairs without a fit get
+  `pair_not_fitted`.
+- Batch: new table `subset_results` (`batch_subset_results.csv`), one row per
+  pair and subset with `pair_id`, `exposure`, `outcome`, `subset`, `rules`,
+  `n_loci`, `status`, `same_loci_as`, `error_message` and the estimate and test
+  columns of `main_results`; `locus_results` gains `in_subset_<name>` (NA for
+  loci that were not fitted); `config$subsets` and the resume fingerprint record
+  the specification, and subset rows are restored on resume. The locus blocks
+  of `write_locus_blocks` hold the maximal set.
+- Single analysis: `result$subset_results` and `data/subset_results.csv`, with
+  the columns of `main_result.csv`. `instrument_sensitivity.csv`,
+  `steiger_sensitivity.csv` and the default sensitivity sets are unchanged.
+
 # qtl2mr 0.6.1.9003 (development)
 
 Not released. An opt-in founder-design QC on top of 0.6.1.9002; with the

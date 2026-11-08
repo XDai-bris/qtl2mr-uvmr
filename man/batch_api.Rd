@@ -37,7 +37,7 @@ run_qtl2mr_batch(resources, pairs, instruments,
   resume = FALSE, overwrite = FALSE, output_dir = NULL, progress = TRUE,
   write_locus_blocks = FALSE,
   sample_policy = c("own_complete", "pair_common_complete"),
-  min_founder_copies = NULL)
+  min_founder_copies = NULL, subsets = NULL)
 }
 \arguments{
 \if{latex}{\out{\sloppy}}
@@ -147,6 +147,16 @@ the outcome of each pair, on the samples the outcome is fitted with (its own
 complete samples, or the pair's common complete samples under
 \code{sample_policy = "pair_common_complete"}), so a locus can be dropped for
 one pair and kept for another. See Details.}
+\item{subsets}{Optional instrument subsets; \code{NULL} (default) is off. A
+named list with one element per subset, each a list of rules:
+\code{F_X_min} (one number; keeps loci with a finite block F of the exposure
+\eqn{\ge} the value) and \code{steiger = TRUE} (keeps loci with
+\code{steiger_pass = TRUE}, so \code{FALSE} and \code{NA} are dropped;
+\code{FALSE} means no Steiger rule). The rules of a subset are combined by
+intersection. Names must be unique, use only letters, digits, \code{.} and
+\code{_}, and not be \code{"all"}; an unknown rule or an empty rule list is an
+error. For example \code{list(F1.5 = list(F_X_min = 1.5), F1.5_SF =
+list(F_X_min = 1.5, steiger = TRUE))}. See Details.}
 }
 \details{
 \if{latex}{\out{\sloppy}}
@@ -254,6 +264,28 @@ differ from the original run, or when a record or a published table has been mod
 whose package-owned files or records are symbolic links is refused. Pairs that
 ended in an error are fitted again on resume.
 
+With \code{subsets}, the instruments a pair is fitted on are its maximal set
+and the main row is its fit, unchanged. For each subset, the loci of the pair
+that were fitted (after the outcome founder QC and non-estimable drops) and pass
+the subset's rules are judged on that pair's own \code{F_X_block} and
+\code{steiger_pass} (the values in \code{locus_results}), and the multilocus
+combination is refitted on their blocks with the run's settings: heterogeneity
+method, simulation draws and seed, diagnostic bootstrap and seed, reported
+estimator policy and cross-covariance model. The LMMs are not refitted, so a
+subset row equals the main row of a separate run whose instruments are only
+that subset's loci, provided the fitted samples of each locus do not depend on
+which chromosomes carry instruments (they do not when every sample has
+probabilities and kinship on every chromosome). A subset whose loci are those
+of the maximal set or of an earlier subset copies that row and records it in
+\code{same_loci_as}. A subset with fewer than \code{min_loci} loci gets status
+\code{"too_few_loci"} and no estimate; a subset whose refit fails gets status
+\code{"error"} and an \code{errors} row with stage \code{"subset"}, and does
+not stop the run under \code{fail_fast} or change the pair's other rows. Pairs
+without a fit get status \code{"pair_not_fitted"}. The specification is part of
+the configuration and the resume fingerprint; subset rows are saved in the pair
+records, so they are restored on resume. The locus blocks written by
+\code{write_locus_blocks} are those of the maximal set.
+
 Batch results are for screening many pairs: no figures, HTML, leave-one-out or
 instrument-set sensitivity. Rerun a pair of interest with
 \code{qtl2mr_pair_input()} and \code{run_qtl2mr_analysis()} for the full
@@ -294,7 +326,19 @@ columns whether or not it has rows. With \code{min_founder_copies},
 \code{locus_results} also has \code{E_min_y} (the outcome's \eqn{E} at every
 instrument of the pair); both columns are present whenever the QC is on, with
 \code{NA} for pairs that stopped before it. The threshold is recorded in
-\code{config}. The list also holds \code{config},
+\code{config}. With \code{subsets}, the list also holds \code{subset_results}
+(written as \code{batch_subset_results.csv}): one row per pair of
+\code{main_results} and subset, in that order, with \code{pair_id},
+\code{exposure}, \code{outcome}, \code{subset}, \code{rules} (for example
+\code{"F_X_min>=1.5;steiger"}), \code{n_loci}, \code{status} (\code{"ok"},
+\code{"too_few_loci"}, \code{"error"} or \code{"pair_not_fitted"}),
+\code{same_loci_as} (\code{"all"} or an earlier subset, otherwise \code{NA}),
+\code{error_message} and the estimate and test columns of \code{main_results}
+(those from \code{lmm_backend} to \code{standardize_phenotypes}, without
+\code{n_loci_selected} and \code{n_loci_dropped_nonestimable}, which describe
+the pair's LMM stage); \code{locus_results} ends with one logical column
+\code{in_subset_<name>} per subset, \code{NA} on rows of loci that were not
+fitted. The specification is recorded in \code{config$subsets}. The list also holds \code{config},
 \code{resources_metadata} and \code{pairs}; the run configuration is written to
 \code{batch_config.json}. With \code{write_locus_blocks = TRUE} it also holds
 \code{locus_blocks_manifest}.

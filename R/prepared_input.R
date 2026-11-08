@@ -868,37 +868,19 @@ run_prepared_qtl2mr <- function(input,
               n_loci_dropped, length(blocks), n_loci_selected)
     )
   }
-	  fit <- fit_multilocus_founder_mr(
-	    blocks,
-    allow_cross_cov = TRUE,
+  stage <- qtl2mr_multilocus_stage(
+    blocks,
     ridge = ridge,
     heterogeneity_method = heterogeneity_method,
     q_sim_n = q_sim_n,
     q_sim_seed = q_sim_seed,
+    diagnostic_bootstrap_B = diagnostic_bootstrap_B,
+    diagnostic_bootstrap_seed = diagnostic_bootstrap_seed,
+    reported_estimator_policy = reported_estimator_policy,
     progress_callback = progress_callback
   )
-  diagnostic_layer <- fit_multilocus_diagnostic_layer(
-    blocks,
-    global_fit = fit,
-    ridge = ridge,
-    bootstrap_B = diagnostic_bootstrap_B,
-    bootstrap_seed = diagnostic_bootstrap_seed
-  )
-  reported <- qtl2mr_reported_estimate(
-    fit = fit,
-    diagnostic_layer = diagnostic_layer,
-    policy = reported_estimator_policy
-  )
-  get_est <- function(name, col) {
-    rows <- diagnostic_layer$estimates$estimator == name
-    if (!any(rows)) return(NA_real_)
-    diagnostic_layer$estimates[[col]][which(rows)[1L]]
-  }
-  get_est_chr <- function(name, col) {
-    rows <- diagnostic_layer$estimates$estimator == name
-    if (!any(rows) || !col %in% names(diagnostic_layer$estimates)) return(NA_character_)
-    as.character(diagnostic_layer$estimates[[col]][which(rows)[1L]])
-  }
+  fit <- stage$fit
+  diagnostic_layer <- stage$diagnostic_layer
   backend_provenance <- qtl2mr_lmm_backend_provenance(blocks)
   phenotype_scaling <- do.call(rbind, lapply(blocks, function(block) {
     do.call(rbind, lapply(c("exposure", "outcome"), function(role) {
@@ -938,12 +920,110 @@ run_prepared_qtl2mr <- function(input,
       paste(paste0(names(counts), "=", counts), collapse = ", "),
       "); inspect sample_alignment (n_missing_covar_id, n_incomplete_covar) and the fitted sample sets.", call. = FALSE)
   }
+  locus_first_stage <- qtl2mr_locus_first_stage(blocks, ridge = ridge)
+  summary_rows <- qtl2mr_multilocus_summary(blocks, stage, phenotype_scaling, locus_first_stage,
+    exposure = exposure, outcome = outcome, n_loci_selected = n_loci_selected, n_loci_dropped = n_loci_dropped,
+    standardize_phenotypes = standardize_phenotypes, cross_cov_model = cross_cov_model,
+    diagnostic_bootstrap_B = diagnostic_bootstrap_B, diagnostic_bootstrap_seed = diagnostic_bootstrap_seed)
+  summary <- summary_rows$summary
+  overlap_summary <- summary_rows$overlap_summary
+  hsq_table <- qtl2mr_hsq_table(blocks, exposure = exposure, outcome = outcome)
+  founder_residuals <- do.call(rbind, lapply(blocks, founder_residual_scores, theta = fit$theta))
+  founder_ratios <- do.call(rbind, lapply(blocks, founder_coordinate_ratios, theta_ref = fit$theta))
+  out <- list(
+	    summary = summary,
+	    fit = fit,
+	    locus_blocks = blocks,
+	    selected_loci = selected_retained,
+	    selected_loci_original = selected,
+	    dropped_loci = dropped_loci,
+	    locus_first_stage = locus_first_stage,
+	    locus_diagnostics = fit$locus_diagnostics,
+    diagnostic_layer = diagnostic_layer,
+    overlap_summary = overlap_summary,
+    sample_alignment = sample_alignment,
+    input_alignment = qtl2mr_input_alignment(input),
+    phenotype_scaling = phenotype_scaling,
+    founder_residual_scores_global = founder_residuals,
+    founder_coordinate_ratios = founder_ratios,
+    hsq = hsq_table,
+    backend_provenance = backend_provenance,
+    sample_ids = unique(c(
+      unlist(lapply(blocks, function(b) b$fit_x$sample_ids), use.names = FALSE),
+      unlist(lapply(blocks, function(b) b$fit_y$sample_ids), use.names = FALSE)
+    )),
+    overlap_sample_ids = Reduce(intersect, lapply(blocks, function(b) intersect(b$fit_x$sample_ids, b$fit_y$sample_ids))),
+    prepared_metadata = input$metadata
+  )
+  class(out) <- c("qtl2mr_prepared_pilot", "list")
+  if (isTRUE(write_outputs) && !is.null(output_dir)) {
+	    dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+	    utils::write.csv(summary, file.path(output_dir, "prepared_multilocus_founder_mr_summary.csv"), row.names = FALSE)
+	    utils::write.csv(selected_retained, file.path(output_dir, "prepared_selected_loci.csv"), row.names = FALSE)
+	    utils::write.csv(selected, file.path(output_dir, "prepared_selected_loci_original.csv"), row.names = FALSE)
+	    utils::write.csv(dropped_loci, file.path(output_dir, "prepared_dropped_loci.csv"), row.names = FALSE)
+	    utils::write.csv(overlap_summary, file.path(output_dir, "prepared_overlap_summary.csv"), row.names = FALSE)
+    saveRDS(fit, file.path(output_dir, "prepared_multilocus_founder_mr.rds"))
+  }
+  out
+}
+
+# The multilocus stage of a pair, from its locus blocks: the second-order fit
+# (with the Q calibration), the diagnostic layer and the reported estimate.
+# run_prepared_qtl2mr() fits the main row with it and subset refits
+# (qtl2mr_pair_subsets()) call it with the same settings, so they cannot differ.
+qtl2mr_multilocus_stage <- function(blocks, ridge, heterogeneity_method, q_sim_n, q_sim_seed,
+                                    diagnostic_bootstrap_B, diagnostic_bootstrap_seed,
+                                    reported_estimator_policy, progress_callback = NULL) {
+  fit <- fit_multilocus_founder_mr(
+    blocks,
+    allow_cross_cov = TRUE,
+    ridge = ridge,
+    heterogeneity_method = heterogeneity_method,
+    q_sim_n = q_sim_n,
+    q_sim_seed = q_sim_seed,
+    progress_callback = progress_callback
+  )
+  diagnostic_layer <- fit_multilocus_diagnostic_layer(
+    blocks,
+    global_fit = fit,
+    ridge = ridge,
+    bootstrap_B = diagnostic_bootstrap_B,
+    bootstrap_seed = diagnostic_bootstrap_seed
+  )
+  reported <- qtl2mr_reported_estimate(
+    fit = fit,
+    diagnostic_layer = diagnostic_layer,
+    policy = reported_estimator_policy
+  )
+  list(fit = fit, diagnostic_layer = diagnostic_layer, reported = reported)
+}
+
+# The one-row summary of a pair from its blocks, multilocus stage, phenotype
+# scaling rows and per-locus first stage; also returns the overlap table. Shared
+# by the main fit and the subset refits.
+qtl2mr_multilocus_summary <- function(blocks, stage, phenotype_scaling, locus_first_stage, exposure, outcome,
+                                      n_loci_selected, n_loci_dropped, standardize_phenotypes, cross_cov_model,
+                                      diagnostic_bootstrap_B, diagnostic_bootstrap_seed) {
+  fit <- stage$fit
+  diagnostic_layer <- stage$diagnostic_layer
+  reported <- stage$reported
+  get_est <- function(name, col) {
+    rows <- diagnostic_layer$estimates$estimator == name
+    if (!any(rows)) return(NA_real_)
+    diagnostic_layer$estimates[[col]][which(rows)[1L]]
+  }
+  get_est_chr <- function(name, col) {
+    rows <- diagnostic_layer$estimates$estimator == name
+    if (!any(rows) || !col %in% names(diagnostic_layer$estimates)) return(NA_character_)
+    as.character(diagnostic_layer$estimates[[col]][which(rows)[1L]])
+  }
+  backend_provenance <- qtl2mr_lmm_backend_provenance(blocks)
   sd_x <- phenotype_scaling$sd[phenotype_scaling$role == "exposure"]
   sd_y <- phenotype_scaling$sd[phenotype_scaling$role == "outcome"]
   common_sd <- function(z) length(z) && all(is.finite(z)) && all(abs(z - z[[1L]]) <= 1e-10 * max(abs(z)))
   raw_conversion_available <- !isTRUE(standardize_phenotypes) || (common_sd(sd_x) && common_sd(sd_y))
   raw_multiplier <- if (!isTRUE(standardize_phenotypes)) 1 else if (raw_conversion_available) sd_y[[1L]] / sd_x[[1L]] else NA_real_
-  locus_first_stage <- qtl2mr_locus_first_stage(blocks, ridge = ridge)
   summary <- data.frame(
     exposure = exposure,
     outcome = outcome,
@@ -1047,45 +1127,7 @@ run_prepared_qtl2mr <- function(input,
     summary$n_loci_complete_overlap <- sum(overlap_summary$complete_overlap, na.rm = TRUE)
   }
   summary$confidence_set_bounded <- qtl2mr_confidence_set_bounded(fit)
-  hsq_table <- qtl2mr_hsq_table(blocks, exposure = exposure, outcome = outcome)
-  founder_residuals <- do.call(rbind, lapply(blocks, founder_residual_scores, theta = fit$theta))
-  founder_ratios <- do.call(rbind, lapply(blocks, founder_coordinate_ratios, theta_ref = fit$theta))
-  out <- list(
-	    summary = summary,
-	    fit = fit,
-	    locus_blocks = blocks,
-	    selected_loci = selected_retained,
-	    selected_loci_original = selected,
-	    dropped_loci = dropped_loci,
-	    locus_first_stage = locus_first_stage,
-	    locus_diagnostics = fit$locus_diagnostics,
-    diagnostic_layer = diagnostic_layer,
-    overlap_summary = overlap_summary,
-    sample_alignment = sample_alignment,
-    input_alignment = qtl2mr_input_alignment(input),
-    phenotype_scaling = phenotype_scaling,
-    founder_residual_scores_global = founder_residuals,
-    founder_coordinate_ratios = founder_ratios,
-    hsq = hsq_table,
-    backend_provenance = backend_provenance,
-    sample_ids = unique(c(
-      unlist(lapply(blocks, function(b) b$fit_x$sample_ids), use.names = FALSE),
-      unlist(lapply(blocks, function(b) b$fit_y$sample_ids), use.names = FALSE)
-    )),
-    overlap_sample_ids = Reduce(intersect, lapply(blocks, function(b) intersect(b$fit_x$sample_ids, b$fit_y$sample_ids))),
-    prepared_metadata = input$metadata
-  )
-  class(out) <- c("qtl2mr_prepared_pilot", "list")
-  if (isTRUE(write_outputs) && !is.null(output_dir)) {
-	    dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
-	    utils::write.csv(summary, file.path(output_dir, "prepared_multilocus_founder_mr_summary.csv"), row.names = FALSE)
-	    utils::write.csv(selected_retained, file.path(output_dir, "prepared_selected_loci.csv"), row.names = FALSE)
-	    utils::write.csv(selected, file.path(output_dir, "prepared_selected_loci_original.csv"), row.names = FALSE)
-	    utils::write.csv(dropped_loci, file.path(output_dir, "prepared_dropped_loci.csv"), row.names = FALSE)
-	    utils::write.csv(overlap_summary, file.path(output_dir, "prepared_overlap_summary.csv"), row.names = FALSE)
-    saveRDS(fit, file.path(output_dir, "prepared_multilocus_founder_mr.rds"))
-  }
-  out
+  list(summary = summary, overlap_summary = overlap_summary)
 }
 
 qtl2mr_check_whole <- function(x, name, min = -.Machine$integer.max) {

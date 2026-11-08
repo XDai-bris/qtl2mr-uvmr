@@ -781,7 +781,7 @@ qtl2mr_batch_owned_paths <- function(output_dir) {
     "run_manifest", "sample_exclusions", "probability_normalization", "input_alignment",
     "selected_loci", "first_stage_summary", "sample_qc", "first_stage_filter_results",
     "mr_block_cache_manifest", "exact_group_plan", "sample_groups", "selected_loci_summary", "workload_summary",
-    "locus_blocks_manifest")
+    "locus_blocks_manifest", "subset_results")
   paths <- file.path(output_dir, c(paste0("batch_", tables, ".csv"),
     "batch_config.json", "batch_resume_state.rds", "batch_pair_records", "mr_block_cache", "by_exposure",
     "batch_locus_blocks"))
@@ -888,6 +888,7 @@ qtl2mr_empty_batch <- function(resources, pairs, instruments, config) {
   config$probability_policy <- resources$probability_policy %||% "strict"
   out <- stats::setNames(lapply(qtl2mr_batch_tables, qtl2mr_empty_batch_table), qtl2mr_batch_tables)
   out$sample_exclusions <- qtl2mr_batch_sample_exclusions(resources, pairs, instruments)
+  if (!is.null(config$subsets)) out$subset_results <- qtl2mr_empty_subset_results()
   out$input_alignment <- resources$sample_alignment %||% qtl2mr_input_alignment(resources)
   out$config <- config
   out$resources_metadata <- resources$metadata
@@ -1008,7 +1009,8 @@ qtl2mr_json_value <- function(x) {
 
 write_qtl2mr_batch_outputs <- function(batch, output_dir) {
   dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
-  tables <- c(qtl2mr_batch_tables, if (!is.null(batch$input_alignment)) "input_alignment")
+  tables <- c(qtl2mr_batch_tables, if (!is.null(batch$input_alignment)) "input_alignment",
+    if (!is.null(batch$subset_results)) "subset_results")
   for (name in tables) {
     utils::write.csv(batch[[name]], file.path(output_dir, paste0("batch_", name, ".csv")), row.names = FALSE)
   }
@@ -1114,7 +1116,9 @@ qtl2mr_batch_append_pair <- function(batch, result) {
   batch <- qtl2mr_batch_append(batch, "overlap_qc", result$overlap)
   batch <- qtl2mr_batch_append(batch, "warnings", result$warnings)
   batch <- qtl2mr_batch_append(batch, "errors", result$error)
-  qtl2mr_batch_append(batch, "probability_normalization", result$probability)
+  batch <- qtl2mr_batch_append(batch, "errors", result$subset_errors)
+  batch <- qtl2mr_batch_append(batch, "probability_normalization", result$probability)
+  qtl2mr_batch_append(batch, "subset_results", result$subsets)
 }
 
 # Fit one exposure-outcome pair exactly as run_qtl2mr_analysis() would fit
@@ -1122,7 +1126,7 @@ qtl2mr_batch_append_pair <- function(batch, result) {
 # returned as error rows; the caller applies fail_fast.
 qtl2mr_batch_fit_pair <- function(resources, pair, instruments, settings, context_cache, fit_cache,
                                   sample_policy = "own_complete", write_locus_blocks = FALSE,
-                                  min_founder_copies = NULL, founder_qc = NULL) {
+                                  min_founder_copies = NULL, founder_qc = NULL, subsets = NULL) {
   t0 <- proc.time()[["elapsed"]]
   qc <- NULL
   tryCatch({
@@ -1166,6 +1170,9 @@ qtl2mr_batch_fit_pair <- function(resources, pair, instruments, settings, contex
       result$main$n_loci_dropped_founder_qc <- sum(!qc$pass)
       result$loci <- qtl2mr_founder_qc_locus_rows(pair, qc, result$loci)
     }
+    # Subset refits come last and only read the pair's fit; their errors are
+    # recorded per subset and do not change the pair's main row.
+    if (!is.null(subsets)) result <- qtl2mr_batch_add_subsets(result, pair, pilot, subsets, settings)
     result
   }, error = function(e) {
     runtime <- proc.time()[["elapsed"]] - t0
@@ -1301,6 +1308,7 @@ qtl2mr_batch_finalize <- function(batch, pairs) {
       batch$locus_results$E_min_y <- rep(NA_real_, nrow(batch$locus_results))
     }
   }
+  if (!is.null(batch$config$subsets)) batch <- qtl2mr_batch_finalize_subsets(batch)
   batch
 }
 
@@ -1326,7 +1334,8 @@ run_qtl2mr_batch <- function(resources,
                              progress = TRUE,
                              write_locus_blocks = FALSE,
                              sample_policy = c("own_complete", "pair_common_complete"),
-                             min_founder_copies = NULL) {
+                             min_founder_copies = NULL,
+                             subsets = NULL) {
   if (!inherits(resources, "qtl2mr_resources")) stop("resources must come from qtl2mr_prepare_resources()", call. = FALSE)
   if (missing(instruments)) {
     stop("instruments is required; select them with qtl2mr_select_instruments() or supply a table with exposure and marker columns", call. = FALSE)
@@ -1339,6 +1348,7 @@ run_qtl2mr_batch <- function(resources,
   write_locus_blocks <- qtl2mr_check_flag(write_locus_blocks, "write_locus_blocks")
   sample_policy <- match.arg(sample_policy)
   min_founder_copies <- qtl2mr_check_min_founder_copies(min_founder_copies)
+  subsets <- qtl2mr_check_subsets(subsets)
   if (write_locus_blocks && is.null(output_dir)) stop("write_locus_blocks = TRUE requires output_dir", call. = FALSE)
   settings <- qtl2mr_fit_settings(
     on_nonestimable_locus = match.arg(on_nonestimable_locus),
@@ -1357,6 +1367,7 @@ run_qtl2mr_batch <- function(resources,
   if (!identical(sample_policy, "own_complete")) config$sample_policy <- sample_policy
   if (write_locus_blocks) config$write_locus_blocks <- TRUE
   if (!is.null(min_founder_copies)) config$min_founder_copies <- min_founder_copies
+  if (!is.null(subsets)) config$subsets <- subsets
 
   # Destination, pair preflight and the checkpoint are all checked before
   # anything in output_dir is written or removed.
@@ -1385,7 +1396,7 @@ run_qtl2mr_batch <- function(resources,
     pair <- todo[i, , drop = FALSE]
     result <- qtl2mr_batch_fit_pair(resources, pair, instruments, settings, context_cache, fit_cache,
       sample_policy = sample_policy, write_locus_blocks = write_locus_blocks, min_founder_copies = min_founder_copies,
-      founder_qc = plan[[i]]$founder_qc)
+      founder_qc = plan[[i]]$founder_qc, subsets = subsets)
     if (!is.null(output_dir) && is.null(result$error)) {
       qtl2mr_write_pair_record(output_dir, pair_index[[i]], pair$pair_id, fingerprint, result)
     }

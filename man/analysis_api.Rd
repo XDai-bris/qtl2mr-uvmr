@@ -27,7 +27,7 @@ run_qtl2mr_analysis(input, exposure = NULL, outcome = NULL,
   diagnostic_bootstrap_B = 500L, diagnostic_bootstrap_seed = 1L,
   standardize_phenotypes = TRUE, cross_cov_model = c("star", "raw", "zero"),
   run_loo_mr = TRUE, run_instrument_sensitivity = TRUE, progress = NULL,
-  n_workers = 1L)
+  n_workers = 1L, subsets = NULL)
 
 \method{summary}{qtl2mr_analysis_result}(object, ...)
 
@@ -114,6 +114,15 @@ in the calling process in the same order as with one process, so results,
 warnings and the random number stream do not depend on \code{n_workers}. Under
 \code{options(warn = 2)} or higher the refits run in the calling process. A
 worker that is killed (for example out of memory) stops the analysis.}
+\item{subsets}{Optional instrument subsets, specified as in
+\code{\link{run_qtl2mr_batch}}; \code{NULL} (default) is off. Each subset
+keeps the fitted loci that pass its rules (judged on \code{F_X_block} and
+\code{steiger_pass} of \code{block_first_stage.csv}) and refits the multilocus
+combination with the analysis settings, including the heterogeneity simulation
+and the diagnostic bootstrap; the LMMs are not refitted. A subset needs at
+least one locus. The main result and the existing sensitivity tables
+(\code{instrument_sensitivity.csv}, \code{steiger_sensitivity.csv}) are not
+changed.}
 \item{result}{A \code{qtl2mr_analysis_result}; for \code{report_qtl2mr_locus()}
 also a path to its \code{result_object.rds}.}
 \item{detail}{For \code{qtl2mr_output_paths()}, return the full file manifest
@@ -203,7 +212,13 @@ chromosome with its status and source), \code{sample_alignment.csv},
 \code{block_first_stage.csv} (per-locus block F, partial R2 and
 \code{steiger_pass}), \code{instrument_sensitivity.csv},
 \code{steiger_sensitivity.csv} and \code{output_manifest.csv}, which lists
-every file.
+every file. With \code{subsets}, the result also holds \code{subset_results},
+written as \code{subset_results.csv}: one row per subset with \code{exposure},
+\code{outcome}, \code{subset}, \code{rules}, \code{n_loci}, \code{status},
+\code{same_loci_as}, \code{error_message} and the columns of
+\code{main_result.csv} other than \code{n_loci_selected} and
+\code{n_loci_dropped_nonestimable}; see \code{\link{run_qtl2mr_batch}}. For
+the same pair and settings its rows equal the batch rows.
 
 \code{qtl2mr_primary_result()} returns the one-row summary. Key columns:
 \code{theta_reported}, \code{se_reported}, \code{reported_ci_lower},
