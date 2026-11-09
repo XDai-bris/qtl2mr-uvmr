@@ -126,10 +126,11 @@ qtl2mr_combine_resources <- function(x, y, kinship = NULL, common_only = FALSE) 
     pheno_ids <- pheno_ids[pheno_ids %in% common]
     covar_ids <- covar_ids[covar_ids %in% common]
   }
-  allele_probs <- lapply(names(x$allele_probs), function(chr) {
-    qtl2mr_combine_probs(x$allele_probs[[chr]], y$allele_probs[[chr]], geno)
-  })
-  names(allele_probs) <- names(x$allele_probs)
+  # The list keeps the attributes of x (for example the qtl2 class "calc_genoprob").
+  allele_probs <- x$allele_probs
+  for (chr in names(allele_probs)) {
+    allele_probs[[chr]] <- qtl2mr_combine_probs(x$allele_probs[[chr]], y$allele_probs[[chr]], geno)
+  }
   # 5. Traits of one input are NA for samples only in the other.
   pheno <- data.frame(row.names = pheno_ids)
   for (trait in names(x$pheno)) pheno[[trait]] <- x$pheno[match(pheno_ids, rownames(x$pheno)), trait]
