@@ -1,8 +1,9 @@
-# Opt-in founder-design QC (min_founder_copies). A locus is dropped for a trait
+# Founder-design QC (min_founder_copies, 5 by default since 0.6.1.9006; NULL
+# turns it off). A locus is dropped for a trait
 # when the rarest founder's expected allele count on the samples that trait is
 # fitted on, E = min_k sum_i 2 p_ik, is below the threshold. The probabilities
-# are those the package fits: after the probability policy's normalisation.
-# With min_founder_copies = NULL (default) nothing here runs.
+# are those the package fits: after the rounding normalisation.
+# With min_founder_copies = NULL nothing here runs.
 
 qtl2mr_check_min_founder_copies <- function(x) {
   if (is.null(x)) return(NULL)
@@ -65,8 +66,8 @@ qtl2mr_trait_founder_copies <- function(input, trait, role, loci) {
 }
 
 # Outcome-side QC of one pair: E_min of every instrument of the exposure on the
-# samples the outcome is fitted with (own complete, or the pair's common
-# complete samples), from a prepared input normalised at these markers.
+# samples the outcome is fitted with (its own complete samples), from a
+# prepared input normalised at these markers.
 # Returns the instrument rows with E_min_y and pass.
 qtl2mr_outcome_founder_qc <- function(input, outcome, rows, threshold) {
   E <- qtl2mr_trait_founder_copies(input, outcome, "outcome", rows)

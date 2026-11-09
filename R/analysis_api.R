@@ -111,7 +111,8 @@ qtl2mr_make_progress_reporter <- function(progress = NULL,
       if (!is.null(detail) && nzchar(detail)) paste0(": ", detail) else ""
     )
     if (isTRUE(settings$console)) {
-      condition <- simpleMessage(line)
+      # One line per message on the console (the log file gets its own newline).
+      condition <- simpleMessage(paste0(line, "\n"))
       class(condition) <- c("qtl2mr_progress_message", class(condition))
       message(condition)
     }

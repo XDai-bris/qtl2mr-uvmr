@@ -188,7 +188,7 @@ qtl2mr_peak_rule_record <- function(peak_rule, peakdrop, min_spacing) {
 # alone when positions are missing) within a chromosome, never across a
 # chromosome boundary. "peakdrop" is the qtl2 peak rule; "spacing" takes the
 # maximum of each contiguous LOD island (the rule of qtl2mr 0.6.1 and earlier)
-# and keeps those candidates at least min_spacing apart.
+# and keeps those candidates more than min_spacing apart.
 qtl2mr_scan_candidates <- function(qtl_scan, marker_map, trait, lod_thresh, exclude_chr,
                                    peak_rule = "peakdrop", peakdrop = 1.5, min_spacing = 1) {
   peak_rule <- match.arg(peak_rule, qtl2mr_peak_rules)

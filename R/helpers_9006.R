@@ -182,16 +182,21 @@ qtl2mr_diagnostics_columns <- c(
   "ci_type_weighted_mode",
   "diagnostic_bootstrap_B", "diagnostic_bootstrap_seed")
 
+# The result and the directory diagnostics.csv goes to: the directory given (or
+# that of the given result_object.rds), else the result's recorded output_dir.
 qtl2mr_read_analysis_result <- function(result) {
+  dir <- NULL
   if (is.character(result) && length(result) == 1L && !is.na(result)) {
     path <- if (dir.exists(result)) file.path(result, "result_object.rds") else result
     if (!file.exists(path)) stop("no result_object.rds found at ", result, call. = FALSE)
+    dir <- dirname(normalizePath(path))
     result <- readRDS(path)
   }
   if (!inherits(result, "qtl2mr_analysis_result")) {
     stop("result must be a run_qtl2mr_analysis() result or its output directory", call. = FALSE)
   }
   if (!length(result$pilot$locus_blocks)) stop("result has no locus blocks", call. = FALSE)
+  attr(result, "qtl2mr_diagnostics_dir") <- dir %||% result$output_dir
   result
 }
 
@@ -220,7 +225,7 @@ qtl2mr_diagnostics <- function(result, nsim = 1000L, seed = 1L) {
   summary$seed <- seed
   out <- summary[qtl2mr_diagnostics_columns]
   rownames(out) <- NULL
-  dir <- result$output_dir
+  dir <- attr(result, "qtl2mr_diagnostics_dir")
   if (is.character(dir) && length(dir) == 1L && !is.na(dir) && dir.exists(file.path(dir, "data"))) {
     utils::write.csv(out, file.path(dir, "data", "diagnostics.csv"), row.names = FALSE)
   }
