@@ -92,47 +92,70 @@ qtl2mr_so_coordinates <- function(blocks, allow_cross_cov, ridge) {
     qtl2mr_add_invariant_ridge(joint, 0)
     b
   })
+  # Per block, fixed across evaluations: the diagonal positions, a zero matrix
+  # and whether Sigma_x is identically zero.
+  aux <- lapply(normalized, function(b) {
+    k <- nrow(b$Sigma_y)
+    list(didx = seq.int(1L, k * k, by = k + 1L), zero = matrix(0, k, k), sigma_x_zero = all(b$Sigma_x == 0))
+  })
+  # S + diag(v, k), bit for bit: the off-diagonal entries gain an exact +0 and
+  # the diagonal gains v, as in the sum with the diagonal matrix.
+  add_diag <- function(S, v, a) {
+    S <- S + a$zero
+    S[a$didx] <- S[a$didx] + v
+    S
+  }
+  # The objective is evaluated hundreds of times per fit, over every block.
+  # Each block's arithmetic is that of 0.6.1.9004 operation for operation
+  # (the same expressions, mean(), chol() and backsolve()); only call overhead
+  # is removed, so every value is identical.
   evaluate <- function(alpha, derivatives = FALSE) {
     at_tail <- abs(alpha) >= pi / 2
     cc <- if (at_tail) 0 else cos(alpha)
     ss <- if (at_tail) sign(alpha) else sin(alpha)
-    total <- c(Q = 0, first = 0, second = 0)
-    for (b in normalized) {
+    cc2 <- cc^2
+    ss2 <- ss^2
+    sc <- ss * cc
+    q <- 0
+    first <- 0
+    second <- 0
+    for (i in seq_along(normalized)) {
+      b <- normalized[[i]]
+      a <- aux[[i]]
       # If exposure sampling variance is identically zero, the leading
       # homogeneous term vanishes. Evaluate its actual limit separately.
-      if (at_tail && all(b$Sigma_x == 0)) {
+      if (at_tail && a$sigma_x_zero) {
         if (any(b$beta_x != 0)) return(if (derivatives) c(Q = Inf, first = NA, second = NA) else Inf)
         cf <- chol(qtl2mr_add_invariant_ridge(b$Sigma_y, ridge))
         z <- backsolve(cf, b$beta_y, transpose = TRUE)
-        total[["Q"]] <- total[["Q"]] + sum(z^2)
+        q <- q + sum(z^2)
         next
       }
-      S <- cc^2 * b$Sigma_y + ss^2 * b$Sigma_x - ss * cc * b$cross
-      S <- qtl2mr_sym(S)
+      S <- cc2 * b$Sigma_y + ss2 * b$Sigma_x - sc * b$cross
+      S <- (S + t.default(S)) / 2
       # Normalized matrices have ordinary numerical scale. This trace ridge is
       # identical to the existing invariant ridge wherever trace(S) is positive.
-      S <- S + diag(ridge * mean(diag(S)), nrow(S))
-      cf <- try(chol(S), silent = TRUE)
-      if (inherits(cf, "try-error")) {
+      S <- add_diag(S, ridge * mean.default(S[a$didx]), a)
+      cf <- tryCatch(chol.default(S), error = function(e) NULL)
+      if (is.null(cf)) {
         return(if (derivatives) c(Q = Inf, first = NA, second = NA) else Inf)
       }
-      solve_S <- function(v) backsolve(cf, backsolve(cf, v, transpose = TRUE))
       r <- cc * b$beta_y - ss * b$beta_x
-      z <- solve_S(r)
-      total[["Q"]] <- total[["Q"]] + sum(r * z)
+      z <- backsolve(cf, backsolve(cf, r, transpose = TRUE))
+      q <- q + sum(r * z)
       if (derivatives) {
         rp <- -ss * b$beta_y - cc * b$beta_x
         Sp <- 2 * ss * cc * (b$Sigma_x - b$Sigma_y) - (cc^2 - ss^2) * b$cross
         Spp <- 2 * (cc^2 - ss^2) * (b$Sigma_x - b$Sigma_y) + 4 * ss * cc * b$cross
-        Sp <- Sp + diag(ridge * mean(diag(Sp)), nrow(Sp))
-        Spp <- Spp + diag(ridge * mean(diag(Spp)), nrow(Spp))
+        Sp <- add_diag(Sp, ridge * mean.default(Sp[a$didx]), a)
+        Spp <- add_diag(Spp, ridge * mean.default(Spp[a$didx]), a)
         v <- rp - as.numeric(Sp %*% z)
-        total[["first"]] <- total[["first"]] + 2 * sum(rp * z) - sum(z * (Sp %*% z))
-        total[["second"]] <- total[["second"]] - 2 * sum(r * z) +
-          2 * sum(v * solve_S(v)) - sum(z * (Spp %*% z))
+        first <- first + 2 * sum(rp * z) - sum(z * (Sp %*% z))
+        second <- second - 2 * sum(r * z) +
+          2 * sum(v * backsolve(cf, backsolve(cf, v, transpose = TRUE))) - sum(z * (Spp %*% z))
       }
     }
-    if (derivatives) total else unname(total[["Q"]])
+    if (derivatives) c(Q = q, first = first, second = second) else q
   }
   list(blocks = normalized, scale = scale, evaluate = evaluate)
 }

@@ -872,7 +872,9 @@ qtl2mr_empty_batch_table <- function(name) {
       "run_id", "created_at", "status", "n_pairs_requested", "n_pairs_ok", "n_pairs_error",
       "n_pairs_resumed", "nonestimable_locus_policy", "n_loci_dropped_nonestimable",
       "parallel_backend", "n_workers", "context_cache_hits", "context_cache_misses",
-      "lmm_fit_cache_hits", "lmm_fit_cache_misses", "wall_sec", "mean_wall_sec_per_pair", "lmm_backend"
+      "lmm_fit_cache_hits", "lmm_fit_cache_misses", "context_computed", "lmm_fit_computed",
+      "cache_released_entries", "cache_released_bytes", "cache_budget_bytes",
+      "wall_sec", "mean_wall_sec_per_pair", "lmm_backend"
     ),
     sample_exclusions = c("trait", "reason", "n_input_samples", "n_excluded", "excluded_ids"),
     probability_normalization = c("pair_id", "chr", "marker", "n_normalized", "max_abs_sum_deviation"),
@@ -1379,6 +1381,7 @@ run_qtl2mr_batch <- function(resources,
     batch_traits = unique(c(valid$exposure, valid$outcome)), created_at = as.character(Sys.time()))))
   run_id <- format(Sys.time(), "%Y%m%d_%H%M%S")
   t_run <- proc.time()[["elapsed"]]
+  counters0 <- qtl2mr_cache_counters()
 
   fingerprint <- if (is.null(output_dir)) NULL else
     qtl2mr_batch_fingerprint(resources, pairs, instruments, config, markers = preflight$markers)
@@ -1441,13 +1444,15 @@ run_qtl2mr_batch <- function(resources,
     run_group <- function(idx) {
       context_cache <- qtl2mr_context_cache_new()
       fit_cache <- qtl2mr_context_cache_new()
+      counters0 <- qtl2mr_cache_counters()
       if (progress) message(sprintf("[qtl2mr batch] exposure %s: %d pairs", todo$exposure[[idx[[1L]]]], length(idx)))
       out <- vector("list", length(idx))
       for (k in seq_along(idx)) {
         out[[k]] <- fit_one(idx[[k]], context_cache, fit_cache)
         if (fail_fast && !is.null(out[[k]]$error)) break
       }
-      list(results = out, stats = list(qtl2mr_context_cache_stats(context_cache), qtl2mr_context_cache_stats(fit_cache)))
+      list(results = out, stats = list(qtl2mr_context_cache_stats(context_cache), qtl2mr_context_cache_stats(fit_cache)),
+        computed = qtl2mr_cache_counters() - counters0)
     }
     for (w in seq_along(waves)) {
       wave_start(w)
@@ -1460,6 +1465,7 @@ run_qtl2mr_batch <- function(resources,
         if (is.list(value) && !inherits(value, "condition") && is.list(value$results)) {
           results[idx] <- value$results
           cache_stats[[length(cache_stats) + 1L]] <- value$stats
+          qtl2mr_cache_counters_add_computed(value$computed)
           next
         }
         # A worker that died or errored outside a pair: keep its fully written
@@ -1501,6 +1507,7 @@ run_qtl2mr_batch <- function(resources,
   stat_sum <- function(which, field) sum(vapply(cache_stats, function(s) as.numeric(s[[which]][[field]] %||% 0), numeric(1)))
   manifest <- function(batch, status) {
     wall_sec <- proc.time()[["elapsed"]] - t_run
+    counters <- qtl2mr_cache_counters() - counters0
     data.frame(
       run_id = run_id, created_at = as.character(Sys.time()), status = status,
       n_pairs_requested = nrow(pairs),
@@ -1512,6 +1519,9 @@ run_qtl2mr_batch <- function(resources,
       parallel_backend = backend, n_workers = n_workers,
       context_cache_hits = stat_sum(1L, "hits"), context_cache_misses = stat_sum(1L, "misses"),
       lmm_fit_cache_hits = stat_sum(2L, "hits"), lmm_fit_cache_misses = stat_sum(2L, "misses"),
+      context_computed = counters[["context"]], lmm_fit_computed = counters[["fit_attempt"]],
+      cache_released_entries = counters[["released_entries"]], cache_released_bytes = counters[["released_bytes"]],
+      cache_budget_bytes = qtl2mr_cache_budget(),
       wall_sec = wall_sec, mean_wall_sec_per_pair = wall_sec / max(nrow(todo), 1L),
       lmm_backend = qtl2mr_backend_label(batch$main_results$lmm_backend[batch$main_results$status == "ok"]),
       stringsAsFactors = FALSE

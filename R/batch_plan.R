@@ -208,12 +208,18 @@ qtl2mr_batch_prefill <- function(resources, plan, settings, n_workers) {
   out <- parallel::mclapply(chunks, function(idx) {
     reg <- qtl2mr_registry()
     reg$journal <- new.env(parent = emptyenv())
+    counters0 <- qtl2mr_cache_counters()
     qtl2mr_batch_prefill_run(input, units[idx], settings)
     ids <- ls(reg$journal, all.names = TRUE)
     entries <- mget(ids, envir = reg$entries, ifnotfound = list(NULL))
-    entries[!vapply(entries, is.null, logical(1))]
+    list(entries = entries[!vapply(entries, is.null, logical(1))], computed = qtl2mr_cache_counters() - counters0)
   }, mc.cores = length(chunks), mc.preschedule = FALSE, mc.set.seed = FALSE)
-  for (entries in out) if (is.list(entries) && !inherits(entries, "try-error")) qtl2mr_registry_import(entries)
+  for (o in out) {
+    if (is.list(o) && !inherits(o, "try-error") && is.list(o$entries)) {
+      qtl2mr_registry_import(o$entries)
+      qtl2mr_cache_counters_add_computed(o$computed)
+    }
+  }
   invisible(NULL)
 }
 

@@ -216,7 +216,10 @@ prepare_lmm_context <- function(pheno,
     kinship_decomp <- decompose()
     eigenvec <- kinship_decomp$vectors
     wts <- 1 / sqrt(hsq_fit * kinship_decomp$values + (1 - hsq_fit))
-    raw_transform <- diag(wts, nrow = length(wts)) %*% eigenvec
+    # Row scaling, bit for bit the product diag(wts) %*% eigenvec: every entry
+    # of that product is the single term wts[i] * eigenvec[i, j] plus exact
+    # zeros, and "+ 0" turns an exact -0 into the +0 the product gives.
+    raw_transform <- wts * eigenvec + 0
     colnames(raw_transform) <- ids
     rownames(raw_transform) <- ids
     star_rotation <- eigenvec

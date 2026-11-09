@@ -1,3 +1,32 @@
+# qtl2mr 0.6.1.9005 (development)
+
+Not released. Performance only, on top of 0.6.1.9004: every estimate, table,
+block file and warning is bit for bit the same as in 0.6.1.9004 (and, with the
+default `subsets = NULL`, as in 0.6.1.9003). Only the run manifest gains
+columns.
+
+- The second-order objective is evaluated with less R call overhead. Each
+  block's arithmetic is unchanged operation for operation (the same
+  expressions, `mean()`, `chol()` and `backsolve()`), so every objective value,
+  estimate, interval and Q is identical.
+- The LMM transform of a context is formed by row scaling, which equals the
+  former product with a diagonal matrix bit for bit.
+- Kinship eigendecompositions are kept up to a byte budget (option
+  `qtl2mr.decomposition_budget`, default 1 GiB; at least 8 kept) instead of the
+  last 8, and a reused one moves to the front. Selection, which visits every
+  chromosome of each exposure in turn, no longer recomputes them.
+- The session cache of contexts and fits has a configurable budget, option
+  `qtl2mr.cache_budget` (bytes by `object.size()`), with the default raised
+  from 2 GiB to 4 GiB. The budget changes only what is kept for reuse.
+- The batch run manifest has new columns: `context_computed` and
+  `lmm_fit_computed` (contexts and per-locus fits actually computed in the run,
+  including recomputations of released entries and those made in forked
+  workers), `cache_released_entries` and `cache_released_bytes` (entries
+  released for the budget in this session during the run) and
+  `cache_budget_bytes`. The existing `*_cache_hits` and `*_cache_misses` keep
+  their meaning: a hit is a key this run asked for before, whether or not its
+  value was still kept (backlog QB-7).
+
 # qtl2mr 0.6.1.9004 (development)
 
 Not released. Instrument subsets in one run and an F report of an instrument

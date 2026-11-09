@@ -101,7 +101,9 @@ perf_strip <- function(x) {
     x <- x[setdiff(names(x) %||% character(), c("created_at", "output_dir", "paths", "output_manifest", "figure_manifest"))]
     x[] <- lapply(x, perf_strip)
   } else if (is.data.frame(x)) {
-    x <- x[, setdiff(names(x), c("runtime_sec", "wall_sec", "mean_wall_sec_per_pair", "run_id", "created_at")), drop = FALSE]
+    # 0.6.1.9005 manifest counters describe the cache state of the run, by design.
+    x <- x[, setdiff(names(x), c("runtime_sec", "wall_sec", "mean_wall_sec_per_pair", "run_id", "created_at",
+      "context_computed", "lmm_fit_computed", "cache_released_entries", "cache_released_bytes", "cache_budget_bytes")), drop = FALSE]
   }
   x
 }

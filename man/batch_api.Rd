@@ -352,7 +352,20 @@ frames, written as \code{batch_<name>.csv} when \code{output_dir} is given:
 \code{warnings}, \code{errors}, \code{sample_exclusions} (one row per trait
 and exclusion reason), \code{probability_normalization},
 \code{input_alignment} and \code{run_manifest} (one row; \code{status} is
-\code{"complete"} or \code{"stopped_fail_fast"}). Each table has the same
+\code{"complete"} or \code{"stopped_fail_fast"}). In \code{run_manifest},
+\code{context_cache_hits} and \code{lmm_fit_cache_hits} count requests for a
+key this run had asked for before, whether or not its value was still kept
+(the misses count first requests, which may reuse a value kept from an earlier
+call); \code{context_computed} and \code{lmm_fit_computed} count the contexts
+and per-locus fits actually computed in the run, including recomputations of
+released values and those made in workers; \code{cache_released_entries} and
+\code{cache_released_bytes} count values released to keep within
+\code{cache_budget_bytes}. The budget is set with
+\code{options(qtl2mr.cache_budget = bytes)} (default 4 GiB, by
+\code{object.size()}) and kinship eigendecompositions are kept up to
+\code{options(qtl2mr.decomposition_budget = bytes)} (default 1 GiB); neither
+changes a result. A later call in the same session reuses only what is still
+kept. Each table has the same
 columns whether or not it has rows. With \code{min_founder_copies},
 \code{main_results} also has \code{n_loci_dropped_founder_qc} and
 \code{locus_results} also has \code{E_min_y} (the outcome's \eqn{E} at every

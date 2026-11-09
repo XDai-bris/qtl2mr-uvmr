@@ -6,12 +6,41 @@
 # saveRDS() of user objects is unchanged and nothing here outlives the session.
 qtl2mr_state <- new.env(parent = emptyenv())
 
-# Bound on cached contexts and fits (bytes, as estimated by object.size()).
+# Bound on cached contexts and fits (bytes, as estimated by object.size()):
+# option qtl2mr.cache_budget, default 4 GiB (2 GiB before 0.6.1.9005).
 # Least recently used entries are released first; a running batch pins the
-# entries of the exposure groups it is fitting.
-qtl2mr_cache_budget_bytes <- 2 * 1024^3
+# entries of the exposure groups it is fitting. The budget changes only what
+# is kept for reuse, never a result.
+qtl2mr_cache_budget_bytes <- 4 * 1024^3
 
-qtl2mr_cache_budget <- function() qtl2mr_state$budget %||% qtl2mr_cache_budget_bytes
+qtl2mr_cache_budget <- function() {
+  if (!is.null(qtl2mr_state$budget)) return(qtl2mr_state$budget)
+  b <- getOption("qtl2mr.cache_budget", qtl2mr_cache_budget_bytes)
+  if (!is.numeric(b) || length(b) != 1L || is.na(b) || b < 0) {
+    stop("option qtl2mr.cache_budget must be one non-negative number of bytes", call. = FALSE)
+  }
+  as.numeric(b)
+}
+
+# Counts kept in this session: contexts and fits actually computed (including
+# recomputations of released entries) and registry entries released for the
+# budget. A batch reports the change over its run; forked workers return the
+# computations they made, which are added here.
+qtl2mr_cache_counters <- function() {
+  computed <- qtl2mr_state$computed %||% c(context = 0, fit = 0, fit_attempt = 0)
+  reg <- qtl2mr_registry()
+  c(context = computed[["context"]], fit_attempt = computed[["fit_attempt"]],
+    released_entries = reg$released_entries %||% 0, released_bytes = reg$released_bytes %||% 0)
+}
+
+qtl2mr_cache_counters_add_computed <- function(delta) {
+  if (!is.numeric(delta) || !all(c("context", "fit_attempt") %in% names(delta))) return(invisible(NULL))
+  computed <- qtl2mr_state$computed %||% c(context = 0, fit = 0, fit_attempt = 0)
+  computed[["context"]] <- computed[["context"]] + delta[["context"]]
+  computed[["fit_attempt"]] <- computed[["fit_attempt"]] + delta[["fit_attempt"]]
+  assign("computed", computed, envir = qtl2mr_state)
+  invisible(NULL)
+}
 
 # Forget everything cached in this session (as in a new R process). Internal;
 # used by tests.
@@ -55,13 +84,38 @@ qtl2mr_kinship_fingerprint <- function(kinship, sample_ids) {
 
 # Eigendecomposition of 2K on a sample set, shared by the hsq fit and the
 # transform of one context and by traits fitted on the same samples. The
-# decomposition is a deterministic function of the matrix and the samples.
+# decomposition is a deterministic function of the matrix and the samples, so a
+# kept decomposition is exactly the one that would be recomputed. Kept
+# decompositions are bounded in bytes (option qtl2mr.decomposition_budget,
+# default 1 GiB, at least 8 kept); a reused one moves to the front, so a
+# selection that visits every chromosome of each exposure in turn reuses them.
+qtl2mr_decomposition_budget_bytes <- 1024^3
+
+qtl2mr_decomposition_budget <- function() {
+  b <- getOption("qtl2mr.decomposition_budget", qtl2mr_decomposition_budget_bytes)
+  if (!is.numeric(b) || length(b) != 1L || is.na(b) || b < 0) {
+    stop("option qtl2mr.decomposition_budget must be one non-negative number of bytes", call. = FALSE)
+  }
+  as.numeric(b)
+}
+
 qtl2mr_decompose_kinship_cached <- function(kinship, sample_ids, kinship0) {
-  for (e in qtl2mr_memo_list("kinship_decomp")) {
-    if (identical(e$ids, sample_ids) && identical(e$kinship, kinship)) return(e$decomp)
+  memo <- qtl2mr_memo_list("kinship_decomp")
+  for (i in seq_along(memo)) {
+    e <- memo[[i]]
+    if (identical(e$ids, sample_ids) && identical(e$kinship, kinship)) {
+      if (i > 1L) assign("kinship_decomp", c(memo[i], memo[-i]), envir = qtl2mr_state)
+      return(e$decomp)
+    }
   }
   decomp <- qtl2mr_decompose_kinship(kinship0, sample_ids = sample_ids)
-  qtl2mr_memo_push("kinship_decomp", list(kinship = kinship, ids = sample_ids, decomp = decomp), 8L)
+  entry <- list(kinship = kinship, ids = sample_ids, decomp = decomp,
+    bytes = as.numeric(utils::object.size(decomp)))
+  memo <- c(list(entry), memo)
+  bytes <- cumsum(vapply(memo, function(e) e$bytes %||% 0, numeric(1)))
+  keep <- max(8L, sum(bytes <= qtl2mr_decomposition_budget()))
+  if (length(memo) > keep) memo <- memo[seq_len(keep)]
+  assign("kinship_decomp", memo, envir = qtl2mr_state)
   decomp
 }
 
@@ -153,6 +207,8 @@ qtl2mr_registry_evict <- function(reg = qtl2mr_registry()) {
   k <- which(cumsum(bytes[ord]) >= excess)[1L]
   if (is.na(k)) k <- length(ord)
   drop <- ids[ord][seq_len(k)]
+  reg$released_entries <- (reg$released_entries %||% 0) + length(drop)
+  reg$released_bytes <- (reg$released_bytes %||% 0) + sum(bytes[ord][seq_len(k)])
   qtl2mr_registry_remove(drop)
 }
 

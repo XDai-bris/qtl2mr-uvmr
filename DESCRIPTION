@@ -1,7 +1,7 @@
 Package: qtl2mr
 Type: Package
 Title: Founder-Aware Mendelian Randomization in Multiparent Mice
-Version: 0.6.1.9004
+Version: 0.6.1.9005
 Date: 2026-11-08
 Authors@R: person(given = "Xiaoyang", family = "Dai",
     role = c("aut", "cre"), email = "xd14188@bristol.ac.uk")
