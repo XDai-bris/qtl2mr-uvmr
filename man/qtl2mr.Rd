@@ -16,16 +16,20 @@ Three main functions cover ordinary use:
 \item{Instrument selection}{\code{\link{qtl2mr_select_instruments}()} picks
 one instrument set per exposure from a qtl2 scan, with the exposure block F of
 every candidate, after \code{\link{qtl2mr_prepare_resources}()}.}
-\item{One exposure-outcome pair}{\code{\link{as_qtl2mr_prepared_input}()} (or
-\code{\link{qtl2mr_pair_input}()} from selected instruments) then
-\code{\link{run_qtl2mr_analysis}()}, which writes tables, figures and an HTML
-report with sensitivity analyses. Read results with
-\code{\link{qtl2mr_primary_result}()} and \code{\link{qtl2mr_warnings}()}.}
+\item{One exposure-outcome pair}{\code{\link{qtl2mr_pair_input}()} from the
+resources and an instrument table, then \code{\link{run_qtl2mr_analysis}()},
+which writes tables, figures and an HTML report with sensitivity analyses.
+Read results with \code{\link{qtl2mr_primary_result}()} and
+\code{\link{qtl2mr_warnings}()}; \code{\link{qtl2mr_diagnostics}()} adds the
+simulated Q p-value and bootstrap standard errors.}
 \item{Many pairs}{\code{\link{run_qtl2mr_batch}()} fits every pair exactly as
 the single-pair analysis would and writes compact tables, with optional
 parallel workers and resume.}
 }
-Follow-up refits on locus subsets use \code{\link{refit_qtl2mr_subset}()} and
+\code{\link{qtl2mr_combine_resources}()} combines two resources objects, for
+example two data sets measured on overlapping mice. The founder QC
+(\code{min_founder_copies = 5}) is on by default in selection and in each
+pair. Follow-up refits on locus subsets use \code{\link{refit_qtl2mr_subset}()} and
 \code{\link{fit_instrument_set_sensitivity}()}. The low-level fitting functions
 (\code{\link{fit_founder_lmm_block}()}, \code{\link{fit_mr_locus_block}()},
 \code{\link{fit_multilocus_founder_mr}()}, \code{\link{second_order_gls_ivw}()})

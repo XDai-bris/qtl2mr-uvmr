@@ -58,11 +58,12 @@ has \code{status = "failed"} and the error message in \code{notes}.
 \examples{
 data("qtl2mr_example", package = "qtl2mr")
 ex <- qtl2mr_example
-prepared <- as_qtl2mr_prepared_input(ex$allele_probs, ex$pheno, ex$covar,
-  ex$kinship, ex$marker_map, ex$selected_loci, ex$exposure, ex$outcome)
-result <- run_qtl2mr_analysis(prepared, output_dir = tempfile("qtl2mr-"),
-  make_figures = FALSE, make_html = FALSE, verbose = FALSE, progress = FALSE,
-  heterogeneity_method = "chisq", diagnostic_bootstrap_B = 0L)
+resources <- qtl2mr_prepare_resources(ex$allele_probs, ex$kinship, ex$pheno,
+  ex$covar, ex$marker_map)
+input <- qtl2mr_pair_input(resources,
+  data.frame(exposure = "x", marker = c("m1", "m2")), "x", "y")
+result <- run_qtl2mr_analysis(input, output_dir = tempfile("qtl2mr-"),
+  make_figures = FALSE, make_html = FALSE, progress = FALSE)
 refit_qtl2mr_subset(result, subset = "m1", reason = "strongest locus only")
 }
 \keyword{methods}

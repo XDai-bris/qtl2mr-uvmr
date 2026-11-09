@@ -83,10 +83,10 @@ sensitivity estimate.}
 heterogeneity p-value. \code{"auto"} reports a chi-square reference for
 single-locus fits and simulation calibration for multi-locus fits.}
 \item{q_sim_n}{Number of conditional residual simulations for the aggregate
-Q heterogeneity p-value. The low-level default is \code{0L};
-\code{run_qtl2mr_analysis()} runs 1,000 draws by default for several loci
-(its \code{heterogeneity_nsim}), while \code{run_qtl2mr_batch()} defaults to the
-chi-square reference. If simulation is selected with
+Q heterogeneity p-value. The low-level default is \code{0L}.
+\code{run_qtl2mr_analysis()} and \code{run_qtl2mr_batch()} report the
+chi-square reference; \code{\link{qtl2mr_diagnostics}()} runs the simulation
+afterwards (1,000 draws by default). If simulation is selected with
 \code{q_sim_n = 0L}, the low-level fit warns and returns \code{Q_p_reported =
 NA}.}
 \item{q_sim_seed}{Random seed for Q simulation calibration.}

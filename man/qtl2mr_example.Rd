@@ -25,6 +25,8 @@ only to keep this teaching fixture self-contained.
 \details{
 \if{latex}{\out{\sloppy}}
 The fixture uses seed 301 and normalized exponential founder probabilities.
+Every marker passes the default founder QC (\code{min_founder_copies = 5}):
+the rarest founder has at least 19 expected allele copies at each marker.
 The exposure is generated from founder contrasts at the first three markers;
 the outcome uses a structural coefficient of 0.75 and an additional fourth
 marker founder contrast. The listed \code{exposure_lod} values are illustrative

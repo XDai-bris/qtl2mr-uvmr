@@ -35,49 +35,42 @@ two selected teaching loci (`m1`, `m2`). In a real analysis, choose loci with
 ## Prepare the input
 
 ```{r prepare-input}
-prepared <- as_qtl2mr_prepared_input(
+resources <- qtl2mr_prepare_resources(
   allele_probs = qtl2mr_example$allele_probs,
+  kinship = qtl2mr_example$kinship,
   pheno = qtl2mr_example$pheno,
   covar = qtl2mr_example$covar,
-  kinship = qtl2mr_example$kinship,
   marker_map = qtl2mr_example$marker_map,
-  selected_loci = qtl2mr_example$selected_loci,
-  exposure = qtl2mr_example$exposure,
-  outcome = qtl2mr_example$outcome,
   metadata = qtl2mr_example$metadata
 )
-stopifnot(validate_qtl2mr_input(prepared, require_selected_loci = TRUE))
+instruments <- data.frame(exposure = "x", marker = qtl2mr_example$selected_loci)
+input <- qtl2mr_pair_input(resources, instruments, exposure = "x", outcome = "y")
+stopifnot(validate_qtl2mr_input(input, require_selected_loci = TRUE))
+input$metadata$founder_qc_outcome$loci
 ```
+
+`qtl2mr_pair_input()` adds one pair and its instruments (only `exposure` and
+`marker` are needed) to the shared resources. Its founder QC, on by default,
+drops a locus whose rarest founder has fewer than `min_founder_copies = 5`
+expected allele copies (`E_min_y`) in the outcome's samples; both loci pass.
 
 ## Run the two-locus quick start
 
 ```{r quick-analysis, results='hide'}
 result_dir <- tempfile("qtl2mr-getting-started-")
 result <- run_qtl2mr_analysis(
-  prepared,
+  input,
   output_dir = result_dir,
-  overwrite = TRUE,
   make_figures = FALSE,
-  make_html = TRUE,
-  verbose = FALSE,
-  diagnostic_bootstrap_B = 0L,
-  heterogeneity_method = "chisq",
-  run_loo_mr = FALSE,
-  run_instrument_sensitivity = FALSE,
   progress = FALSE
 )
 ```
 
-Those switches keep this walkthrough fast by skipping optional diagnostics;
-they are not universal analysis defaults. The LMM uses qtl2mr's internal
-backend; the `qtl2` package is optional and is needed only for upstream
-processing or the standalone `validate_qtl2_scan1coef()` comparison.
-The default `heterogeneity_method = "auto"` uses a chi-square Q reference
-for one locus and simulation for multiple loci, with 1,000 draws by default.
-Each draw refits MR; this can dominate runtime even for two loci. The explicit
-`"chisq"` above is an approximate fast-demo choice, not the default reference
-or a calibration guarantee. Use `progress = TRUE` for stage updates in your
-own run; diagnostic bootstraps and sensitivity refits also add time.
+`progress = FALSE` keeps the walkthrough quiet; by default each stage and a
+final summary are printed. The statistical settings are fixed: the analysis
+always runs the leave-one-locus-out and instrument-set sensitivity refits,
+refers Q to chi-square and standardises phenotypes. The `qtl2` package is
+needed only upstream or for `validate_qtl2_scan1coef()`.
 
 ## Read the result and warnings
 
@@ -106,12 +99,12 @@ knitr::kable(primary_view, digits = 3)
 knitr::kable(actionable_warnings)
 ```
 
-The default `reported_estimator_policy = "diagnostic_only"` reports the
-Star-space second-order estimate only for a numerically acceptable, bounded
-fit. An unresolved or unbounded fit is left unreported; raw second-order and Two-step
-diagnostics remain inspectable. The only notice here, `no_kinship_ols`, says
-that this fixture has no kinship, so the founder LMM reduces to ordinary least
-squares; the next section adds one.
+The reported estimate is the Star-space second-order estimate, given only for
+a numerically acceptable, bounded fit. An unresolved or unbounded fit is left
+unreported; the Two-step IVW, weighted median and weighted mode comparators
+remain inspectable as diagnostics. The only notice here, `no_kinship_ols`,
+says that this fixture has no kinship, so the founder LMM reduces to ordinary
+least squares; a later section adds one.
 
 ```{r first-stage}
 first_stage <- read.csv(file.path(result_dir, "data", "block_first_stage.csv"))
@@ -121,28 +114,35 @@ first_stage[, c("marker", "F_X_block", "partial_R2_X_block", "partial_R2_Y_block
 `weak_block_first_stage` is raised when a retained locus has F_X < 2, that is,
 its founder effects on the exposure do not reach nominal p = 0.05. Both loci
 are above that guide, but `m2` is close to it and explains more outcome than
-exposure variance (`steiger_pass = FALSE`). With the default
-`run_instrument_sensitivity = TRUE`, the Steiger direction check refits
+exposure variance (`steiger_pass = FALSE`). The Steiger direction check refits
 without `m2` and reports the result next to the primary estimate in
 `data/steiger_sensitivity.csv` (about 0.79 instead of 0.89); it never filters
 the primary estimate.
 
-The default estimate is in **SD of outcome per SD of exposure**. A bounded
-fit does not guarantee 95% coverage: weak instruments, correlated loci and
-same-sample selection remain limitations. `primary_reliable` is a legacy
-name for this numerical check, not a claim of causal validity.
-The fixture's `true_theta = 0.75` is in **original units**, so it is not the
-target on the displayed SD scale without conversion. With a single common
-scaling, standardized truth = raw truth x SD(X)/SD(Y). A pooled estimate
-cannot generally be converted by one SD ratio when locus-specific samples
-and scaling differ.
+The estimate is in **SD of outcome per SD of exposure**; `theta_raw_units`
+converts it to the original units of the fixture's `true_theta = 0.75` (about
+0.93 here). A bounded fit does not guarantee 95% coverage: weak instruments,
+correlated loci and same-sample selection remain limitations. `primary_reliable`
+is a legacy name for this numerical check, not a claim of causal validity.
+
+## Simulated Q p-value and bootstrap standard errors
+
+`qtl2mr_diagnostics()` adds a Q p-value calibrated by simulation and bootstrap
+standard errors for the weighted median and mode, from the stored locus blocks.
+Each draw refits MR, but not the LMMs; 200 draws (default 1,000) keep this fast.
+
+```{r diagnostics}
+diagnostics <- qtl2mr_diagnostics(result, nsim = 200L)
+diagnostics[, c("Q_p_chisq", "Q_p_sim", "se_weighted_median", "se_weighted_mode")]
+```
+
+It is also written to `data/diagnostics.csv`; the main result is unchanged.
 
 ## Fit with a kinship matrix
 
-The bundled fixture has no kinship. This second fit creates a nonzero
-kinship from independent, synthetic background features. It demonstrates
-the LMM input path, not a reconstruction of a real mouse pedigree or a
-calibration experiment. Nothing is downloaded.
+The bundled fixture has no kinship. This second fit creates a nonzero kinship
+from independent, synthetic background features to demonstrate the LMM input
+path; it is not a reconstruction of a real mouse pedigree.
 
 ```{r kinship-example, results='hide'}
 set.seed(401)
@@ -151,19 +151,14 @@ background <- matrix(rnorm(length(ids) * 24L), nrow = length(ids))
 K <- tcrossprod(background) / ncol(background)
 K <- (K / mean(diag(K)) + diag(length(ids))) / 2
 dimnames(K) <- list(ids, ids)
-prepared_lmm <- as_qtl2mr_prepared_input(
-  allele_probs = qtl2mr_example$allele_probs, pheno = qtl2mr_example$pheno,
-  covar = qtl2mr_example$covar, kinship = list("1" = K),
-  marker_map = qtl2mr_example$marker_map, selected_loci = qtl2mr_example$selected_loci,
-  exposure = qtl2mr_example$exposure, outcome = qtl2mr_example$outcome
+resources_lmm <- qtl2mr_prepare_resources(
+  qtl2mr_example$allele_probs, list("1" = K), qtl2mr_example$pheno,
+  qtl2mr_example$covar, qtl2mr_example$marker_map
 )
+prepared_lmm <- qtl2mr_pair_input(resources_lmm, instruments, "x", "y")
 lmm_dir <- tempfile("qtl2mr-lmm-")
-lmm_result <- run_qtl2mr_analysis(
-  prepared_lmm, output_dir = lmm_dir, make_figures = FALSE,
-  verbose = FALSE, diagnostic_bootstrap_B = 0L,
-  heterogeneity_method = "none", run_loo_mr = FALSE,
-  run_instrument_sensitivity = FALSE, progress = FALSE
-)
+lmm_result <- run_qtl2mr_analysis(prepared_lmm, output_dir = lmm_dir,
+                                  make_figures = FALSE, progress = FALSE)
 ```
 
 ```{r kinship-hsq}
@@ -173,33 +168,50 @@ summary(lmm_result)$estimate
 
 hsq is estimated by REML for each trait without the locus. Here both traits
 get `hsq = 0` (`boundary_zero`, flagged by the `hsq_boundary` notice), so the
-kinship term has no effect and the estimate equals the fit without kinship. That
-is a valid boundary fit in this small independent-background example. It does
-not show that kinship is unimportant in real DO data, nor establish agreement
-between kinship-adjusted and unadjusted models.
+kinship term has no effect and the estimate equals the fit without kinship: a
+valid boundary fit here, not evidence that kinship is unimportant in DO data.
+
+## Combine two data sets
+
+`qtl2mr_combine_resources()` joins two resources objects, for example two data
+sets measured on overlapping mice. Here `x` is measured on the first 64 mice
+and `y` on the last 64, so 32 mice have both traits.
+
+```{r combine}
+part <- function(keep, trait) {
+  qtl2mr_prepare_resources(
+    lapply(qtl2mr_example$allele_probs, function(a) a[keep, , , drop = FALSE]),
+    kinship = NULL, pheno = qtl2mr_example$pheno[keep, trait, drop = FALSE],
+    covar = qtl2mr_example$covar[keep, , drop = FALSE],
+    marker_map = qtl2mr_example$marker_map)
+}
+both <- qtl2mr_combine_resources(part(ids[1:64], "x"), part(ids[33:96], "y"))
+unlist(both$metadata$combined_resources[c("n_samples_x_only", "n_samples_y_only",
+                                          "n_samples_overlap")])
+```
+
+A shared sample ID means the same mouse, so its probabilities and covariates
+must agree. Each trait uses its own samples, so `qtl2mr_pair_input(both, ...)`
+gives a two-sample analysis with partial overlap. Two separately genotyped
+cohorts need a kinship computed on the combined probabilities; no cohort
+covariate is added, as whether one is needed is your decision.
 
 ## Open the useful files
 
-Open the report interactively with
-`browseURL(file.path(result_dir, "report.html"))`. The same folder contains
-`summary.md` and `data/output_manifest.csv`. The knitted vignette cleans its
-temporary directory; supply a named `output_dir` in your own analysis to keep
-the results.
+Open the report with `browseURL(file.path(result_dir, "report.html"))`. The
+same folder contains `summary.md` and `data/output_manifest.csv`. Supply a
+named `output_dir` in your own analysis to keep the results.
 
 ## Move to your own data
 
 Use founder **allele** probabilities (sample x eight founders x marker),
-numeric traits and covariates with sample IDs, an explicit selected-locus
-list, and harmonized chromosome-specific LOCO kinship. The companion
+numeric traits and covariates with sample IDs, an explicit instrument table,
+and harmonized chromosome-specific LOCO kinship. The companion
 `vignette("from-qtl2", package = "qtl2mr")` shows the upstream steps and
-explains which choices are yours. Without a selected-locus list the analysis
-stops; `use_all_loci = TRUE` is an explicit opt-in, not a selection rule.
-Exposure and outcome each use their own usable samples and their overlap is
-modelled. For one or many pairs, `qtl2mr_prepare_resources()` and
-`qtl2mr_select_instruments()` build one instrument set per exposure;
-`qtl2mr_pair_input()` makes the input used above, and `run_qtl2mr_batch()` fits
-many pairs, each exactly as `run_qtl2mr_analysis()` would with the same
-settings.
+explains which choices are yours. Exposure and outcome each use their own
+usable samples and their overlap is modelled. `qtl2mr_select_instruments()`
+builds one instrument set per exposure, and `run_qtl2mr_batch()` fits many
+pairs, each exactly as `run_qtl2mr_analysis()` would.
 
 ```{r cleanup, include=FALSE}
 unlink(result_dir, recursive = TRUE, force = TRUE)

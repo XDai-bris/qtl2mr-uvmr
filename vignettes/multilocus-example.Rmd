@@ -28,16 +28,10 @@ library(qtl2mr)
 data("qtl2mr_multilocus_example", package = "qtl2mr")
 d <- qtl2mr_multilocus_example
 
-input <- as_qtl2mr_prepared_input(
-  allele_probs = d$allele_probs,
-  pheno = d$pheno,
-  covar = d$covar,
-  kinship = d$kinship,
-  marker_map = d$marker_map,
-  selected_loci = d$selected_loci,
-  exposure = d$exposure,
-  outcome = d$outcome
-)
+resources <- qtl2mr_prepare_resources(d$allele_probs, d$kinship, d$pheno,
+                                      d$covar, d$marker_map)
+instruments <- data.frame(exposure = d$exposure, marker = d$selected_loci)
+input <- qtl2mr_pair_input(resources, instruments, d$exposure, d$outcome)
 validate_qtl2mr_input(input, require_selected_loci = TRUE)
 ```
 
@@ -45,56 +39,41 @@ validate_qtl2mr_input(input, require_selected_loci = TRUE)
 arrays. `pheno`, `covar` and `kinship` share the same sample IDs.
 The covariates are batch and age. The kinship matrix is synthetic, not
 LOCO; for real analyses use an appropriate, harmonized kinship source.
-The package estimates hsq rather than receiving a fixed value here.
+The package estimates hsq; it is not an input.
 
-The 40 loci are prespecified teaching instruments, not QTL-scan hits.
-`selected_loci` tells the package exactly where to fit X1 and Y;
-it does not need a separate set of Y hits.
+The 40 loci are prespecified teaching instruments, not QTL-scan hits. The
+instrument table tells the package exactly where to fit X1 and Y; it does not
+need a separate set of Y hits. All 40 pass the default founder QC: the rarest
+founder has at least 89 expected allele copies at every locus.
 
 ## 2. Run the analysis
 
 ```{r analysis, results='hide'}
 result_dir <- tempfile("qtl2mr-multilocus-")
-result <- run_qtl2mr_analysis(
-  input,
-  output_dir = result_dir,
-  standardize_phenotypes = FALSE,
-  make_figures = TRUE,
-  make_html = TRUE,
-  run_loo_mr = TRUE,
-  run_instrument_sensitivity = TRUE,
-  diagnostic_bootstrap_B = 500L,
-  diagnostic_bootstrap_seed = 1L,
-  heterogeneity_method = "chisq",
-  verbose = FALSE,
-  progress = FALSE
-)
+result <- run_qtl2mr_analysis(input, output_dir = result_dir, progress = FALSE)
 ```
 
-`standardize_phenotypes = FALSE` keeps the original units: units of Y per
-unit of X1. The package default is instead SD of Y per SD of X.
-Weighted median/mode use approximate 95% intervals: the original estimate
-plus or minus 1.96 times the SD from 500 parametric-bootstrap draws.
-Loci and weights stay fixed; each per-locus effect is sampled independently
-using its estimate and SE. These diagnostic intervals are not profile CIs
-or a coverage guarantee. The primary result retains its profile interval;
-the `Sigma_xy=0 qtl2mr` and `Two-step IVW` comparators use Wald intervals.
-Heterogeneity uses an approximate chi-square reference.
+The run takes about half a minute: it writes figures and the HTML report and
+always runs the 40 leave-one-locus-out refits and the instrument-set
+sensitivity. Phenotypes are standardised, Q is referred to chi-square, and the
+weighted median and mode are point estimates; section 4 adds their bootstrap
+intervals. The primary result has a profile interval; the
+`Sigma_xy=0 qtl2mr` and `Two-step IVW` comparators use Wald intervals.
 
 ## 3. Read the estimate
 
 ```{r primary}
 primary <- qtl2mr_primary_result(result)
-primary[, c("theta_reported", "reported_ci_lower", "reported_ci_upper",
-            "effect_units", "confidence_set_type")]
+primary[, c("theta_reported", "reported_ci_lower", "reported_ci_upper", "effect_units")]
+primary[, c("theta_raw_units", "profile_ci_lower_raw_units", "profile_ci_upper_raw_units")]
 ```
 
-Expect an estimate around **−0.275**, with a nominal 95% profile interval
-around **[−0.525, −0.030]**. The original structural coefficient was −0.25.
-That agreement in one constructed example is not a coverage test.
-Both numbers are in original units because this run explicitly disables
-standardization. They should not be compared directly with a default SD-unit
-run; for one common scaling, standardized truth = raw truth x SD(X1)/SD(Y).
+The reported estimate is about **−0.093** SD of Y per SD of X1. In original
+units (units of Y per unit of X1) it is about **−0.275**, with a nominal 95%
+profile interval of about **[−0.525, −0.030]**. The original structural
+coefficient was −0.25 in raw units; that agreement in one constructed example
+is not a coverage test. For one common scaling, standardized truth = raw truth
+x SD(X1)/SD(Y).
 
 For comparison, the covariate-adjusted observational slope is:
 
@@ -151,6 +130,25 @@ proven causal or pleiotropic founders.
 ```{r founder-figure, echo=FALSE, out.width='100%', fig.alt='Heatmap of founder residuals for the first 30 selected loci'}
 knitr::include_graphics(file.path(result_dir, "figures", "founder_residual_heatmap.png"))
 ```
+
+`qtl2mr_diagnostics()` adds, from the stored locus blocks, a Q p-value
+calibrated by simulation and bootstrap intervals for the weighted median and
+mode. Each simulation draw re-solves the multilocus fit, about 0.3 seconds
+here, so the default 1,000 draws take a few minutes; 100 keep this vignette
+fast.
+
+```{r simulation-diagnostics}
+diagnostics <- qtl2mr_diagnostics(result, nsim = 100L)
+diagnostics[, c("Q", "Q_p_chisq", "Q_p_sim", "Q_sim_n")]
+diagnostics[, c("theta_weighted_median", "ci_lower_weighted_median", "ci_upper_weighted_median",
+                "theta_weighted_mode", "ci_lower_weighted_mode", "ci_upper_weighted_mode")]
+```
+
+The intervals are the estimate plus or minus 1.96 times the SD of the
+parametric-bootstrap draws (in SD units). Loci and weights stay fixed; each
+per-locus effect is sampled independently from its estimate and SE. These are
+not profile CIs or a coverage guarantee. The table is also written to
+`data/diagnostics.csv`; the main result is unchanged.
 
 ## 5. Open the full report
 

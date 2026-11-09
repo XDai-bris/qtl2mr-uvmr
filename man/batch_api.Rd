@@ -9,38 +9,27 @@
 \if{latex}{\out{\sloppy}}
 Prepare shared inputs once, select one instrument set per exposure, and fit
 many exposure-outcome pairs with compact tabular output. Every batch row is
-the same fit that \code{run_qtl2mr_analysis()} gives for that pair with the
-same settings;
+the same fit that \code{run_qtl2mr_analysis()} gives for that pair;
 \code{qtl2mr_pair_input()} builds the single-pair input for a full report.
 }
 \usage{
 qtl2mr_prepare_resources(allele_probs, kinship, pheno, covar,
-  marker_map = NULL, metadata = list(),
-  probability_policy = c("normalize_rounding", "strict"))
+  marker_map = NULL, metadata = list())
 
 qtl2mr_select_instruments(resources, qtl_scan, exposures = NULL,
-  lod_thresh = 4, peak_rule = c("peakdrop", "spacing", "legacy"),
-  peakdrop = 1.5, min_spacing = 1, exclude_chr = "X", max_loci = NULL,
-  F_X_min = NULL, n_workers = 1L, progress = TRUE, min_founder_copies = NULL)
+  lod_thresh = 4, peak_rule = c("peakdrop", "spacing"),
+  peakdrop = 1.5, min_spacing = 1, exclude_chr = "X",
+  min_founder_copies = 5, n_workers = 1L, progress = TRUE)
 
 qtl2mr_instrument_summary(instruments, F_breaks = c(1.5, 2, 5, 10))
 
 qtl2mr_pair_input(resources, instruments, exposure, outcome,
-  sample_policy = c("own_complete", "pair_common_complete"),
-  min_founder_copies = NULL)
+  min_founder_copies = 5)
 
-run_qtl2mr_batch(resources, pairs, instruments,
-  on_nonestimable_locus = c("fail", "drop"),
-  reported_estimator_policy = c("diagnostic_only", "strict_so", "auto_fallback"),
-  heterogeneity_method = c("chisq", "simulation", "auto", "none"),
-  heterogeneity_nsim = 1000L, heterogeneity_seed = 1L,
-  diagnostic_bootstrap_B = 0L, diagnostic_bootstrap_seed = 1L,
-  standardize_phenotypes = TRUE, cross_cov_model = c("star", "raw", "zero"),
-  min_samples = 50L, min_loci = 1L, n_workers = 1L, fail_fast = FALSE,
-  resume = FALSE, overwrite = FALSE, output_dir = NULL, progress = TRUE,
-  write_locus_blocks = FALSE,
-  sample_policy = c("own_complete", "pair_common_complete"),
-  min_founder_copies = NULL, subsets = NULL)
+run_qtl2mr_batch(resources, pairs, instruments, min_samples = 50L,
+  min_loci = 1L, min_founder_copies = 5, subsets = NULL, n_workers = 1L,
+  fail_fast = FALSE, resume = FALSE, overwrite = FALSE, output_dir = NULL,
+  progress = TRUE, write_locus_blocks = FALSE)
 }
 \arguments{
 \if{latex}{\out{\sloppy}}
@@ -58,9 +47,6 @@ names, or \code{NULL}.}
 \code{pos} columns, or a chromosome-named qtl2 map list. If omitted it is built
 from allele-probability dimnames.}
 \item{metadata}{Optional list stored with the resources.}
-\item{probability_policy}{\code{"normalize_rounding"} (default) accepts small
-founder-probability sum errors from rounding and normalizes an analysis-local
-copy, with a warning and an adjustment record; \code{"strict"} rejects them.}
 \item{resources}{Object returned by \code{qtl2mr_prepare_resources()}.}
 \item{qtl_scan}{LOD scores: a marker by trait matrix such as
 \code{qtl2::scan1()} output, a trait-named list of single-column matrices, or
@@ -72,8 +58,8 @@ LOD \eqn{\ge} \code{lod_thresh} can be peaks. It is a selection rule, not a
 significance calibration.}
 \item{peak_rule}{How LOD peaks become candidates; see Details.
 \code{"peakdrop"} (default) is the qtl2 peak rule; \code{"spacing"} is a
-sensitivity rule; \code{"legacy"} reproduces qtl2mr 0.6.1 and earlier and is
-meant only for reproducing earlier results.}
+sensitivity rule that keeps the maximum of each contiguous LOD island and then
+applies \code{min_spacing}.}
 \item{peakdrop}{For \code{peak_rule = "peakdrop"}: the LOD drop that separates
 two peaks on one chromosome (default 1.5). \code{Inf} keeps one peak per
 chromosome.}
@@ -82,10 +68,6 @@ between kept candidates on one chromosome, in the units of the marker map
 positions (Mb for a qtl2 physical map; default 1).}
 \item{exclude_chr}{Chromosomes left out of the candidate table (default
 \code{"X"}; only autosomal loci can be fitted).}
-\item{max_loci}{Optional cap on the number of selected loci per exposure,
-keeping the highest LOD peaks among those that pass the other rules.}
-\item{F_X_min}{Optional minimum block F for the exposure. \code{NULL} (default)
-does not filter on F.}
 \item{n_workers}{Number of processes. On Unix, exposures (selection) run in
 parallel with \code{parallel::mclapply()}. In a batch, the trait LMM fits are
 computed in parallel by trait; with several exposures, the groups of pairs
@@ -101,9 +83,9 @@ with one row per exposure and marker: usually
 \code{marker} are required. When a \code{selected} column is present it must
 be logical without missing values, and only rows with \code{selected = TRUE}
 are used. \code{chr} must agree with the marker map when given; other columns
-are ignored. Pass the table to \code{qtl2mr_pair_input()}, not as
-\code{selected_loci} of \code{\link{as_qtl2mr_prepared_input}()}, which refuses
-unselected rows and other exposures' rows. \code{qtl2mr_instrument_summary()}
+are ignored. A hand-written table such as
+\code{data.frame(exposure = "x", marker = c("m1", "m2"))} is enough for
+\code{qtl2mr_pair_input()}. \code{qtl2mr_instrument_summary()}
 needs the data frame returned by \code{qtl2mr_select_instruments()} (at least
 \code{exposure}, \code{selected}, \code{drop_reason} and \code{F_X_block}).}
 \item{F_breaks}{Block F values at which \code{qtl2mr_instrument_summary()}
@@ -113,16 +95,10 @@ counts the fitted candidates reaching them (one column
 \item{pairs}{Data frame or CSV path with \code{exposure} and \code{outcome}
 columns and an optional unique \code{pair_id}. Each pair uses the instruments
 of its exposure.}
-\item{on_nonestimable_locus, reported_estimator_policy, heterogeneity_method,
-heterogeneity_nsim, heterogeneity_seed, diagnostic_bootstrap_B,
-diagnostic_bootstrap_seed, standardize_phenotypes, cross_cov_model}{Fit
-settings, with the same meaning as in \code{\link{run_qtl2mr_analysis}}. The
-batch defaults differ only in \code{heterogeneity_method = "chisq"} and
-\code{diagnostic_bootstrap_B = 0}.}
 \item{min_samples}{Minimum number of complete samples required for both the
 exposure and the outcome of a pair.}
 \item{min_loci}{Minimum number of instruments required for a pair, also after
-non-estimable loci are dropped.}
+the outcome founder QC.}
 \item{fail_fast}{Stop at the first failing pair instead of recording an error
 row and continuing. A pair that fails the checks made before fitting (missing
 traits or instruments, too few loci or samples) stops the run before anything
@@ -137,24 +113,15 @@ written by \code{run_qtl2mr_batch()} are removed.}
 \item{write_locus_blocks}{Also write the per-locus founder blocks of every
 completed pair (requires \code{output_dir}); see Details. The default writes
 and returns nothing extra.}
-\item{sample_policy}{Samples each pair is fitted on. \code{"own_complete"}
-(default): the exposure and the outcome each use their own complete samples.
-\code{"pair_common_complete"}: both traits use the samples complete for both
-traits, the covariates and every instrument chromosome, as the 0.5.0 batch did;
-\code{min_samples} then applies to that common sample. For
-\code{qtl2mr_pair_input()} the same choice sets the samples of the single-pair
-input, so that a batch row equals the single analysis under either policy.}
-\item{min_founder_copies}{Optional founder-design QC; \code{NULL} (default) is
-off. A locus is dropped when the rarest founder's expected allele count,
-\eqn{E = \min_k \sum_i 2 p_{ik}}, is below \code{min_founder_copies}, where the
-sum runs over the samples the trait's LMM is fitted on and \eqn{p} are the
-founder probabilities as fitted (after the probability policy's normalisation).
-In \code{qtl2mr_select_instruments()} it applies to the exposure on its own
-complete samples; in \code{run_qtl2mr_batch()} and \code{qtl2mr_pair_input()} to
-the outcome of each pair, on the samples the outcome is fitted with (its own
-complete samples, or the pair's common complete samples under
-\code{sample_policy = "pair_common_complete"}), so a locus can be dropped for
-one pair and kept for another. See Details.}
+\item{min_founder_copies}{Threshold of the founder QC (default 5); \code{NULL}
+turns the QC off. A locus is dropped when the rarest founder's expected allele
+count, \eqn{E = \min_k \sum_i 2 p_{ik}}, is below \code{min_founder_copies},
+where the sum runs over the samples the trait's LMM is fitted on and \eqn{p}
+are the founder probabilities as fitted (after rounding normalisation). In
+\code{qtl2mr_select_instruments()} it applies to the exposure; in
+\code{run_qtl2mr_batch()} and \code{qtl2mr_pair_input()} to the outcome of each
+pair, so a locus can be dropped for one pair and kept for another. See
+Details.}
 \item{subsets}{Optional instrument subsets; \code{NULL} (default) is off. A
 named list with one element per subset, each a list of rules:
 \code{F_X_min} (one number; keeps loci with a finite block F of the exposure
@@ -178,69 +145,90 @@ intervals, a new peak starts only after the LOD has fallen by more than
 \code{peakdrop}; otherwise a higher LOD moves the current peak. Each peak is
 represented by its maximum-LOD marker (the first in map order when tied).
 Unlike qtl2, a marker exactly at \code{lod_thresh} counts as above the
-threshold. With \code{peak_rule = "legacy"} the candidates are the maxima of
-each contiguous run of markers with LOD \eqn{\ge} \code{lod_thresh}, so a
-QTL whose LOD dips below the threshold is split into several candidates; this
-was the only rule before qtl2mr 0.7.0. \code{peak_rule = "spacing"} takes the
-legacy candidates in decreasing LOD and drops any within \code{min_spacing} of
-one already kept on the same chromosome. No rule is LD pruning: nearby peaks
-can still carry correlated founder haplotypes.
+threshold. With \code{peak_rule = "spacing"} the candidates start from the
+maximum of each contiguous run (island) of markers with LOD \eqn{\ge}
+\code{lod_thresh}, the only rule of qtl2mr 0.6.1 and earlier; they are then
+taken in decreasing LOD, and any within \code{min_spacing} of one already kept
+on the same chromosome is dropped, so the kept peaks are more than
+\code{min_spacing} apart. No rule is LD pruning: nearby peaks can still carry
+correlated founder haplotypes.
 
-For every LOD candidate it fits the exposure founder LMM with the same samples, covariates,
-LOCO kinship and null-model hsq as the MR analysis and records the block F,
-\code{F_X_block}: the joint Wald statistic of the seven founder contrasts
-divided by 7 (see the README for its scale). It equals the block F of every pair
-using that exposure; when the pairs are fitted with
-\code{standardize_phenotypes = FALSE} the two agree up to rounding. A scan
-without trait names (a plain LOD vector or an unnamed column) can only be used
-for one exposure. A candidate is not selected, in
-this order, when it is not autosomal (\code{drop_reason = "non_autosomal"}),
-when it fails the founder QC (\code{"founder_qc"}, only with
-\code{min_founder_copies}; such a candidate is not fitted, so it has no block F
-and cannot be \code{"nonestimable_x"}), when the exposure founder effects cannot
-be estimated (\code{"nonestimable_x"} or \code{"x_fit_error"}), when
-\code{F_X_block < F_X_min} (\code{"F"}), or when \code{max_loci} better
-candidates by LOD were already kept among those passing every earlier rule
-(\code{"max_loci"}).
+For every LOD candidate that passes the founder QC, it fits the exposure
+founder LMM with the same samples, covariates, LOCO kinship and null-model hsq
+as the MR analysis and records the block F, \code{F_X_block}: the joint Wald
+statistic of the seven founder contrasts divided by 7 (see the README for its
+scale). It equals the block F of every pair using that exposure. A scan without
+trait names (a plain LOD vector or an unnamed column) can only be used for one
+exposure. A candidate is not selected, in this order, when it is not autosomal
+(\code{drop_reason = "non_autosomal"}), when it fails the founder QC
+(\code{"founder_qc"}; such a candidate is not fitted, so it has no block F and
+cannot be \code{"nonestimable_x"}), or when the exposure founder effects cannot
+be estimated (\code{"nonestimable_x"} or \code{"x_fit_error"}). Every other
+candidate is selected: there is no F filter and no cap on the number of loci.
+To use only the stronger loci, pass \code{subsets} (for example
+\code{list(F2 = list(F_X_min = 2))}) to \code{run_qtl2mr_batch()} or
+\code{\link{run_qtl2mr_analysis}()}, or edit the table.
 
-With \code{min_founder_copies} in \code{run_qtl2mr_batch()}, the outcome QC runs
-for each pair before anything is fitted: a failing locus is not fitted for that
-pair (so it cannot stop the pair as non-estimable under
-\code{on_nonestimable_locus = "fail"}), is listed in \code{locus_results} with
-\code{kept = FALSE} and \code{drop_reason = "founder_qc_outcome"}, and is
-counted in \code{main_results$n_loci_dropped_founder_qc}; \code{n_loci_selected}
-counts the loci that pass. A pair left with fewer than \code{min_loci} loci
-ends as a \code{too_few_loci} error. \code{qtl2mr_pair_input()} with the same
-value gives the input of the remaining loci, so a batch row still equals the
-single analysis; the QC result is recorded in the input's
-\code{metadata$founder_qc_outcome}. Loci that pass the QC but are not estimable
-still follow \code{on_nonestimable_locus}. The batch applies only this
-outcome-side rule: the exposure side is applied by
-\code{qtl2mr_select_instruments()}, so an instrument table selected without the
-QC is used as given for the exposure. In selection, because \code{max_loci}
-counts only passing loci, a QC drop can bring in a lower-LOD candidate.
+\strong{Founder QC.} A locus where one founder is almost absent from the fitted
+samples gives a near-singular founder design: its founder contrasts are poorly
+estimated or not estimable. The QC removes such loci before they are fitted.
+For each locus it computes \eqn{E}, the expected number of copies of the
+rarest founder allele, as defined under \code{min_founder_copies}, and drops
+the locus when \eqn{E} is below the threshold (default 5).
+\itemize{
+\item Exposure side: \code{qtl2mr_select_instruments()} checks each candidate on
+the exposure's samples after \code{"non_autosomal"} and before fitting
+(\code{drop_reason = "founder_qc"}; the table gains \code{E_min_x}).
+\item Outcome side: \code{qtl2mr_pair_input()} and \code{run_qtl2mr_batch()}
+check each instrument of a pair on the outcome's samples before fitting. A
+failing locus is not fitted for that pair, is listed in \code{locus_results}
+with \code{kept = FALSE} and \code{drop_reason = "founder_qc_outcome"}, and is
+counted in \code{main_results$n_loci_dropped_founder_qc};
+\code{n_loci_selected} counts the loci that pass. A pair left with fewer than
+\code{min_loci} loci ends as a \code{too_few_loci} error
+(\code{qtl2mr_pair_input()} stops when no locus is left). The QC result of a
+single-pair input is recorded in its \code{metadata$founder_qc_outcome}, and a
+batch row still equals the single analysis.
+\item The order of the drops is \code{non_autosomal}, then the founder QC, then
+non-estimable loci. In selection a non-estimable locus is dropped; in a pair, a
+locus that passes the QC but is not estimable stops the pair with an error.
+\item \code{qtl2mr_pair_input()} and \code{run_qtl2mr_batch()} do not repeat the
+exposure-side check, so an instrument table written by hand, or selected with
+\code{min_founder_copies = NULL}, is used as given for the exposure.
+}
+Typical effect: in a Diversity Outbred cohort of about 800 mice, with about
+3,000 candidate loci across 80 traits, a threshold of 5 removed about 1\% of
+the exposure loci, mostly loci whose design was near-singular because a founder
+was almost absent, and removed an outcome locus in about 2\% of the pairs.
+\code{min_founder_copies = NULL} turns the QC off, for example to reproduce
+results made without it.
 
 \code{run_qtl2mr_batch()} fits each pair exactly as
 \code{run_qtl2mr_analysis(qtl2mr_pair_input(resources, instruments, exposure,
-outcome))} with the same settings: the exposure and the outcome each use their
-own complete samples and their overlap enters the star-space covariance. The
+outcome))}: the exposure and the outcome each use their own complete samples,
+their overlap enters the star-space covariance, and the fit settings are the
+fixed settings described in \code{\link{run_qtl2mr_analysis}} (non-estimable
+loci fail the pair; chi-square Q; weighted median and mode without bootstrap
+standard errors; star-space covariance; standardised phenotypes). They are
+still recorded in \code{batch_config.json} and the result tables. The batch
+does not run the leave-one-locus-out or instrument-set sensitivity refits. The
 columns of \code{main_results} other than \code{pair_id}, \code{status},
 \code{error_message}, \code{locus_fit_status} and \code{runtime_sec} are
-identical to the same columns of the single-pair \code{main_result}. With
-\code{sample_policy = "pair_common_complete"} both traits use the pair's common
-complete samples instead, in the batch and in \code{qtl2mr_pair_input()} alike.
+identical to the same columns of the single-pair \code{main_result}. To fit
+both traits of every pair on one common sample set, build the resources with
+\code{\link{qtl2mr_combine_resources}(common_only = TRUE)} or subset the inputs
+first.
 Locus fits that share a trait, chromosome, marker, sample set and phenotype
 values are computed once and reused across pairs: the batch first fits, trait by
 trait, every locus its pairs need, then fits the pairs in order. Fits are kept
 for the R session (also those of \code{qtl2mr_select_instruments()} and of
-single analyses) within a bound of 2 GiB as measured by \code{object.size()}:
-the least recently used are released first, a batch keeps the fits it is
-using, and fits that no remaining pair needs become the first to be released.
-Reuse never changes a result. Pairs whose exposure has no selected instrument
-are recorded as \code{no_instruments} errors. Under
-\code{sample_policy = "pair_common_complete"}, \code{sample_exclusions} still
-lists each trait's own exclusions; samples dropped because the partner trait is
-missing show in the fitted sample counts.
+single analyses) within a memory budget, by default 4 GiB as measured by
+\code{object.size()} (option \code{qtl2mr.cache_budget}; see Value). A batch
+works in waves that each hold up to half of that budget. The least recently used
+fits are released first, a batch keeps the fits it is using, and fits that no
+remaining pair needs become the first to be released. Reuse never changes a
+result. Pairs whose exposure has no selected instrument are recorded as
+\code{no_instruments} errors.
 
 With \code{write_locus_blocks = TRUE}, \code{batch_locus_blocks/pair_<index>.rds}
 holds, for each completed pair, a named list of per-locus blocks with
@@ -274,12 +262,10 @@ ended in an error are fitted again on resume.
 
 With \code{subsets}, the instruments a pair is fitted on are its maximal set
 and the main row is its fit, unchanged. For each subset, the loci of the pair
-that were fitted (after the outcome founder QC and non-estimable drops) and pass
-the subset's rules are judged on that pair's own \code{F_X_block} and
-\code{steiger_pass} (the values in \code{locus_results}), and the multilocus
-combination is refitted on their blocks with the run's settings: heterogeneity
-method, simulation draws and seed, diagnostic bootstrap and seed, reported
-estimator policy and cross-covariance model. The LMMs are not refitted, so a
+that were fitted (after the outcome founder QC) and pass the subset's rules are
+judged on that pair's own \code{F_X_block} and \code{steiger_pass} (the values
+in \code{locus_results}), and the multilocus combination is refitted on their
+blocks with the same fixed settings as the main fit. The LMMs are not refitted, so a
 subset row equals the main row of a separate run whose instruments are only
 that subset's loci, provided the fitted samples of each locus do not depend on
 which chromosomes carry instruments (they do not when every sample has
@@ -292,8 +278,8 @@ not stop the run under \code{fail_fast} or change the pair's other rows. A
 failure elsewhere in a pair's subset step (selecting the loci or assembling the
 rows) gives every subset of that pair status \code{"error"} in the same way,
 and the main row and locus rows stay as without subsets. Warnings raised by the
-estimator itself (for example for simulation with \code{heterogeneity_nsim = 0})
-are raised again by each subset refit, so they can appear several times. Pairs
+estimator itself are raised again by each subset refit, so they can appear
+several times. Pairs
 without a fit get status \code{"pair_not_fitted"}. The specification is part of
 the configuration and the resume fingerprint; subset rows are saved in the pair
 records, so they are restored on resume. The locus blocks written by
@@ -302,7 +288,17 @@ records, so they are restored on resume. The locus blocks written by
 Batch results are for screening many pairs: no figures, HTML, leave-one-out or
 instrument-set sensitivity. Rerun a pair of interest with
 \code{qtl2mr_pair_input()} and \code{run_qtl2mr_analysis()} for the full
-report, including the Steiger direction check.
+report, including the Steiger direction check, and then
+\code{\link{qtl2mr_diagnostics}()} for its simulated Q p-value and bootstrap
+standard errors.
+
+\code{qtl2mr_prepare_resources()} checks the founder probabilities once. Sums
+that differ from one only by rounding (at most \code{n_founders * 5e-5}, 0.0004
+for eight founders, the worst case for probabilities rounded to four decimal
+places) are accepted: sample-marker vectors off by more than \code{1e-6} are
+divided by their sum in an analysis-local copy, with a warning and a record in
+\code{metadata$probability_normalization}; the original arrays are kept. Larger deviations are an error; values are
+never clipped, and negative or non-finite entries are never repaired.
 }
 \value{
 \if{latex}{\out{\sloppy}}
@@ -312,22 +308,24 @@ report, including the Steiger direction check.
 candidate: \code{exposure}, \code{marker}, \code{chr}, \code{pos}, \code{lod},
 \code{F_X_block}, \code{n_x}, \code{hsq_x}, \code{selected},
 \code{drop_reason}, \code{locus_rank} (rank among selected loci by LOD),
-\code{selected_by} (\code{"lod_peakdrop_max"},
-\code{"lod_island_max_min_spacing"} or \code{"contiguous_lod_island_max"}) and
+\code{selected_by} (\code{"lod_peakdrop_max"} or
+\code{"lod_island_max_min_spacing"}) and
 the settings \code{lod_thresh}, \code{peak_rule}, \code{peakdrop} and
 \code{min_spacing} (each \code{NA} when the rule does not use it),
-\code{rule_version} (\code{"tophit_v1"} or \code{"legacy"}), \code{F_X_min},
-\code{max_loci} and \code{exclude_chr}. With \code{min_founder_copies} it also has
-\code{E_min_x} (after \code{hsq_x}; \code{NA} for loci that are not autosomal)
-and the setting \code{min_founder_copies}.
+\code{rule_version} (\code{"tophit_v1"}), \code{F_X_min},
+\code{max_loci} and \code{exclude_chr}. \code{F_X_min} and \code{max_loci} are
+always \code{NA}: selection no longer has these rules, and the columns are kept
+so that the table format is unchanged. With the founder QC on (the default) it
+also has \code{E_min_x} (after \code{hsq_x}; \code{NA} for loci that are not
+autosomal) and the setting \code{min_founder_copies}.
 
 \code{qtl2mr_instrument_summary()} returns one row per exposure, in table
 order: \code{exposure}; \code{n_candidates}; the number of candidates dropped
 for each reason, \code{n_dropped_non_autosomal}, \code{n_dropped_founder_qc}
-(only when the table was selected with \code{min_founder_copies}),
+(only when the table was selected with the founder QC on),
 \code{n_dropped_nonestimable_x}, \code{n_dropped_x_fit_error},
-\code{n_dropped_F}, \code{n_dropped_max_loci} and one column for any other
-reason present; \code{n_selected}; \code{F_min}, \code{F_q25},
+\code{n_dropped_F} and \code{n_dropped_max_loci} (0 for tables selected by
+this version) and one column for any other reason present; \code{n_selected}; \code{F_min}, \code{F_q25},
 \code{F_median}, \code{F_mean}, \code{F_q75} and \code{F_max} of
 \code{F_X_block} over the selected loci (type-7 quantiles, as in the single
 analysis's \code{first_stage_summary.csv}; \code{NA} when no locus is
@@ -336,9 +334,9 @@ selected); \code{n_F_ge_<break>}, the number of fitted candidates (finite
 and the settings columns of the table (\code{selected_by}, \code{lod_thresh},
 \code{peak_rule}, \code{peakdrop}, \code{min_spacing}, \code{rule_version},
 \code{F_X_min}, \code{max_loci}, \code{exclude_chr} and, when present,
-\code{min_founder_copies}). With \code{F_X_min = NULL} and no
-\code{max_loci}, \code{n_F_ge_<b>} is the number of loci a selection with
-\code{F_X_min = b} keeps.
+\code{min_founder_copies}). Because selection has no F filter, the fitted
+candidates are the selected loci, so \code{n_F_ge_<b>} is the number of
+selected loci that a subset \code{list(F_X_min = b)} keeps.
 
 \code{qtl2mr_pair_input()} returns a \code{qtl2mr_prepared_input} for
 \code{\link{run_qtl2mr_analysis}}.
@@ -391,7 +389,9 @@ fitted. The specification is recorded in \code{config$subsets}. The list also ho
 }
 \seealso{
 \code{\link{run_qtl2mr_analysis}} for one pair with a full report;
-\code{\link{as_qtl2mr_prepared_input}} for a hand-built single-pair input.
+\code{\link{qtl2mr_combine_resources}} to combine two resources objects;
+\code{\link{qtl2mr_diagnostics}} for the simulated Q p-value and bootstrap
+standard errors of one pair.
 }
 \examples{
 data("qtl2mr_example", package = "qtl2mr")
@@ -408,13 +408,12 @@ qtl2mr_instrument_summary(instruments)[, c("exposure", "n_candidates",
 batch <- run_qtl2mr_batch(resources, data.frame(exposure = "x", outcome = "y"),
   instruments, min_samples = 20L, progress = FALSE)
 batch$main_results[, c("pair_id", "status", "theta", "profile_ci_lower",
-  "profile_ci_upper", "n_loci_steiger_fail")]
+  "profile_ci_upper", "n_loci_steiger_fail", "n_loci_dropped_founder_qc")]
 
 # The same pair in the single-pair workflow gives the same estimate.
 single <- run_qtl2mr_analysis(qtl2mr_pair_input(resources, instruments, "x", "y"),
   output_dir = tempfile("qtl2mr-"), make_html = FALSE, make_figures = FALSE,
-  verbose = FALSE, progress = FALSE, heterogeneity_method = "chisq",
-  diagnostic_bootstrap_B = 0L)
+  progress = FALSE)
 identical(batch$main_results$theta, qtl2mr_primary_result(single)$theta)
 }
 \keyword{methods}

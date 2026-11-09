@@ -31,10 +31,12 @@ have four members and AR coefficient 0.3. This is not LOCO kinship.}
 }
 \details{
 \if{latex}{\out{\sloppy}}
-Use \code{standardize_phenotypes = FALSE} in \code{run_qtl2mr_analysis()} to
-report the original units. The metadata records this choice but does not set
-analysis options automatically. Heritabilities are estimated by the package;
-no fixed hsq or precomputed effect estimates are supplied.
+\code{run_qtl2mr_analysis()} reports the effect in SD units; its
+\code{theta_raw_units} and related columns give it in the original units of
+\code{true_theta}. Heritabilities are estimated by the package; no fixed hsq or
+precomputed effect estimates are supplied. Every marker passes the default
+founder QC (\code{min_founder_copies = 5}): the rarest founder has at least
+89 expected allele copies at each marker.
 
 The example is an unchanged subset of the CTC tutorial's 2026-10-15
 background-QTL Case A construction (master-seed provenance 2026101501).
@@ -57,10 +59,11 @@ is not evidence of a significant opposite observational association.
 \examples{
 data("qtl2mr_multilocus_example", package = "qtl2mr")
 d <- qtl2mr_multilocus_example
-input <- as_qtl2mr_prepared_input(
-  d$allele_probs, d$pheno, covar = d$covar, kinship = d$kinship,
-  marker_map = d$marker_map, selected_loci = d$selected_loci,
-  exposure = d$exposure, outcome = d$outcome)
+resources <- qtl2mr_prepare_resources(d$allele_probs, d$kinship, d$pheno,
+  d$covar, d$marker_map)
+input <- qtl2mr_pair_input(resources,
+  data.frame(exposure = d$exposure, marker = d$selected_loci),
+  d$exposure, d$outcome)
 validate_qtl2mr_input(input, require_selected_loci = TRUE)
 }
 \seealso{

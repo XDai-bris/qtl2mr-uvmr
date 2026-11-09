@@ -1,3 +1,135 @@
+# qtl2mr 0.6.1.9006 (development)
+
+Not released. An API clean-up on top of 0.6.1.9005: the main functions keep
+one setting for each statistical choice, `as_qtl2mr_prepared_input()` is no
+longer exported, the founder QC is on by default, and two helpers are added.
+Only the arguments were changed: the settings now fixed are the 0.6.1.9005
+batch defaults and the fitting code is unchanged, so programme-style batch
+calls (the same instruments and the same `min_founder_copies`) are designed to
+give results bit for bit identical to 0.6.1.9005.
+
+## Default changes for single-pair users
+
+Three public defaults change:
+
+- The founder QC is on: `min_founder_copies = 5` in
+  `qtl2mr_select_instruments()`, `qtl2mr_pair_input()` and `run_qtl2mr_batch()`
+  (`NULL` turns it off). A locus is dropped when E, the expected number of
+  copies of the rarest founder allele on the fitted samples
+  (min over founders of the sum of 2 p), is below 5: on the exposure side in
+  selection (`drop_reason = "founder_qc"`), on the outcome side for each pair
+  (`drop_reason = "founder_qc_outcome"`, counted in
+  `n_loci_dropped_founder_qc`). Loci are dropped as non-autosomal first, then by
+  the QC, then as non-estimable. In one Diversity Outbred cohort of about 800
+  mice, with about 3,000 candidate loci across 80 traits, a threshold of 5
+  removed about 1% of the exposure loci (mostly loci whose design was
+  near-singular because a founder was almost absent) and an outcome locus in
+  about 2% of the pairs.
+- With several loci, `run_qtl2mr_analysis()` refers the Q heterogeneity
+  statistic to chi-square (before: conditional residual simulation with 1,000
+  draws).
+- The weighted median and weighted mode comparators are point estimates
+  without bootstrap standard errors or intervals (before: 500 draws in
+  `run_qtl2mr_analysis()`).
+
+The last two change neither the reported estimate nor its interval; the QC
+changes them only for pairs where it drops a locus. `qtl2mr_diagnostics()`
+gives the simulated Q p-value and the bootstrap standard errors.
+
+## Removed arguments
+
+Calls that pass a removed argument fail with an "unused argument" error.
+
+- `qtl2mr_prepare_resources()`: `probability_policy`. Rounding errors in the
+  founder probabilities are always normalised in an analysis-local copy, with
+  a warning and a record (the former default).
+- `qtl2mr_select_instruments()`: `peak_rule = "legacy"`, `F_X_min` and
+  `max_loci`. `peak_rule = "spacing"` still starts from the maxima of the
+  contiguous LOD islands and then keeps peaks more than `min_spacing` apart;
+  qtl2mr 0.6.1 reproduces the legacy selection. Selection keeps every
+  estimable peak that passes the founder QC; apply F rules afterwards with
+  `subsets`. The instrument table keeps its `F_X_min` and `max_loci` columns,
+  always `NA`, so its format is unchanged, and `qtl2mr_instrument_summary()`
+  keeps `n_dropped_F` and `n_dropped_max_loci` (0); its `n_F_ge_<b>` now counts
+  the selected loci.
+- `qtl2mr_pair_input()` and `run_qtl2mr_batch()`: `sample_policy`. Each trait
+  always uses its own complete samples (the former default). For one common
+  sample set use `qtl2mr_combine_resources(common_only = TRUE)` or subset the
+  inputs.
+- `run_qtl2mr_analysis()`: `loci` (edit the instrument table or use
+  `subsets`), `verbose`, `on_nonestimable_locus`, `reported_estimator_policy`,
+  `heterogeneity_method`, `heterogeneity_nsim`, `heterogeneity_seed`,
+  `diagnostic_bootstrap_B`, `diagnostic_bootstrap_seed`,
+  `standardize_phenotypes`, `cross_cov_model`, `run_loo_mr` and
+  `run_instrument_sensitivity`. `progress` is now `TRUE` or `FALSE` (default
+  `TRUE`): `TRUE` prints the stages and the final summary, `FALSE` prints
+  nothing, and `logs/progress.log` is written either way.
+- `run_qtl2mr_batch()`: `on_nonestimable_locus`, `reported_estimator_policy`,
+  `heterogeneity_method`, `heterogeneity_nsim`, `heterogeneity_seed`,
+  `diagnostic_bootstrap_B`, `diagnostic_bootstrap_seed`,
+  `standardize_phenotypes` and `cross_cov_model`.
+- In `qtl2mr_select_instruments()` and `run_qtl2mr_batch()` the remaining
+  arguments were reordered (`min_founder_copies` and, in the batch, `subsets`
+  come earlier); pass them by name.
+
+The fixed settings, in `run_qtl2mr_analysis()` and `run_qtl2mr_batch()` alike:
+a non-estimable selected locus fails the pair; the reported estimate is the
+second-order estimate, reported only when its profile confidence set is one
+bounded interval, with the comparators as diagnostics only; Q is referred to
+chi-square; the weighted median and mode have no bootstrap; the
+cross-covariance is the star model; phenotypes are standardised, and the
+raw-unit columns are still given. The single analysis always runs the
+leave-one-locus-out and instrument-set sensitivity refits; the batch never
+does. The settings are still recorded in the result tables and
+`batch_config.json`, so table formats are unchanged.
+
+`as_qtl2mr_prepared_input()` is no longer exported: build a single-pair input
+with `qtl2mr_prepare_resources()` and `qtl2mr_pair_input()`, whose instrument
+table needs only `exposure` and `marker` columns. With it, a user-supplied
+`hsq` is no longer part of the public interface; hsq is always estimated by
+the package's REML. The low-level exported functions, such as
+`fit_multilocus_founder_mr()` and `fit_mr_locus_block_overlap()`, keep their
+arguments.
+
+## New helpers
+
+- `qtl2mr_combine_resources(x, y, kinship = NULL, common_only = FALSE)`
+  combines two resources objects, for example two data sets measured on
+  overlapping mice, into one that every entry point accepts. The marker map
+  (marker, chr, pos) and the founders must be identical, trait names must not
+  clash, and the covariate columns must be the same; a shared sample ID means
+  the same mouse, so its probabilities and covariates must be identical. Each
+  failed check is an error. Samples present in only one input are `NA` for the
+  other input's traits, so each trait uses its own samples (the two-sample MR
+  case). The kinship is taken from the inputs when both cover all combined
+  samples with identical values; otherwise (for example two cohorts) it must be
+  supplied, for example `qtl2::calc_kinship(probs, "loco")` on the combined
+  probabilities. `common_only = TRUE` keeps only the shared genotyped samples.
+  No cohort covariate is added. The sample counts and the kinship source are
+  recorded in `metadata$combined_resources`.
+- `qtl2mr_diagnostics(result, nsim = 1000L, seed = 1L)` works post hoc on a
+  `run_qtl2mr_analysis()` result object or its output directory. From the
+  stored locus blocks, without refitting the LMMs, it returns one row with the
+  simulated Q p-value (`Q_p_sim` and related fields) and the bootstrap
+  standard errors and intervals of the weighted median and mode; `nsim` is both
+  the number of simulations and of bootstrap draws, and `seed` seeds both. It
+  writes `data/diagnostics.csv` into the result directory when that exists and
+  does not change the main result. At the same seeds its numbers equal those of
+  0.6.1.9005 with `heterogeneity_method = "simulation"` and
+  `diagnostic_bootstrap_B = nsim`. For a batch pair, rerun the pair with
+  `qtl2mr_pair_input()` and `run_qtl2mr_analysis()` first.
+
+## Unchanged
+
+- The recommended actions in the warning catalogue still mention
+  `probability_policy = "strict"` and a supplied hsq; they are kept so that the
+  batch `warnings` table stays identical to 0.6.1.9005.
+- Locus block files still record `sample_policy = "own_complete"` in their
+  schema attribute, so code that reads them needs no change.
+- Documentation: the manual pages, vignettes and README describe the new
+  interface; the session cache is documented with its 4 GiB default budget
+  (option `qtl2mr.cache_budget`), of which a batch wave holds up to half.
+
 # qtl2mr 0.6.1.9005 (development)
 
 Not released. Performance only, on top of 0.6.1.9004: every estimate, table,
