@@ -1782,6 +1782,9 @@ run_qtl2mr_analysis <- function(input,
   if (!inherits(input, "qtl2mr_prepared_input")) {
     stop("input must be created by qtl2mr_pair_input()", call. = FALSE)
   }
+  overwrite <- qtl2mr_check_flag(overwrite, "overwrite")
+  make_html <- qtl2mr_check_flag(make_html, "make_html")
+  make_figures <- qtl2mr_check_flag(make_figures, "make_figures")
   progress <- qtl2mr_check_flag(progress, "progress")
   # progress = TRUE prints the stages and the final summary; logs/progress.log
   # is written either way.
@@ -1795,8 +1798,8 @@ run_qtl2mr_analysis <- function(input,
   run_instrument_sensitivity <- TRUE
   n_workers <- qtl2mr_check_count(n_workers, "n_workers")
   subsets <- qtl2mr_check_subsets(subsets)
-  # Refits of the Q simulation, bootstrap, LOO and instrument-set sensitivity
-  # may run in forked workers; random numbers are drawn in this process.
+  # Refits of LOO, instrument-set sensitivity and subsets may run in forked
+  # workers; random numbers are drawn in this process.
   old_workers <- qtl2mr_set_workers(n_workers)
   on.exit(qtl2mr_set_workers(old_workers), add = TRUE)
   settings <- qtl2mr_fixed_fit_settings()

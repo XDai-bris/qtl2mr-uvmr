@@ -301,7 +301,8 @@ qtl2mr_add_E_min_x <- function(rows, E) {
 # Candidates arrive sorted by LOD. Non-autosomal loci are never fitted or used.
 # With min_founder_copies, a locus whose rarest founder is too rare on the
 # exposure's own sample is dropped next, before fitting ("founder_qc"); then
-# non-estimable loci, the F rule, and max_loci among the loci still passing.
+# non-estimable loci. The F rule and max_loci are kept here for the internal
+# record; qtl2mr_select_instruments() passes NULL for both since 0.6.1.9006.
 qtl2mr_instrument_rows <- function(candidates, first_stage, F_X_min, max_loci, selected_by, founder_qc = NULL) {
   if (!nrow(candidates)) return(qtl2mr_empty_instruments(!is.null(founder_qc)))
   reason <- rep("", nrow(candidates))

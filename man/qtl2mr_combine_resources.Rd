@@ -45,9 +45,20 @@ from the shared sample IDs.
 \strong{Kinship.} When \code{kinship = NULL} and both inputs have a kinship that
 covers all combined samples with identical values (one cohort, as when both
 data sets come from the same genotyped mice), it is taken from them. When
-neither input has a kinship, the combined object has none. Otherwise, for
-example for two cohorts genotyped separately, supply \code{kinship} computed on
-the combined probabilities; qtl2mr does not compute kinship.
+neither input has a kinship, the combined object has none. Otherwise supply
+\code{kinship} computed on the combined probabilities; qtl2mr does not compute
+kinship. This includes kinships that each cover only their own input's samples
+(for example two cohorts genotyped separately): the kinship between a sample
+only in \code{x} and one only in \code{y} is then unknown. With qtl2, the
+combined probabilities can be formed with \code{rbind()} of the two
+\code{calc_genoprob} objects (or taken from the combined resources'
+\code{allele_probs}) and passed to \code{qtl2::calc_kinship(probs, "loco")}.
+
+Numbers are compared by value, so the same covariate value or marker position
+stored as integer on one side and double on the other is accepted. Each input
+must hold the same samples on every chromosome. The combined object holds the
+two inputs and the combined probabilities in memory at once, which for a full
+Diversity Outbred cohort is a few times the size of one probability array.
 
 \strong{One common sample set.} With \code{common_only = TRUE} only the
 genotyped samples present in both inputs are kept. Each trait is still fitted

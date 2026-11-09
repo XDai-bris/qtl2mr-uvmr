@@ -117,7 +117,14 @@ arguments.
   does not change the main result. At the same seeds its numbers equal those of
   0.6.1.9005 with `heterogeneity_method = "simulation"` and
   `diagnostic_bootstrap_B = nsim`. For a batch pair, rerun the pair with
-  `qtl2mr_pair_input()` and `run_qtl2mr_analysis()` first.
+  `qtl2mr_pair_input()` and `run_qtl2mr_analysis()` first. `nsim` must be at
+  least 2. Given a result object whose folder no longer holds that run (moved,
+  removed or overwritten), it warns and writes nothing.
+- `run_qtl2mr_analysis()` now checks that `overwrite`, `make_html` and
+  `make_figures` are `TRUE` or `FALSE`. Argument positions changed (the fifth
+  argument is now `overwrite`, where it was `loci`; the ninth argument of
+  `qtl2mr_select_instruments()` is now `min_founder_copies`, where it was
+  `max_loci`), so name the arguments in calls written for earlier versions.
 
 ## Unchanged
 

@@ -17,7 +17,7 @@ qtl2mr_diagnostics(result, nsim = 1000L, seed = 1L)
 \code{\link{run_qtl2mr_analysis}()}, its output directory, or the path of its
 \code{result_object.rds}.}
 \item{nsim}{Number of Q simulation draws, and also the number of bootstrap
-draws (a whole number, at least 1).}
+draws (a whole number, at least 2).}
 \item{seed}{Seed for both the simulation and the bootstrap (a whole number).
 The global random-number state is restored afterwards.}
 }
@@ -62,9 +62,18 @@ the draws can show), \code{Q_sim_null_mean}, \code{Q_sim_null_sd} and
 and \code{diagnostic_bootstrap_B} and \code{diagnostic_bootstrap_seed}. The
 table is also written to \code{data/diagnostics.csv} in the result folder: the
 folder given as \code{result} (or the folder of the given
-\code{result_object.rds}), or, for a result object, its recorded
-\code{output_dir}, when that folder exists. The file is not added to
-\code{output_manifest.csv}, and a second call replaces it.
+\code{result_object.rds}); for a result object, its recorded
+\code{output_dir}, but only when the \code{result_object.rds} there is the same
+run. If that folder was moved, removed or overwritten by another analysis,
+nothing is written and a warning says so; pass the folder instead. The file is
+written atomically and never through a link; it is not added to
+\code{output_manifest.csv}, and a second call replaces it (each row records
+\code{nsim} and \code{seed}).
+
+The computation runs in the calling R process (no workers) and refits the
+multilocus stage once per simulation draw and per bootstrap draw, so with the
+default \code{nsim = 1000} it takes roughly 2,000 multilocus refits; on many
+loci this can take minutes.
 }
 \seealso{
 \code{\link{run_qtl2mr_analysis}}, \code{\link{qtl2mr_method_comparison}}.
