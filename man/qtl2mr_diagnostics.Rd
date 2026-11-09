@@ -70,10 +70,10 @@ written atomically and never through a link; it is not added to
 \code{output_manifest.csv}, and a second call replaces it (each row records
 \code{nsim} and \code{seed}).
 
-The computation runs in the calling R process (no workers) and refits the
-multilocus stage once per simulation draw and per bootstrap draw, so with the
-default \code{nsim = 1000} it takes roughly 2,000 multilocus refits; on many
-loci this can take minutes.
+The computation runs in the calling R process (no workers). The simulation
+refits the multilocus stage once per draw, so the default \code{nsim = 1000}
+means about 1,000 refits; the bootstrap of the weighted median and mode
+refits nothing. On many loci this can take minutes.
 }
 \seealso{
 \code{\link{run_qtl2mr_analysis}}, \code{\link{qtl2mr_method_comparison}}.

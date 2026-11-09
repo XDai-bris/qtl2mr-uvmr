@@ -183,7 +183,7 @@ design. Selection checks the exposure (`drop_reason = "founder_qc"`), and
 `qtl2mr_pair_input()` and `run_qtl2mr_batch()` check the outcome of each pair
 (`founder_qc_outcome`); a hand-written instrument table is not checked for the
 exposure. In one Diversity Outbred cohort of about 800 mice,
-with about 3,000 candidate loci across 80 traits, it removed about 1% of the
+with about 3,000 candidate loci across 80 traits, it removed under 1% of the
 exposure loci and an outcome locus in about 2% of the pairs.
 `min_founder_copies = NULL` turns it off.
 

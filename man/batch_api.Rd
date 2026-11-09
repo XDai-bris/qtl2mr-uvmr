@@ -197,7 +197,7 @@ exposure-side check, so an instrument table written by hand, or selected with
 \code{min_founder_copies = NULL}, is used as given for the exposure.
 }
 Typical effect: in a Diversity Outbred cohort of about 800 mice, with about
-3,000 candidate loci across 80 traits, a threshold of 5 removed about 1\% of
+3,000 candidate loci across 80 traits, a threshold of 5 removed under 1\% of
 the exposure loci, mostly loci whose design was near-singular because a founder
 was almost absent, and removed an outcome locus in about 2\% of the pairs.
 \code{min_founder_copies = NULL} turns the QC off, for example to reproduce

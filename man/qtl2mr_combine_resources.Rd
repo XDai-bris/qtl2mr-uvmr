@@ -56,7 +56,8 @@ combined probabilities can be formed with \code{rbind()} of the two
 
 Numbers are compared by value, so the same covariate value or marker position
 stored as integer on one side and double on the other is accepted. Each input
-must hold the same samples on every chromosome. The combined object holds the
+must hold the same samples, in the same order, on every chromosome. The
+combined object holds the
 two inputs and the combined probabilities in memory at once, which for a full
 Diversity Outbred cohort is a few times the size of one probability array.
 

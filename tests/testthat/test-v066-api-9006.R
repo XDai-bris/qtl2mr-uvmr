@@ -925,3 +925,35 @@ test_that("two cohorts with no shared samples: the user's kinship, each trait on
     expect_identical(fx$vcov_fc, fa$vcov_fc, info = m)
   }
 })
+
+test_that("qtl2mr_combine_resources() rebuilds the per-sample qtl2 attributes for the combined samples", {
+  data("qtl2mr_multilocus_example", package = "qtl2mr", envir = environment())
+  ml <- qtl2mr_multilocus_example
+  ids <- rownames(ml$pheno)
+  with_attrs <- function(ap, keep) {
+    ap <- lapply(ap, function(a) a[keep, , , drop = FALSE])
+    attr(ap, "crosstype") <- "do"
+    attr(ap, "is_female") <- stats::setNames(seq_along(ids) %% 2L == 0L, ids)[keep]
+    attr(ap, "cross_info") <- matrix(seq_along(ids), ncol = 1L, dimnames = list(ids, "ngen"))[keep, , drop = FALSE]
+    class(ap) <- c("calc_genoprob", "list")
+    ap
+  }
+  part <- function(keep, trait) suppressWarnings(qtl2mr_prepare_resources(with_attrs(ml$allele_probs, keep),
+    ml$kinship, ml$pheno[keep, trait, drop = FALSE], ml$covar[keep, , drop = FALSE], marker_map = ml$marker_map))
+  kx <- ids[1:250]; ky <- ids[151:400]
+  K <- ml$kinship
+  x <- part(kx, "x1"); y <- part(ky, "y")
+  rc <- suppressWarnings(qtl2mr_combine_resources(x, y, kinship = K))
+  ap <- rc$allele_probs
+  expect_identical(attr(ap, "crosstype"), "do")
+  expect_identical(class(ap), c("calc_genoprob", "list"))
+  expect_identical(names(attr(ap, "is_female")), rc$sample_ids)
+  expect_identical(unname(attr(ap, "is_female")), seq_along(ids)[match(rc$sample_ids, ids)] %% 2L == 0L)
+  expect_identical(rownames(attr(ap, "cross_info")), rc$sample_ids)
+  expect_identical(as.integer(attr(ap, "cross_info")[, 1L]), match(rc$sample_ids, ids))
+  # A shared mouse with a different sex is refused.
+  y2 <- y
+  f <- attr(y2$allele_probs, "is_female"); f[[kx[[200L]]]] <- !f[[kx[[200L]]]]
+  attr(y2$allele_probs, "is_female") <- f
+  expect_error(suppressWarnings(qtl2mr_combine_resources(x, y2, kinship = K)), "same is_female")
+})

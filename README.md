@@ -156,7 +156,7 @@ samples, and drops the locus when E is below `min_founder_copies` (default 5;
   then as non-estimable.
 
 In one Diversity Outbred cohort of about 800 mice, with about 3,000 candidate
-loci across 80 traits, a threshold of 5 removed about 1% of the exposure loci
+loci across 80 traits, a threshold of 5 removed under 1% of the exposure loci
 (mostly loci whose design was near-singular because a founder was almost
 absent) and removed an outcome locus in about 2% of the pairs. Every marker of
 the two bundled examples passes.
@@ -333,7 +333,8 @@ multilocus fit, about 0.3 seconds per draw for that example, so the default
 
 The development version 0.6.1.9006 simplifies the main functions: each
 statistical choice has one setting, and the arguments below are gone. Calls
-that pass a removed argument now fail with an "unused argument" error.
+that pass a removed argument now fail with an "unused argument" error
+(`peak_rule = "legacy"` fails in the check of `peak_rule`).
 
 | 0.6.1 (and 0.6.1.900x) | 0.6.1.9006 |
 |---|---|
@@ -369,8 +370,8 @@ option, use the version that had it, such as the 0.6.1 release.
 | `run_qtl2mr_batch(r, p, instrument_rule = list(lod_thresh = 4))` | `run_qtl2mr_batch(r, p, qtl2mr_select_instruments(r, scan, exposures = unique(p$exposure), lod_thresh = 4))`; without `exposures` every trait in the scan is used |
 | pair columns `instrument_trait`, `lod_thresh`, `exclude_chr`, `max_loci`, `selected_loci_file` | one instrument set per exposure in the `instruments` table; these columns are now an error |
 | `sample_policy`, `min_sample_retention` | removed: every pair uses role-specific samples, as in `run_qtl2mr_analysis()` |
-| `run_qtl2mr_batch(..., fit_options = list(...), force = TRUE)` | top-level arguments and `overwrite = TRUE`; `fit_options$q_sim_n`/`q_sim_seed` are `heterogeneity_nsim`/`heterogeneity_seed`; `engine`, `cache_contexts`, `cache_lmm_fits` and `verbose` are internal (low-level `fit_multilocus_founder_mr()` keeps `q_sim_n`) |
-| `run_qtl2mr_analysis(..., standardize_phenotypes = , cross_cov_model = )` through `...` | named arguments; `...` is gone, and `ridge`, `engine` and the caches are internal. Arguments after `verbose` were reordered, so pass them by name |
+| `run_qtl2mr_batch(..., fit_options = list(...), force = TRUE)` | top-level arguments and `overwrite = TRUE`; `fit_options$q_sim_n`/`q_sim_seed` became `heterogeneity_nsim`/`heterogeneity_seed` (removed in 0.6.1.9006; see [Changes since 0.6.1](#changes-since-061)); `engine`, `cache_contexts`, `cache_lmm_fits` and `verbose` are internal (low-level `fit_multilocus_founder_mr()` keeps `q_sim_n`) |
+| `run_qtl2mr_analysis(..., standardize_phenotypes = , cross_cov_model = )` through `...` | named arguments in 0.6.0 (both removed in 0.6.1.9006, with `verbose`; see [Changes since 0.6.1](#changes-since-061)); `...` is gone, and `ridge`, `engine` and the caches are internal. Pass arguments by name |
 | `batch$selected_loci`, `batch$first_stage_summary`, `batch$sample_qc` (and their CSV files) | `batch$locus_results` (`batch_locus_results.csv`); per-trait `batch$sample_exclusions` |
 | batch `main_results` columns `instrument_trait`, `lod_thresh`, `exclude_chr` | removed; the instruments table records the selection |
 | `theta_so`, `se_so`, `ci_lower_so`, `ci_upper_so`, `sample_policy` columns | `theta`, `se`, `profile_ci_lower`, `profile_ci_upper`; no sample-policy column |

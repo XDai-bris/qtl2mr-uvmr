@@ -22,7 +22,7 @@ Three public defaults change:
   `n_loci_dropped_founder_qc`). Loci are dropped as non-autosomal first, then by
   the QC, then as non-estimable. In one Diversity Outbred cohort of about 800
   mice, with about 3,000 candidate loci across 80 traits, a threshold of 5
-  removed about 1% of the exposure loci (mostly loci whose design was
+  removed under 1% of the exposure loci (mostly loci whose design was
   near-singular because a founder was almost absent) and an outcome locus in
   about 2% of the pairs.
 - With several loci, `run_qtl2mr_analysis()` refers the Q heterogeneity
@@ -38,7 +38,8 @@ gives the simulated Q p-value and the bootstrap standard errors.
 
 ## Removed arguments
 
-Calls that pass a removed argument fail with an "unused argument" error.
+Calls that pass a removed argument fail with an "unused argument" error
+(`peak_rule = "legacy"` fails in the check of `peak_rule`).
 
 - `qtl2mr_prepare_resources()`: `probability_policy`. Rounding errors in the
   founder probabilities are always normalised in an analysis-local copy, with

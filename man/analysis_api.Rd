@@ -193,7 +193,8 @@ chromosome with its status and source), \code{sample_alignment.csv},
 \code{block_first_stage.csv} (per-locus block F, partial R2 and
 \code{steiger_pass}), \code{instrument_sensitivity.csv},
 \code{steiger_sensitivity.csv} and \code{output_manifest.csv}, which lists
-every file. With \code{subsets}, the result also holds \code{subset_results},
+every file the analysis wrote (a later \code{qtl2mr_diagnostics()} file is not
+added). With \code{subsets}, the result also holds \code{subset_results},
 written as \code{subset_results.csv}: one row per subset with \code{exposure},
 \code{outcome}, \code{subset}, \code{rules}, \code{n_loci}, \code{status},
 \code{same_loci_as}, \code{error_message} and the columns of

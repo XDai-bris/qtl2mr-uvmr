@@ -439,6 +439,7 @@ test_that("single analyses do not depend on what the session has cached", {
   inst <- suppressWarnings(qtl2mr_select_instruments(f$resources, f$scan, progress = FALSE))
   qtl2mr:::qtl2mr_cache_reset()
   cold <- run(inst)
+  expect_identical(cold$value$pilot$summary$Q_p_method, "simulation")  # the mock took effect
   qtl2mr:::qtl2mr_cache_reset()
   sel <- perf_capture(qtl2mr_select_instruments(f$resources, f$scan, progress = FALSE))
   expect_identical(sel$value, inst)

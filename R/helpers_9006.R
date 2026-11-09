@@ -72,6 +72,34 @@ qtl2mr_combine_kinship <- function(kx, ky, ids) {
   stats::setNames(out, names(lx))
 }
 
+# Per-sample attributes of qtl2 genoprobs (is_female: a named vector; cross_info:
+# a matrix with sample row names) for the combined samples: from x for its mice,
+# from y for the others. NULL when neither input has it or a sample is not
+# covered; an error when a shared mouse differs.
+qtl2mr_combine_sample_attr <- function(ax, ay, ids, name) {
+  if (is.null(ax) || is.null(ay)) return(NULL)
+  is_mat <- is.matrix(ax) && is.matrix(ay)
+  idx <- if (is_mat) rownames(ax) else names(ax)
+  idy <- if (is_mat) rownames(ay) else names(ay)
+  if (is.null(idx) || is.null(idy) || (!is_mat && (is.matrix(ax) || is.matrix(ay)))) return(NULL)
+  shared <- intersect(idx, idy)
+  same <- if (is_mat) identical(unname(ax[shared, , drop = FALSE]), unname(ay[shared, , drop = FALSE]))
+    else identical(unname(ax[shared]), unname(ay[shared]))
+  if (length(shared) && !same) {
+    stop("samples in both x and y must have the same ", name, " in allele_probs; a shared sample ID means the same mouse",
+      call. = FALSE)
+  }
+  if (!all(ids %in% c(idx, idy))) return(NULL)
+  from_x <- ids %in% idx
+  if (is_mat) {
+    if (!identical(colnames(ax), colnames(ay))) return(NULL)
+    out <- rbind(ax[ids[from_x], , drop = FALSE], ay[ids[!from_x], , drop = FALSE])
+    return(out[ids, , drop = FALSE])
+  }
+  out <- c(ax[ids[from_x]], ay[ids[!from_x]])
+  out[ids]
+}
+
 qtl2mr_combine_resources <- function(x, y, kinship = NULL, common_only = FALSE) {
   if (!inherits(x, "qtl2mr_resources") || !inherits(y, "qtl2mr_resources")) {
     stop("x and y must both come from qtl2mr_prepare_resources()", call. = FALSE)
@@ -143,10 +171,21 @@ qtl2mr_combine_resources <- function(x, y, kinship = NULL, common_only = FALSE) 
     pheno_ids <- pheno_ids[pheno_ids %in% common]
     covar_ids <- covar_ids[covar_ids %in% common]
   }
-  # The list keeps the attributes of x (for example the qtl2 class "calc_genoprob").
+  # The list keeps the sample-independent attributes of x (for example the qtl2
+  # class "calc_genoprob"); the per-sample ones are rebuilt for the combined
+  # samples, or dropped when they cannot be.
+  for (a in c("crosstype", "alleles")) {
+    if (!is.null(attr(x$allele_probs, a)) && !is.null(attr(y$allele_probs, a)) &&
+        !identical(attr(x$allele_probs, a), attr(y$allele_probs, a))) {
+      stop("x and y must have the same ", a, " in allele_probs", call. = FALSE)
+    }
+  }
   allele_probs <- x$allele_probs
   for (chr in names(allele_probs)) {
     allele_probs[[chr]] <- qtl2mr_combine_probs(x$allele_probs[[chr]], y$allele_probs[[chr]], geno)
+  }
+  for (a in c("is_female", "cross_info")) {
+    attr(allele_probs, a) <- qtl2mr_combine_sample_attr(attr(x$allele_probs, a), attr(y$allele_probs, a), geno, a)
   }
   # 5. Traits of one input are NA for samples only in the other.
   pheno <- data.frame(row.names = pheno_ids)
@@ -254,13 +293,21 @@ qtl2mr_write_diagnostics_csv <- function(table, dir) {
 }
 
 qtl2mr_diagnostics <- function(result, nsim = 1000L, seed = 1L) {
-  result <- qtl2mr_read_analysis_result(result)
   if (!is.numeric(nsim) || length(nsim) != 1L || !is.finite(nsim) || nsim != round(nsim) || nsim < 2) {
     stop("nsim must be one whole number >= 2 (it is both the number of Q simulations and of bootstrap draws)",
       call. = FALSE)
   }
   nsim <- as.integer(nsim)
   seed <- qtl2mr_check_whole(seed, "seed")
+  result <- qtl2mr_read_analysis_result(result)
+  # Refuse a linked or unusual diagnostics.csv before the computation, not after it.
+  target_dir <- attr(result, "qtl2mr_diagnostics_dir")
+  if (is.character(target_dir) && length(target_dir) == 1L && !is.na(target_dir) &&
+      dir.exists(file.path(target_dir, "data")) &&
+      !qtl2mr_assert_known_path_node(file.path(target_dir, "data", "diagnostics.csv"), "diagnostics.csv") %in%
+        c("absent", "file")) {
+    stop("data/diagnostics.csv is a link or not a regular file; refusing to write it", call. = FALSE)
+  }
   pilot <- result$pilot
   blocks <- pilot$locus_blocks
   # The multilocus stage of the analysis, refitted from its blocks with the

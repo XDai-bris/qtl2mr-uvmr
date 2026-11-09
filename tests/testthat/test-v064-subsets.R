@@ -299,7 +299,11 @@ test_that("resume restores subset rows and refuses a changed specification; work
     heterogeneity_nsim = 20L, diagnostic_bootstrap_B = 10L)
   forked <- qtl2mr_with_settings(v064_batch(f, subsets = v064_subsets, n_workers = 2L),
     heterogeneity_method = "simulation", heterogeneity_nsim = 20L, diagnostic_bootstrap_B = 10L)
-  expect_true(all(serial$main_results$Q_p_method == "simulation" & serial$main_results$diagnostic_bootstrap_B == 10L))
+  # The mock took effect: simulated Q p-values and a 10-draw bootstrap.
+  expect_identical(unique(serial$main_results$Q_p_method), "simulation")
+  expect_true(all(is.finite(serial$main_results$Q_p_sim)))
+  boot <- serial$method_comparison$bootstrap_B[serial$method_comparison$method == "Weighted median"]
+  expect_true(length(boot) > 0L && all(boot == 10L))
   expect_identical(forked$subset_results, serial$subset_results)
   expect_identical(forked$locus_results, serial$locus_results)
   expect_identical(forked$errors, serial$errors)
@@ -315,17 +319,19 @@ test_that("subset refits leave the caller's random number stream as without subs
   # defaults ("auto", which simulates for several loci) and the counts below.
   draw_after <- function(...) {
     set.seed(99L)
-    invisible(qtl2mr_with_settings(v064_batch(f, ...), heterogeneity_method = "simulation",
-      heterogeneity_nsim = 10L, diagnostic_bootstrap_B = 5L))
+    b <- qtl2mr_with_settings(v064_batch(f, ...), heterogeneity_method = "simulation",
+      heterogeneity_nsim = 10L, diagnostic_bootstrap_B = 5L)
+    expect_identical(unique(b$main_results$Q_p_method), "simulation")  # the mock took effect
     stats::runif(3L)
   }
   expect_identical(draw_after(subsets = v064_subsets), draw_after())
   single_after <- function(...) {
     set.seed(7L)
-    invisible(qtl2mr_with_settings(suppressWarnings(run_qtl2mr_analysis(
+    r <- qtl2mr_with_settings(suppressWarnings(run_qtl2mr_analysis(
       qtl2mr_pair_input(f$resources, f$instruments, "x", "y"),
       output_dir = tempfile("v064-rng-"), make_html = FALSE, make_figures = FALSE, progress = FALSE, ...)),
-      heterogeneity_method = "auto", heterogeneity_nsim = 10L, diagnostic_bootstrap_B = 5L))
+      heterogeneity_method = "auto", heterogeneity_nsim = 10L, diagnostic_bootstrap_B = 5L)
+    expect_identical(r$pilot$summary$Q_p_method, "simulation")  # the mock took effect
     stats::runif(3L)
   }
   expect_identical(single_after(subsets = v064_subsets[c("F2", "SF")]), single_after())
