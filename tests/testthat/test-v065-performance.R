@@ -174,7 +174,9 @@ test_that("the SO objective and its derivatives are bit for bit those of 0.6.1.9
     list(K = 12L, cross = TRUE, ridge = 0),
     list(K = 12L, cross = TRUE, ridge = 1e-10, zero_x = TRUE),
     list(K = 5L, cross = TRUE, ridge = 1e-10, scale_x = 1e-6),
-    list(K = 2L, cross = TRUE, ridge = 1e-10, perfect = TRUE)
+    list(K = 2L, cross = TRUE, ridge = 1e-10, perfect = TRUE),
+    list(K = 6L, cross = TRUE, ridge = 1e-3),
+    list(K = 4L, cross = FALSE, ridge = 0.05)
   )
   alphas <- c(seq(-pi / 2, pi / 2, length.out = 101L), -pi / 2 - 0.1, pi / 2 + 0.1, 0, 1e-12, pi / 4, -pi / 4)
   for (cs in cases) {
@@ -232,6 +234,23 @@ test_that("the context transform equals the diagonal-matrix product bit for bit"
     dimnames(ref) <- list(ctx$sample_ids, ctx$sample_ids)
     expect_true(identical(ctx$raw_transform, ref, num.eq = FALSE))
   }
+  # Eigenvectors with exact -0 entries (valid: the negated vectors of a diagonal kinship): the package's
+  # transform still equals the product bit for bit, which needs its "+ 0".
+  Kd <- diag(seq(0.6, 1.7, length.out = n))
+  dimnames(Kd) <- list(ids, ids)
+  negated <- function(kinship, sample_ids, kinship0) {
+    d <- ns$qtl2mr_decompose_kinship(kinship0, sample_ids = sample_ids)
+    d$vectors <- -d$vectors
+    d
+  }
+  testthat::local_mocked_bindings(qtl2mr_decompose_kinship_cached = negated, .package = "qtl2mr")
+  ctx <- ns$prepare_lmm_context(y, kinship = Kd, addcovar = covar, hsq = 0.4, trait_name = "t", chr = "1")
+  E <- negated(Kd, ctx$sample_ids, Kd[ctx$sample_ids, ctx$sample_ids])
+  expect_true(any(E$vectors == 0 & 1 / E$vectors < 0))
+  wts <- 1 / sqrt(0.4 * E$values + 0.6)
+  ref <- diag(wts, nrow = length(wts)) %*% E$vectors
+  dimnames(ref) <- list(ctx$sample_ids, ctx$sample_ids)
+  expect_true(identical(ctx$raw_transform, ref, num.eq = FALSE))
 })
 
 test_that("kept eigendecompositions are reused across many chromosomes and bounded in bytes", {
@@ -318,6 +337,15 @@ test_that("the run manifest counts computations and releases, in workers too, wi
   ns$qtl2mr_cache_reset()
   par <- batch(n_workers = 2L)
   expect_identical(par$run_manifest[c("context_computed", "lmm_fit_computed")], m[c("context_computed", "lmm_fit_computed")])
+  # One exposure group with two workers, where the prefill or the group may run in this process: counted once.
+  for (mfc in list(NULL, 18)) {
+    one <- function(w) {
+      ns$qtl2mr_cache_reset()
+      suppressWarnings(run_qtl2mr_batch(f$resources, f$pairs[1L, , drop = FALSE], inst, min_samples = 20L,
+        progress = FALSE, n_workers = w, min_founder_copies = mfc))$run_manifest
+    }
+    expect_identical(one(2L)[c("context_computed", "lmm_fit_computed")], one(1L)[c("context_computed", "lmm_fit_computed")])
+  }
   # A budget too small to keep anything: the run releases entries, and a second call recomputes although its
   # hit counts are those of a warm run (backlog QB-7); the results are unchanged.
   options(qtl2mr.cache_budget = 1)

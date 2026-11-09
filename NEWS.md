@@ -18,12 +18,18 @@ columns.
 - The session cache of contexts and fits has a configurable budget, option
   `qtl2mr.cache_budget` (bytes by `object.size()`), with the default raised
   from 2 GiB to 4 GiB. The budget changes only what is kept for reuse.
+- Peak memory can therefore be higher than in 0.6.1.9004: a batch wave may
+  hold up to half the cache budget (2 GiB by default instead of 1 GiB), and
+  each process (the session and every forked worker) may keep up to the
+  decomposition budget of eigendecompositions, outside the cache budget. Size
+  jobs accordingly, or set `options(qtl2mr.cache_budget = 2 * 1024^3,
+  qtl2mr.decomposition_budget = 0)` for the 0.6.1.9004 bounds.
 - The batch run manifest has new columns: `context_computed` and
   `lmm_fit_computed` (contexts and per-locus fits actually computed in the run,
   including recomputations of released entries and those made in forked
   workers), `cache_released_entries` and `cache_released_bytes` (entries
   released for the budget in this session during the run) and
-  `cache_budget_bytes`. The existing `*_cache_hits` and `*_cache_misses` keep
+  `cache_budget_bytes`, appended after the existing columns. The existing `*_cache_hits` and `*_cache_misses` keep
   their meaning: a hit is a key this run asked for before, whether or not its
   value was still kept (backlog QB-7).
 

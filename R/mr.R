@@ -98,11 +98,12 @@ qtl2mr_so_coordinates <- function(blocks, allow_cross_cov, ridge) {
     k <- nrow(b$Sigma_y)
     list(didx = seq.int(1L, k * k, by = k + 1L), zero = matrix(0, k, k), sigma_x_zero = all(b$Sigma_x == 0))
   })
-  # S + diag(v, k), bit for bit: the off-diagonal entries gain an exact +0 and
-  # the diagonal gains v, as in the sum with the diagonal matrix.
+  # S + diag(v, k), bit for bit: each diagonal entry is S[i, i] + v and each
+  # off-diagonal entry S[i, j] + 0, as in the sum with the diagonal matrix.
   add_diag <- function(S, v, a) {
+    d <- S[a$didx] + v
     S <- S + a$zero
-    S[a$didx] <- S[a$didx] + v
+    S[a$didx] <- d
     S
   }
   # The objective is evaluated hundreds of times per fit, over every block.

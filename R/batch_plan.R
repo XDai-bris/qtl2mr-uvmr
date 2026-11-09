@@ -212,12 +212,14 @@ qtl2mr_batch_prefill <- function(resources, plan, settings, n_workers) {
     qtl2mr_batch_prefill_run(input, units[idx], settings)
     ids <- ls(reg$journal, all.names = TRUE)
     entries <- mget(ids, envir = reg$entries, ifnotfound = list(NULL))
-    list(entries = entries[!vapply(entries, is.null, logical(1))], computed = qtl2mr_cache_counters() - counters0)
+    list(entries = entries[!vapply(entries, is.null, logical(1))], computed = qtl2mr_cache_counters() - counters0,
+      pid = Sys.getpid())
   }, mc.cores = length(chunks), mc.preschedule = FALSE, mc.set.seed = FALSE)
   for (o in out) {
     if (is.list(o) && !inherits(o, "try-error") && is.list(o$entries)) {
       qtl2mr_registry_import(o$entries)
-      qtl2mr_cache_counters_add_computed(o$computed)
+      # A single chunk runs in this process, whose counters already include it.
+      if (!identical(o$pid, Sys.getpid())) qtl2mr_cache_counters_add_computed(o$computed)
     }
   }
   invisible(NULL)

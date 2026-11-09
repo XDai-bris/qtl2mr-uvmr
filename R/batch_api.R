@@ -872,9 +872,8 @@ qtl2mr_empty_batch_table <- function(name) {
       "run_id", "created_at", "status", "n_pairs_requested", "n_pairs_ok", "n_pairs_error",
       "n_pairs_resumed", "nonestimable_locus_policy", "n_loci_dropped_nonestimable",
       "parallel_backend", "n_workers", "context_cache_hits", "context_cache_misses",
-      "lmm_fit_cache_hits", "lmm_fit_cache_misses", "context_computed", "lmm_fit_computed",
-      "cache_released_entries", "cache_released_bytes", "cache_budget_bytes",
-      "wall_sec", "mean_wall_sec_per_pair", "lmm_backend"
+      "lmm_fit_cache_hits", "lmm_fit_cache_misses", "wall_sec", "mean_wall_sec_per_pair", "lmm_backend",
+      "context_computed", "lmm_fit_computed", "cache_released_entries", "cache_released_bytes", "cache_budget_bytes"
     ),
     sample_exclusions = c("trait", "reason", "n_input_samples", "n_excluded", "excluded_ids"),
     probability_normalization = c("pair_id", "chr", "marker", "n_normalized", "max_abs_sum_deviation"),
@@ -1452,7 +1451,7 @@ run_qtl2mr_batch <- function(resources,
         if (fail_fast && !is.null(out[[k]]$error)) break
       }
       list(results = out, stats = list(qtl2mr_context_cache_stats(context_cache), qtl2mr_context_cache_stats(fit_cache)),
-        computed = qtl2mr_cache_counters() - counters0)
+        computed = qtl2mr_cache_counters() - counters0, pid = Sys.getpid())
     }
     for (w in seq_along(waves)) {
       wave_start(w)
@@ -1465,7 +1464,8 @@ run_qtl2mr_batch <- function(resources,
         if (is.list(value) && !inherits(value, "condition") && is.list(value$results)) {
           results[idx] <- value$results
           cache_stats[[length(cache_stats) + 1L]] <- value$stats
-          qtl2mr_cache_counters_add_computed(value$computed)
+          # A single group runs in this process, whose counters already include it.
+          if (!identical(value$pid, Sys.getpid())) qtl2mr_cache_counters_add_computed(value$computed)
           next
         }
         # A worker that died or errored outside a pair: keep its fully written
@@ -1519,11 +1519,11 @@ run_qtl2mr_batch <- function(resources,
       parallel_backend = backend, n_workers = n_workers,
       context_cache_hits = stat_sum(1L, "hits"), context_cache_misses = stat_sum(1L, "misses"),
       lmm_fit_cache_hits = stat_sum(2L, "hits"), lmm_fit_cache_misses = stat_sum(2L, "misses"),
+      wall_sec = wall_sec, mean_wall_sec_per_pair = wall_sec / max(nrow(todo), 1L),
+      lmm_backend = qtl2mr_backend_label(batch$main_results$lmm_backend[batch$main_results$status == "ok"]),
       context_computed = counters[["context"]], lmm_fit_computed = counters[["fit_attempt"]],
       cache_released_entries = counters[["released_entries"]], cache_released_bytes = counters[["released_bytes"]],
       cache_budget_bytes = qtl2mr_cache_budget(),
-      wall_sec = wall_sec, mean_wall_sec_per_pair = wall_sec / max(nrow(todo), 1L),
-      lmm_backend = qtl2mr_backend_label(batch$main_results$lmm_backend[batch$main_results$status == "ok"]),
       stringsAsFactors = FALSE
     )
   }

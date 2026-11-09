@@ -363,9 +363,10 @@ released values and those made in workers; \code{cache_released_entries} and
 \code{cache_budget_bytes}. The budget is set with
 \code{options(qtl2mr.cache_budget = bytes)} (default 4 GiB, by
 \code{object.size()}) and kinship eigendecompositions are kept up to
-\code{options(qtl2mr.decomposition_budget = bytes)} (default 1 GiB); neither
-changes a result. A later call in the same session reuses only what is still
-kept. Each table has the same
+\code{options(qtl2mr.decomposition_budget = bytes)} (default 1 GiB, per
+process, outside the cache budget); neither changes a result, but both raise
+peak memory (a wave holds up to half the cache budget). A later call in the
+same session reuses only what is still kept. Each table has the same
 columns whether or not it has rows. With \code{min_founder_copies},
 \code{main_results} also has \code{n_loci_dropped_founder_qc} and
 \code{locus_results} also has \code{E_min_y} (the outcome's \eqn{E} at every
