@@ -8,14 +8,14 @@ using selected QTL as instruments. Each instrument is represented by founder
 haplotype probabilities from `qtl2`, not by a single SNP dosage, and the
 estimator accounts for exposure-outcome sample overlap.
 
-**Current release:** [v0.6.1](https://github.com/XDai-bris/qtl2mr-uvmr/releases/tag/v0.6.1).
+**Current release:** [v0.7.0](https://github.com/XDai-bris/qtl2mr-uvmr/releases/tag/v0.7.0).
 See [NEWS.md](NEWS.md) for what changed,
-[Changes since 0.6.1](#changes-since-061) for the development version in this
-repository, and the [migration table](#upgrading-from-05x) if you used 0.5.x.
+[Changes since 0.6.1](#changes-since-061) if you used 0.6.x, and the
+[migration table](#upgrading-from-05x) if you used 0.5.x.
 
 ## Installation
 
-Download `qtl2mr_0.6.1.tar.gz` and `SHA256SUMS` from the release assets. Use
+Download `qtl2mr_0.7.0.tar.gz` and `SHA256SUMS` from the release assets. Use
 the package file, not GitHub's automatic "Source code" archive, because the
 package file contains the built vignettes. Check the SHA-256 against
 `SHA256SUMS` (for example `shasum -a 256 -c SHA256SUMS` on macOS or
@@ -23,7 +23,7 @@ package file contains the built vignettes. Check the SHA-256 against
 
 ```r
 install.packages("fs")  # with conda: conda install -c conda-forge r-fs
-install.packages("qtl2mr_0.6.1.tar.gz", repos = NULL, type = "source")
+install.packages("qtl2mr_0.7.0.tar.gz", repos = NULL, type = "source")
 library(qtl2mr)
 vignette("getting-started", package = "qtl2mr")
 ```
@@ -49,8 +49,7 @@ a single-pair result. A batch row is the same fit as `run_qtl2mr_analysis()` on
 that pair with the same instruments, so pairs found in a batch can be studied
 in detail without any change in the estimate.
 
-This README describes the development version in this repository
-(0.6.1.9006). Its arguments differ from the 0.6.1 release; see
+This README describes qtl2mr 0.7.0. Its arguments differ from 0.6.1; see
 [Changes since 0.6.1](#changes-since-061).
 
 ### One pair
@@ -200,8 +199,10 @@ works from the locus blocks stored in the result (an object or a result
 folder), without refitting the LMMs; `nsim` is both the number of simulations
 and of bootstrap draws, and `seed` seeds both. It returns one row, writes
 `data/diagnostics.csv` into the result folder and does not change the main
-result. At the same `nsim` and seed its numbers equal those of 0.6.1.9005 with
-`heterogeneity_method = "simulation"` and `diagnostic_bootstrap_B = nsim`. For
+result. At the same `nsim` and seed its numbers equal those of the former
+options `heterogeneity_method = "simulation"` and `diagnostic_bootstrap_B = nsim`
+of `run_qtl2mr_analysis()` (checked against the last development build that had
+them). For
 a batch pair, rerun the pair with `qtl2mr_pair_input()` and
 `run_qtl2mr_analysis()` first.
 
@@ -331,12 +332,18 @@ multilocus fit, about 0.3 seconds per draw for that example, so the default
 
 ## Changes since 0.6.1
 
-The development version 0.6.1.9006 simplifies the main functions: each
-statistical choice has one setting, and the arguments below are gone. Calls
-that pass a removed argument now fail with an "unused argument" error
-(`peak_rule = "legacy"` fails in the check of `peak_rule`).
+Two changes alter results for the same data. Instrument selection now uses
+the qtl2 peak rule (`peak_rule = "peakdrop"`), which gives fewer candidates
+than the contiguous-island rule of 0.6.1, and the founder QC is on by default
+(`min_founder_copies = 5`). MR estimates for a given instrument set are
+otherwise unchanged.
 
-| 0.6.1 (and 0.6.1.900x) | 0.6.1.9006 |
+Version 0.7.0 also simplifies the main functions: each statistical choice has
+one setting, and the arguments below are gone. Calls that pass a removed
+argument now fail with an "unused argument" error (`peak_rule = "legacy"`
+fails in the check of `peak_rule`).
+
+| 0.6.1 | 0.7.0 |
 |---|---|
 | `as_qtl2mr_prepared_input(allele_probs, pheno, covar, kinship, marker_map, selected_loci, exposure, outcome)` | `qtl2mr_prepare_resources(allele_probs, kinship, pheno, covar, marker_map)`, then `qtl2mr_pair_input(resources, data.frame(exposure = exposure, marker = selected_loci), exposure, outcome)`. The function is no longer exported |
 | `hsq =` in `as_qtl2mr_prepared_input()` | removed; hsq is always estimated by the package's REML |
@@ -348,13 +355,13 @@ that pass a removed argument now fail with an "unused argument" error
 | `verbose` (with `progress`) | `progress` alone |
 | `on_nonestimable_locus`, `reported_estimator_policy`, `cross_cov_model`, `standardize_phenotypes`, `run_loo_mr`, `run_instrument_sensitivity` | fixed: a non-estimable locus fails the pair; the second-order estimate is reported only when bounded; star-space covariance; standardised phenotypes, with the `_raw_units` columns for original units; leave-one-out and sensitivity always run in a single analysis and never in a batch |
 | `probability_policy` in `qtl2mr_prepare_resources()` | fixed: rounding errors are normalised with a warning and a record |
-| `min_founder_copies = NULL` by default (0.6.1.9003 to 0.6.1.9005; QC off) | `min_founder_copies = 5` by default; `NULL` turns the QC off |
+| no founder QC | `min_founder_copies = 5` by default; `NULL` turns the QC off |
 
 The fixed settings are still recorded in the result tables and in
 `batch_config.json`, so table formats are unchanged. They are the former batch
-defaults, so a batch run with the same instruments and the
-same `min_founder_copies` is designed to give results bit for bit identical to
-0.6.1.9005. For a single pair, three defaults change: the founder QC is on;
+defaults, so a batch run with the same instruments and the same founder QC
+gives the same results as the former batch defaults. For a single pair, three
+defaults change: the founder QC is on;
 with several loci the Q p-value refers to chi-square instead of simulation;
 and the weighted median and mode have no bootstrap standard errors. The last
 two do not change the estimate or its interval; the QC changes them only for
@@ -370,8 +377,8 @@ option, use the version that had it, such as the 0.6.1 release.
 | `run_qtl2mr_batch(r, p, instrument_rule = list(lod_thresh = 4))` | `run_qtl2mr_batch(r, p, qtl2mr_select_instruments(r, scan, exposures = unique(p$exposure), lod_thresh = 4))`; without `exposures` every trait in the scan is used |
 | pair columns `instrument_trait`, `lod_thresh`, `exclude_chr`, `max_loci`, `selected_loci_file` | one instrument set per exposure in the `instruments` table; these columns are now an error |
 | `sample_policy`, `min_sample_retention` | removed: every pair uses role-specific samples, as in `run_qtl2mr_analysis()` |
-| `run_qtl2mr_batch(..., fit_options = list(...), force = TRUE)` | top-level arguments and `overwrite = TRUE`; `fit_options$q_sim_n`/`q_sim_seed` became `heterogeneity_nsim`/`heterogeneity_seed` (removed in 0.6.1.9006; see [Changes since 0.6.1](#changes-since-061)); `engine`, `cache_contexts`, `cache_lmm_fits` and `verbose` are internal (low-level `fit_multilocus_founder_mr()` keeps `q_sim_n`) |
-| `run_qtl2mr_analysis(..., standardize_phenotypes = , cross_cov_model = )` through `...` | named arguments in 0.6.0 (both removed in 0.6.1.9006, with `verbose`; see [Changes since 0.6.1](#changes-since-061)); `...` is gone, and `ridge`, `engine` and the caches are internal. Pass arguments by name |
+| `run_qtl2mr_batch(..., fit_options = list(...), force = TRUE)` | top-level arguments and `overwrite = TRUE`; `fit_options$q_sim_n`/`q_sim_seed` became `heterogeneity_nsim`/`heterogeneity_seed` (removed in 0.7.0; see [Changes since 0.6.1](#changes-since-061)); `engine`, `cache_contexts`, `cache_lmm_fits` and `verbose` are internal (low-level `fit_multilocus_founder_mr()` keeps `q_sim_n`) |
+| `run_qtl2mr_analysis(..., standardize_phenotypes = , cross_cov_model = )` through `...` | named arguments in 0.6.0 (both removed in 0.7.0, with `verbose`; see [Changes since 0.6.1](#changes-since-061)); `...` is gone, and `ridge`, `engine` and the caches are internal. Pass arguments by name |
 | `batch$selected_loci`, `batch$first_stage_summary`, `batch$sample_qc` (and their CSV files) | `batch$locus_results` (`batch_locus_results.csv`); per-trait `batch$sample_exclusions` |
 | batch `main_results` columns `instrument_trait`, `lod_thresh`, `exclude_chr` | removed; the instruments table records the selection |
 | `theta_so`, `se_so`, `ci_lower_so`, `ci_upper_so`, `sample_policy` columns | `theta`, `se`, `profile_ci_lower`, `profile_ci_upper`; no sample-policy column |
@@ -382,7 +389,7 @@ missing samples: 0.5.x fitted both traits on their common samples, 0.6.0 fits
 each on its own complete samples. Pairs without such differences give the same
 numbers. The batch Q p-value now defaults to chi-square. Batch folders from
 0.5.x cannot be resumed. Several 0.6.0 arguments named in this table were
-removed in 0.6.1.9006; see [Changes since 0.6.1](#changes-since-061). For older
+removed in 0.7.0; see [Changes since 0.6.1](#changes-since-061). For older
 versions, see [NEWS.md](NEWS.md).
 
 ## Method in brief

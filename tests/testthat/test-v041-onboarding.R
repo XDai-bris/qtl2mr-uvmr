@@ -119,8 +119,8 @@ test_that("README and vignette code pass only arguments the 0.6.1.9006 entries h
   }
   expect_match(paste(source, collapse = "\n"), "result <- run_qtl2mr_analysis(", fixed = TRUE)
   text <- paste(source, collapse = "\n")
-  expect_match(text, "**Current release:** [v0.6.1]", fixed = TRUE)
-  expect_match(text, "releases/tag/v0.6.1", fixed = TRUE)
+  expect_match(text, "**Current release:** [v0.7.0]", fixed = TRUE)
+  expect_match(text, "releases/tag/v0.7.0", fixed = TRUE)
   expect_match(text, "exposure and the outcome on their own complete", fixed = TRUE)
   # Retired names may appear only in the change and upgrade sections.
   current <- sub("## (Changes since|Upgrading from) .*", "", text)

@@ -1,341 +1,164 @@
-# qtl2mr 0.6.1.9006 (development)
+# qtl2mr 0.7.0
 
-Not released. An API clean-up on top of 0.6.1.9005: the main functions keep
-one setting for each statistical choice, `as_qtl2mr_prepared_input()` is no
-longer exported, the founder QC is on by default, and two helpers are added.
-Only the arguments were changed: the settings now fixed are the 0.6.1.9005
-batch defaults and the fitting code is unchanged, so programme-style batch
-calls (the same instruments and the same `min_founder_copies`) are designed to
-give results bit for bit identical to 0.6.1.9005.
+Changes since 0.6.1. Instrument selection follows the qtl2 peak rule, a
+founder-design QC is on by default, instrument subsets can be refitted in one
+run, the main functions keep one setting for each statistical choice, and two
+helpers are added. Batches are faster. See "Changes since 0.6.1" in the README
+for a migration table.
 
-## Default changes for single-pair users
+## Default changes when upgrading from 0.6.1
 
-Three public defaults change:
+- **Instrument selection** finds LOD peaks with the qtl2 peak rule
+  (`peak_rule = "peakdrop"`, `peakdrop = 1.5`), so ordinary scans give fewer
+  candidates than 0.6.1 (see below). MR estimates for a given instrument set do
+  not change because of this.
+- **The founder QC is on** (`min_founder_copies = 5`; `NULL` turns it off).
+  Estimates change for pairs where it drops a locus.
+- **`run_qtl2mr_analysis()`** refers Q to chi-square, and the weighted median
+  and mode are point estimates without a bootstrap. This changes neither the
+  reported estimate nor its interval; `qtl2mr_diagnostics()` gives the
+  simulated Q p-value and the bootstrap standard errors.
 
-- The founder QC is on: `min_founder_copies = 5` in
-  `qtl2mr_select_instruments()`, `qtl2mr_pair_input()` and `run_qtl2mr_batch()`
-  (`NULL` turns it off). A locus is dropped when E, the expected number of
-  copies of the rarest founder allele on the fitted samples
-  (min over founders of the sum of 2 p), is below 5: on the exposure side in
-  selection (`drop_reason = "founder_qc"`), on the outcome side for each pair
-  (`drop_reason = "founder_qc_outcome"`, counted in
-  `n_loci_dropped_founder_qc`). Loci are dropped as non-autosomal first, then by
-  the QC, then as non-estimable. In one Diversity Outbred cohort of about 800
-  mice, with about 3,000 candidate loci across 80 traits, a threshold of 5
-  removed under 1% of the exposure loci (mostly loci whose design was
-  near-singular because a founder was almost absent) and an outcome locus in
-  about 2% of the pairs.
-- With several loci, `run_qtl2mr_analysis()` refers the Q heterogeneity
-  statistic to chi-square (before: conditional residual simulation with 1,000
-  draws).
-- The weighted median and weighted mode comparators are point estimates
-  without bootstrap standard errors or intervals (before: 500 draws in
-  `run_qtl2mr_analysis()`).
+## Instrument selection
 
-The last two change neither the reported estimate nor its interval; the QC
-changes them only for pairs where it drops a locus. `qtl2mr_diagnostics()`
-gives the simulated Q p-value and the bootstrap standard errors.
+- `qtl2mr_select_instruments()` finds peaks per chromosome with the qtl2 peak
+  rule: a second peak needs the LOD to fall by more than `peakdrop` below the
+  current peak and rise again by more than `peakdrop`, as in
+  `qtl2::find_peaks()`; each peak is represented by its maximum-LOD marker, and a
+  marker exactly at `lod_thresh` counts as above it. 0.6.1 took the maximum of
+  every contiguous run with LOD ≥ `lod_thresh`, so a QTL whose LOD hovered
+  around the threshold was split into several nearby candidates with nearly
+  identical founder effects, and a separate peak inside a long above-threshold
+  run was missed. In one Diversity Outbred cohort the number of candidates
+  roughly halved.
+- `peak_rule = "spacing"` takes the maxima of the contiguous LOD islands (the
+  0.6.1 candidates) and keeps them, in decreasing LOD, more than `min_spacing`
+  apart (default 1, in marker-map units, Mb for a physical map), as a
+  sensitivity analysis. No rule is LD pruning. qtl2mr 0.6.1 reproduces the old
+  selection.
+- Markers with a missing or non-finite LOD are skipped instead of splitting a
+  peak region, and peak regions at either end of a chromosome are handled.
+- The instrument table records the rule (`selected_by`, `peak_rule`,
+  `peakdrop`, `min_spacing`, `rule_version`).
+- Selection keeps every estimable peak that passes the founder QC; F rules are
+  applied afterwards with `subsets`. The table keeps its `F_X_min` and
+  `max_loci` columns (always `NA`) so its format is stable.
 
-## Removed arguments
+## Founder-design QC
 
-Calls that pass a removed argument fail with an "unused argument" error
-(`peak_rule = "legacy"` fails in the check of `peak_rule`).
+- `min_founder_copies` (default 5) in `qtl2mr_select_instruments()`,
+  `qtl2mr_pair_input()` and `run_qtl2mr_batch()`. A locus is dropped for a trait
+  when E, the expected number of copies of the rarest founder allele on the
+  samples the trait is fitted on (min over founders of the sum over samples of
+  2 p), is below the threshold. Such loci have near-singular founder designs.
+- Exposure side: in selection, after `non_autosomal` and before fitting
+  (`drop_reason = "founder_qc"`, column `E_min_x`). Outcome side: for each pair,
+  in `qtl2mr_pair_input()` and the batch (`drop_reason = "founder_qc_outcome"`,
+  `E_min_y`, `n_loci_dropped_founder_qc`), so a batch row equals the single
+  analysis. The batch does not re-check the exposure side of an instrument
+  table selected elsewhere.
+- In one Diversity Outbred cohort of about 800 mice, with about 3,000 candidate
+  loci across 80 traits, a threshold of 5 removed under 1% of the exposure loci
+  and an outcome locus in about 2% of the pairs. Every marker of the bundled
+  example data passes.
 
-- `qtl2mr_prepare_resources()`: `probability_policy`. Rounding errors in the
-  founder probabilities are always normalised in an analysis-local copy, with
-  a warning and a record (the former default).
-- `qtl2mr_select_instruments()`: `peak_rule = "legacy"`, `F_X_min` and
-  `max_loci`. `peak_rule = "spacing"` still starts from the maxima of the
-  contiguous LOD islands and then keeps peaks more than `min_spacing` apart;
-  qtl2mr 0.6.1 reproduces the legacy selection. Selection keeps every
-  estimable peak that passes the founder QC; apply F rules afterwards with
-  `subsets`. The instrument table keeps its `F_X_min` and `max_loci` columns,
-  always `NA`, so its format is unchanged, and `qtl2mr_instrument_summary()`
-  keeps `n_dropped_F` and `n_dropped_max_loci` (0); its `n_F_ge_<b>` now counts
-  the selected loci.
-- `qtl2mr_pair_input()` and `run_qtl2mr_batch()`: `sample_policy`. Each trait
-  always uses its own complete samples (the former default). For one common
-  sample set use `qtl2mr_combine_resources(common_only = TRUE)` or subset the
-  inputs.
-- `run_qtl2mr_analysis()`: `loci` (edit the instrument table or use
-  `subsets`), `verbose`, `on_nonestimable_locus`, `reported_estimator_policy`,
-  `heterogeneity_method`, `heterogeneity_nsim`, `heterogeneity_seed`,
-  `diagnostic_bootstrap_B`, `diagnostic_bootstrap_seed`,
-  `standardize_phenotypes`, `cross_cov_model`, `run_loo_mr` and
-  `run_instrument_sensitivity`. `progress` is now `TRUE` or `FALSE` (default
-  `TRUE`): `TRUE` prints the stages and the final summary, `FALSE` prints
-  nothing, and `logs/progress.log` is written either way.
-- `run_qtl2mr_batch()`: `on_nonestimable_locus`, `reported_estimator_policy`,
-  `heterogeneity_method`, `heterogeneity_nsim`, `heterogeneity_seed`,
-  `diagnostic_bootstrap_B`, `diagnostic_bootstrap_seed`,
-  `standardize_phenotypes` and `cross_cov_model`.
-- In `qtl2mr_select_instruments()` and `run_qtl2mr_batch()` the remaining
-  arguments were reordered (`min_founder_copies` and, in the batch, `subsets`
-  come earlier); pass them by name.
+## Instrument subsets and F report
 
-The fixed settings, in `run_qtl2mr_analysis()` and `run_qtl2mr_batch()` alike:
-a non-estimable selected locus fails the pair; the reported estimate is the
-second-order estimate, reported only when its profile confidence set is one
-bounded interval, with the comparators as diagnostics only; Q is referred to
-chi-square; the weighted median and mode have no bootstrap; the
-cross-covariance is the star model; phenotypes are standardised, and the
-raw-unit columns are still given. The single analysis always runs the
-leave-one-locus-out and instrument-set sensitivity refits; the batch never
-does. The settings are still recorded in the result tables and
-`batch_config.json`, so table formats are unchanged.
+- `subsets` in `run_qtl2mr_batch()` and `run_qtl2mr_analysis()`: a named list of
+  rule lists, for example
+  `list(F1.5 = list(F_X_min = 1.5), F1.5_SF = list(F_X_min = 1.5, steiger = TRUE))`.
+  Each pair is fitted on its instruments and, for each subset, the fitted loci
+  passing the rules (on the pair's own `F_X_block` and `steiger_pass`) are
+  refitted in the multilocus stage with the run's settings, without refitting
+  the LMMs; a subset row equals the main row of a separate run on those loci.
+  Results: batch table `subset_results` and `locus_results$in_subset_<name>`;
+  single analysis `result$subset_results` and `data/subset_results.csv`. A
+  failing subset is recorded as a row and never changes the main result.
+- `qtl2mr_instrument_summary(instruments, F_breaks = c(1.5, 2, 5, 10))`: the F
+  report of an instrument table, one row per exposure.
 
-`as_qtl2mr_prepared_input()` is no longer exported: build a single-pair input
-with `qtl2mr_prepare_resources()` and `qtl2mr_pair_input()`, whose instrument
-table needs only `exposure` and `marker` columns. With it, a user-supplied
-`hsq` is no longer part of the public interface; hsq is always estimated by
-the package's REML. The low-level exported functions, such as
-`fit_multilocus_founder_mr()` and `fit_mr_locus_block_overlap()`, keep their
-arguments.
+## A simpler interface
+
+- `run_qtl2mr_analysis()` has 10 arguments (was 23) and `run_qtl2mr_batch()` 14
+  (was 25). The statistical settings are fixed in both: a non-estimable
+  selected locus fails the pair; the reported estimate is the second-order
+  estimate, reported only when its profile confidence set is one bounded
+  interval, with the comparators as diagnostics only; Q is referred to
+  chi-square; the weighted median and mode have no bootstrap; the
+  cross-covariance is the star model; phenotypes are standardised and the
+  raw-unit columns are still given. The single analysis always runs the
+  leave-one-locus-out and instrument-set sensitivity refits; the batch never
+  does. The settings are still recorded in the result tables and in
+  `batch_config.json`.
+- Removed arguments (calls that pass them fail with "unused argument";
+  `peak_rule = "legacy"` fails in the check of `peak_rule`):
+  `probability_policy` (rounding errors in the founder probabilities are always
+  normalised in an analysis-local copy, with a warning and a record);
+  `peak_rule = "legacy"`, `F_X_min` and `max_loci` in selection; `sample_policy`
+  (each trait uses its own complete samples; see `qtl2mr_combine_resources()`);
+  `loci` (edit the instrument table or use `subsets`); `verbose`;
+  `on_nonestimable_locus`, `reported_estimator_policy`, `heterogeneity_method`,
+  `heterogeneity_nsim`, `heterogeneity_seed`, `diagnostic_bootstrap_B`,
+  `diagnostic_bootstrap_seed`, `standardize_phenotypes`, `cross_cov_model`,
+  `run_loo_mr` and `run_instrument_sensitivity`.
+- `progress` is `TRUE` (default; prints the stages and, for a single analysis,
+  the final summary) or `FALSE`; a single analysis always writes
+  `logs/progress.log`.
+- `as_qtl2mr_prepared_input()` is no longer exported: build a single-pair input
+  with `qtl2mr_prepare_resources()` and `qtl2mr_pair_input()`, whose instrument
+  table needs only `exposure` and `marker` columns. hsq is always estimated by
+  the package's REML. The low-level exported functions keep their arguments.
+- Argument positions changed (the fifth argument of `run_qtl2mr_analysis()` is
+  now `overwrite`, which is checked to be `TRUE` or `FALSE`); name the arguments
+  in calls written for 0.6.x.
 
 ## New helpers
 
 - `qtl2mr_combine_resources(x, y, kinship = NULL, common_only = FALSE)`
   combines two resources objects, for example two data sets measured on
-  overlapping mice, into one that every entry point accepts. The marker map
-  (marker, chr, pos) and the founders must be identical, trait names must not
-  clash, and the covariate columns must be the same; a shared sample ID means
-  the same mouse, so its probabilities and covariates must be identical. Each
-  failed check is an error. Samples present in only one input are `NA` for the
-  other input's traits, so each trait uses its own samples (the two-sample MR
-  case). The kinship is taken from the inputs when both cover all combined
-  samples with identical values; otherwise (for example two cohorts) it must be
-  supplied, for example `qtl2::calc_kinship(probs, "loco")` on the combined
-  probabilities. `common_only = TRUE` keeps only the shared genotyped samples.
-  No cohort covariate is added. The sample counts and the kinship source are
-  recorded in `metadata$combined_resources`.
-- `qtl2mr_diagnostics(result, nsim = 1000L, seed = 1L)` works post hoc on a
-  `run_qtl2mr_analysis()` result object or its output directory. From the
-  stored locus blocks, without refitting the LMMs, it returns one row with the
-  simulated Q p-value (`Q_p_sim` and related fields) and the bootstrap
-  standard errors and intervals of the weighted median and mode; `nsim` is both
-  the number of simulations and of bootstrap draws, and `seed` seeds both. It
-  writes `data/diagnostics.csv` into the result directory when that exists and
-  does not change the main result. At the same seeds its numbers equal those of
-  0.6.1.9005 with `heterogeneity_method = "simulation"` and
-  `diagnostic_bootstrap_B = nsim`. For a batch pair, rerun the pair with
-  `qtl2mr_pair_input()` and `run_qtl2mr_analysis()` first. `nsim` must be at
-  least 2. Given a result object whose folder no longer holds that run (moved,
-  removed or overwritten), it warns and writes nothing.
-- `run_qtl2mr_analysis()` now checks that `overwrite`, `make_html` and
-  `make_figures` are `TRUE` or `FALSE`. Argument positions changed (the fifth
-  argument is now `overwrite`, where it was `loci`; the ninth argument of
-  `qtl2mr_select_instruments()` is now `min_founder_copies`, where it was
-  `max_loci`), so name the arguments in calls written for earlier versions.
+  overlapping mice. The marker map and founders must agree, trait names must
+  not clash and the covariate columns must be the same; a shared sample ID is
+  the same mouse, so its probabilities and covariates must agree. Samples in
+  only one input are `NA` for the other input's traits, so each trait uses its
+  own samples. The kinship is taken from the inputs when both cover all
+  combined samples identically, otherwise it must be supplied (qtl2mr does not
+  compute kinship). `common_only = TRUE` keeps only the shared samples. No
+  cohort covariate is added.
+- `qtl2mr_diagnostics(result, nsim = 1000L, seed = 1L)`: for a finished single
+  analysis (object or folder), the simulated Q p-value and the bootstrap
+  standard errors and intervals of the weighted median and mode, from the
+  stored locus blocks, written also to `data/diagnostics.csv`. The main result
+  is not changed.
 
-## Unchanged
+## Batch
 
-- The recommended actions in the warning catalogue still mention
-  `probability_policy = "strict"` and a supplied hsq; they are kept so that the
-  batch `warnings` table stays identical to 0.6.1.9005.
-- Locus block files still record `sample_policy = "own_complete"` in their
-  schema attribute, so code that reads them needs no change.
-- Documentation: the manual pages, vignettes and README describe the new
-  interface; the session cache is documented with its 4 GiB default budget
-  (option `qtl2mr.cache_budget`), of which a batch wave holds up to half.
+- `write_locus_blocks = TRUE` writes each pair's per-locus founder blocks to
+  `batch_locus_blocks/` with a manifest; `fit_multilocus_founder_mr()` refits a
+  pair from them.
+- Faster: the founder probabilities are checked once; the second-order
+  estimator reuses its grid and has less R overhead; LMM contexts, kinship
+  decompositions and locus fits are reused within the session, and a batch
+  prefits by trait (in parallel with `n_workers > 1`). Results do not depend on
+  `n_workers`.
+- Memory: the session cache is bounded by option `qtl2mr.cache_budget`
+  (default 4 GiB as measured by `object.size()`; a batch wave holds up to half
+  of it), and kinship decompositions by `qtl2mr.decomposition_budget`
+  (default 1 GiB per process). Set them lower for small machines; results do
+  not change.
+- The run manifest records cache use (`context_computed`, `lmm_fit_computed`,
+  `cache_released_entries`, `cache_released_bytes`, `cache_budget_bytes`).
 
-# qtl2mr 0.6.1.9005 (development)
+## Fixes
 
-Not released. Performance only, on top of 0.6.1.9004: every estimate, table,
-block file and warning is bit for bit the same as in 0.6.1.9004 (and, with the
-default `subsets = NULL`, as in 0.6.1.9003). Only the run manifest gains
-columns.
-
-- The second-order objective is evaluated with less R call overhead. Each
-  block's arithmetic is unchanged operation for operation (the same
-  expressions, `mean()`, `chol()` and `backsolve()`), so every objective value,
-  estimate, interval and Q is identical.
-- The LMM transform of a context is formed by row scaling, which equals the
-  former product with a diagonal matrix bit for bit.
-- Kinship eigendecompositions are kept up to a byte budget (option
-  `qtl2mr.decomposition_budget`, default 1 GiB; at least 8 kept) instead of the
-  last 8, and a reused one moves to the front. Selection, which visits every
-  chromosome of each exposure in turn, no longer recomputes them.
-- The session cache of contexts and fits has a configurable budget, option
-  `qtl2mr.cache_budget` (bytes by `object.size()`), with the default raised
-  from 2 GiB to 4 GiB. The budget changes only what is kept for reuse.
-- Peak memory can therefore be higher than in 0.6.1.9004: a batch wave may
-  hold up to half the cache budget (2 GiB by default instead of 1 GiB), and
-  each process (the session and every forked worker) may keep up to the
-  decomposition budget of eigendecompositions, outside the cache budget. Size
-  jobs accordingly, or set `options(qtl2mr.cache_budget = 2 * 1024^3,
-  qtl2mr.decomposition_budget = 0)` for the 0.6.1.9004 bounds.
-- The batch run manifest has new columns: `context_computed` and
-  `lmm_fit_computed` (contexts and per-locus fits actually computed in the run,
-  including recomputations of released entries and those made in forked
-  workers), `cache_released_entries` and `cache_released_bytes` (entries
-  released for the budget in this session during the run) and
-  `cache_budget_bytes`, appended after the existing columns. The existing `*_cache_hits` and `*_cache_misses` keep
-  their meaning: a hit is a key this run asked for before, whether or not its
-  value was still kept (backlog QB-7).
-
-# qtl2mr 0.6.1.9004 (development)
-
-Not released. Instrument subsets in one run and an F report of an instrument
-table, on top of 0.6.1.9003; with the default `subsets = NULL` every result,
-table, file and warning is the same as in 0.6.1.9003.
-
-- `subsets` in `run_qtl2mr_batch()` and `run_qtl2mr_analysis()`: a named list
-  of rule lists, for example
-  `list(F1.5 = list(F_X_min = 1.5), F1.5_SF = list(F_X_min = 1.5, steiger = TRUE))`.
-  `F_X_min` keeps loci with a finite exposure block F at least the value;
-  `steiger = TRUE` keeps loci with `steiger_pass = TRUE` (FALSE and NA are
-  dropped). Rules within a subset intersect. Names must be unique, use only
-  letters, digits, `.` and `_`, and not be `all`; unknown rules, empty rule
-  lists and invalid values are refused before anything is fitted.
-- Each pair is fitted as before on its instruments (the maximal set), and the
-  main row is unchanged. For each subset, the pair's fitted loci that pass the
-  rules, judged on that pair's own `F_X_block` and `steiger_pass`, are refitted
-  in the multilocus combination with the run's settings (heterogeneity method,
-  simulation draws and seed, diagnostic bootstrap, reported estimator policy,
-  cross-covariance model); the LMMs are not refitted. A subset row therefore
-  equals the main row of a separate run on that subset's loci. The main fit and
-  the subset refits share one internal function for the multilocus stage and
-  its summary row.
-- A subset whose loci equal those of the maximal set or of an earlier subset
-  copies that row (`same_loci_as`). Fewer loci than `min_loci` (one in the
-  single analysis) gives status `too_few_loci`; a failing refit gives status
-  `error` and, in the batch, an `errors` row with stage `"subset"`, without
-  stopping the run or changing the pair's main row; pairs without a fit get
-  `pair_not_fitted`. A failure elsewhere in a pair's subset step (selecting the
-  loci or assembling the rows) gives every subset of that pair status `error`
-  in the same way, and the main row, the locus rows and the other outputs stay
-  as without subsets.
-- Warnings raised by the estimator itself (for example the warning that
-  simulation was selected with `heterogeneity_nsim = 0`) are raised again by
-  each subset refit, so they can appear several times on the console; they do
-  not enter any table.
-- Batch: new table `subset_results` (`batch_subset_results.csv`), one row per
-  pair and subset with `pair_id`, `exposure`, `outcome`, `subset`, `rules`,
-  `n_loci`, `status`, `same_loci_as`, `error_message` and the estimate and test
-  columns of `main_results`; `locus_results` gains `in_subset_<name>` (NA for
-  loci that were not fitted); `config$subsets` and the resume fingerprint record
-  the specification, and subset rows are restored on resume. The locus blocks
-  of `write_locus_blocks` hold the maximal set.
-- Single analysis: `result$subset_results` and `data/subset_results.csv`, with
-  the columns of `main_result.csv`. `instrument_sensitivity.csv`,
-  `steiger_sensitivity.csv` and the default sensitivity sets are unchanged.
-- New exported `qtl2mr_instrument_summary(instruments, F_breaks = c(1.5, 2, 5, 10))`:
-  the F report of a `qtl2mr_select_instruments()` table, one row per exposure
-  with `n_candidates`, the count for each drop reason, `n_selected`, the
-  minimum, quartiles, median, mean and maximum of `F_X_block` over the selected
-  loci, `n_F_ge_<break>` over all fitted candidates, and the selection
-  settings. No existing function or output changes.
-
-# qtl2mr 0.6.1.9003 (development)
-
-Not released. An opt-in founder-design QC on top of 0.6.1.9002; with the
-default `min_founder_copies = NULL` every result, table, file and warning is
-the same as in 0.6.1.9002.
-
-- `min_founder_copies` in `qtl2mr_select_instruments()`, `run_qtl2mr_batch()`
-  and `qtl2mr_pair_input()`: a locus is dropped when the rarest founder's
-  expected allele count, E = min over founders of the sum over samples of
-  2 p, is below the threshold. E is computed on the samples the trait's LMM is
-  fitted on, from the probabilities as fitted (after the probability policy's
-  normalisation).
-- In selection it applies to the exposure on its own complete samples, after
-  `non_autosomal` and before fitting: a failing candidate is not fitted and
-  gets `drop_reason = "founder_qc"`; `max_loci` counts only loci that pass. The
-  table gains `E_min_x` and `min_founder_copies`.
-- In the batch it applies to each pair's outcome, on the samples the outcome
-  is fitted with, before fitting: a failing locus is dropped for that pair only
-  (`locus_results`: `kept = FALSE`, `drop_reason = "founder_qc_outcome"`,
-  `E_min_y`; `main_results`: `n_loci_dropped_founder_qc`), so it cannot stop the
-  pair as non-estimable. `qtl2mr_pair_input()` applies the same QC, so a batch
-  row equals the single analysis. When the QC is on, these columns are always
-  present (0 or NA where no locus was checked).
-- The batch applies only the outcome-side rule. The exposure side is applied by
-  `qtl2mr_select_instruments()`, so an instrument table selected without the QC
-  is not re-checked for the exposure.
-- Because `max_loci` counts only loci that pass, a QC drop can bring in a
-  lower-LOD candidate that the QC-off selection left out (`max_loci`), and
-  `locus_rank` is renumbered over the passing loci. With `max_loci` unset, the
-  QC-on selection is the QC-off selection minus the QC drops (apart from
-  candidates that fail both the QC and estimation, now labelled `founder_qc`).
-
-# qtl2mr 0.6.1.9002 (development)
-
-Not released. A speed build: at the same settings and worker count, every
-result, table and warning is the same as in 0.6.1.9001, and
-`run_qtl2mr_analysis()` with `n_workers > 1` gives the same as with one
-process. Defaults are unchanged; three arguments are added. Fits now stay
-cached in the R session, within a fixed memory bound (see below).
-
-- `qtl2mr_prepare_resources()` checks the founder probabilities once instead of
-  twice, and the sum-to-one check no longer calls `sum()` once per sample and
-  marker; the checks, tolerances and the normalization record are unchanged.
-  Validation of a kinship matrix that already passed is not repeated, and when
-  rounding is normalized only the markers in use are copied.
-- Each fit of the second-order estimator reuses the objective values of its
-  search grid instead of evaluating them again; heterogeneity-simulation draws
-  skip the parts of the fit that they do not report.
-- `run_qtl2mr_analysis(n_workers = 1L)`: on Unix, the refits of the
-  heterogeneity simulation, the diagnostic bootstrap, leave-one-locus-out and
-  the instrument-set sensitivity can run in several processes. Random numbers
-  are drawn in the calling process in the same order, so results do not depend
-  on `n_workers`. Under `options(warn = 2)` or higher the refits run in the
-  calling process; a worker that is killed (for example out of memory) stops
-  the analysis.
-- LMM contexts and locus fits are reused across the R session: fits made by
-  `qtl2mr_select_instruments()` serve the MR stage, and single analyses and
-  batches share them. They are keyed by trait, chromosome, sample set,
-  phenotype and covariate values, kinship and marker probabilities, so only
-  identical fits are shared. The kinship decomposition is computed once per
-  chromosome and sample set, and the overlap products once per pair. The cache
-  holds at most 2 GiB as measured by `object.size()`; the least recently used
-  entries are released first, and a running batch keeps those it is using.
-  Small session memos (kinship checks and fingerprints, up to eight kinship
-  decompositions) are outside this bound.
-- `run_qtl2mr_batch()` first fits, trait by trait (in parallel by trait with
-  `n_workers > 1`), every locus its pairs need, then fits the pairs as before:
-  in order in the calling process for a single exposure, and in parallel
-  exposure-group workers for several exposures, as in 0.6.1.9001 (warnings
-  raised inside those workers are still not returned). Fits that no later pair
-  needs become the first to be released and otherwise stay in the session for
-  later calls.
-- `run_qtl2mr_batch(write_locus_blocks = FALSE)`: with `TRUE`, the per-locus
-  founder blocks of each pair are written to `batch_locus_blocks/` with a
-  manifest; `fit_multilocus_founder_mr()` refits a pair from them.
-- `sample_policy = c("own_complete", "pair_common_complete")` in
-  `run_qtl2mr_batch()` and `qtl2mr_pair_input()`: the default keeps each trait
-  on its own complete samples; `"pair_common_complete"` fits both traits on the
-  pair's common complete samples, as the 0.5.0 batch did.
-
-# qtl2mr 0.6.1.9001 (development)
-
-Not released. A selection-only build: instrument selection changes for
-ordinary scans; MR estimates for a given instrument set are unchanged.
-
-- `qtl2mr_select_instruments()` now finds LOD peaks with the qtl2 peak rule
-  (`peak_rule = "peakdrop"`, the new default): on each chromosome, a second
-  peak needs the LOD to fall by more than `peakdrop` (default 1.5) below the
-  current peak and rise again by more than `peakdrop`, as in
-  `qtl2::find_peaks()`. Each peak is represented by its maximum-LOD marker. A
-  marker exactly at `lod_thresh` still counts as above it. Earlier versions
-  took the maximum of every contiguous run with LOD ≥ `lod_thresh`, so a QTL
-  whose LOD hovered around the threshold was split into several nearby
-  candidates with nearly identical founder effects, and a separate peak inside
-  a long above-threshold run was missed.
-- Two other rules are available: `peak_rule = "spacing"` keeps the old
-  candidates in decreasing LOD and drops any within `min_spacing` (default
-  1 Mb, in marker-map units) of one already kept, as a sensitivity analysis;
-  `peak_rule = "legacy"` gives the 0.6.1 selection, for reproducing earlier
-  results only. No rule is LD pruning.
-- The instrument table records the rule: `selected_by`, `peak_rule`,
-  `peakdrop`, `min_spacing` and `rule_version`.
-- Markers with a missing or non-finite LOD are skipped by every rule instead of
-  splitting a peak region. A peak region that reaches the first or last marker
-  of a chromosome is handled by every rule.
 - The REML heritability profile no longer fails for a trait with a large
-  constant offset when `standardize_phenotypes = FALSE` and a kinship matrix is
-  used (introduced in 0.6.1). The check for a zero residual sum of squares is
-  now relative to the trait's spread around its mean rather than its raw sum
-  of squares; estimates for ordinary inputs are unchanged.
+  constant offset (of the order of 10^7 standard deviations) when phenotypes are
+  not standardised and a kinship is used, as in the low-level
+  `fit_mr_locus_block_overlap(standardize_phenotypes = FALSE)` (introduced in
+  0.6.1). The zero-residual check is now relative to the trait's spread around
+  its mean; estimates for ordinary inputs are unchanged.
+- An invalid `peakdrop` is refused even when no second above-threshold marker
+  follows a peak.
+- Console progress messages end with a newline.
 
 # qtl2mr 0.6.1
 

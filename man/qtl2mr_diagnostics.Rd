@@ -39,10 +39,10 @@ estimate plus or minus 1.96 bootstrap standard errors
 }
 These diagnostics are not profile intervals and carry no coverage guarantee.
 The main result, its tables and \code{result_object.rds} are not changed. At
-the same \code{nsim} and \code{seed} the numbers equal those of qtl2mr
-0.6.1.9005 run with \code{heterogeneity_method = "simulation"},
+the same \code{nsim} and \code{seed} the numbers equal those of the former
+\code{run_qtl2mr_analysis()} options \code{heterogeneity_method = "simulation"},
 \code{heterogeneity_nsim = nsim} and \code{diagnostic_bootstrap_B = nsim}, each
-with that seed.
+with that seed (checked against the last development build that had them).
 
 For a pair of a \code{\link{run_qtl2mr_batch}()} run, first rerun the pair with
 \code{\link{qtl2mr_pair_input}()} and \code{run_qtl2mr_analysis()}, then call
