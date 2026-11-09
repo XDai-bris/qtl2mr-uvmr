@@ -47,16 +47,23 @@ test_that("raw-unit results do not depend on the units of the traits", {
     expect_equal(r$hsq$hsq, base$hsq$hsq, tolerance = 1e-6)
   }
 
-  # Selection standardizes internally; a raw-unit batch reports the same F.
+  # Selection standardizes internally; a raw-unit fit of the pair reports the
+  # same F. Raw units are no longer a batch option (0.6.1.9006): the raw-unit
+  # pair is fitted through the internal path the batch used, without the
+  # founder QC as in the 0.6.1.9005 batch default.
   pheno <- f$pheno
   pheno$x <- pheno$x * 1e-8
   resources <- qtl2mr_prepare_resources(f$gp, f$kinship, pheno, f$covar, f$map)
   inst <- data.frame(exposure = "x", marker = c("a1", "b2"))
-  batch <- run_qtl2mr_batch(resources, data.frame(exposure = "x", outcome = "y"), inst,
-    standardize_phenotypes = FALSE, progress = FALSE)
+  raw_pair <- qtl2mr:::qtl2mr_fit_prepared(qtl2mr_pair_input(resources, inst, "x", "y", min_founder_copies = NULL),
+    "x", "y", qtl2mr_test_settings(standardize_phenotypes = FALSE))
   scan <- matrix(c(6, 1, 1, 5), ncol = 1L, dimnames = list(f$map$marker, "x"))
   selected <- qtl2mr_select_instruments(resources, scan, lod_thresh = 3, progress = FALSE)
   # Equal to numerical precision; the last digits depend on the platform's BLAS.
+  expect_equal(raw_pair$locus_first_stage$F_X_block, selected$F_X_block[match(c("a1", "b2"), selected$marker)],
+    tolerance = 1e-6)
+  # The batch, which standardizes, reports the same F as well.
+  batch <- run_qtl2mr_batch(resources, data.frame(exposure = "x", outcome = "y"), inst, progress = FALSE)
   expect_equal(batch$locus_results$F_X_block, selected$F_X_block[match(c("a1", "b2"), selected$marker)],
     tolerance = 1e-6)
 })
@@ -81,8 +88,7 @@ test_that("a failed Steiger refit is logged and warned", {
   input <- as_qtl2mr_prepared_input(f$gp, f$pheno, f$covar, f$kinship, f$map, c("a1", "a2", "b2"), "x", "y")
   local_mocked_bindings(refit_qtl2mr_subset = function(...) stop("refit boom"))
   result <- run_qtl2mr_analysis(input, output_dir = tempfile("v061-steiger-"), make_html = FALSE,
-    make_figures = FALSE, verbose = FALSE, progress = FALSE, heterogeneity_method = "chisq",
-    diagnostic_bootstrap_B = 0L, run_loo_mr = FALSE)
+    make_figures = FALSE, progress = FALSE)
   expect_identical(result$steiger_sensitivity$status, "failed")
   expect_true("steiger_sensitivity_error" %in% qtl2mr_warnings(result)$warning_id)
   expect_identical(readLines(file.path(result$output_dir, "logs", "steiger_sensitivity_error.log")), "refit boom")

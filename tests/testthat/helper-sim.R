@@ -127,6 +127,59 @@ make_fake_qtl2mr_analysis_result <- function() {
   )
 }
 
+# Fit settings of the internal path: the settings run_qtl2mr_analysis() and
+# run_qtl2mr_batch() fix since 0.6.1.9006 (qtl2mr_fixed_fit_settings()), with
+# any of them overridden. Tests of mechanisms the entries no longer expose
+# (simulated Q p-values, bootstrap SEs, raw units, raw or zero cross-covariance,
+# dropping nonestimable loci) fit through these settings.
+qtl2mr_test_settings <- function(...) {
+  args <- utils::modifyList(list(
+    on_nonestimable_locus = "fail", reported_estimator_policy = "diagnostic_only",
+    heterogeneity_method = "chisq", heterogeneity_nsim = 1000L, heterogeneity_seed = 1L,
+    diagnostic_bootstrap_B = 0L, diagnostic_bootstrap_seed = 1L,
+    standardize_phenotypes = TRUE, cross_cov_model = "star"), list(...))
+  do.call(qtl2mr:::qtl2mr_fit_settings, args)
+}
+
+# The instrument table qtl2mr_select_instruments(max_loci = n) gave before
+# 0.6.1.9006, when max_loci was removed: loci ranked after the first n of each
+# exposure (all of them fitted, as before) are marked not selected.
+qtl2mr_test_top_loci <- function(inst, n) {
+  drop <- inst$selected & !is.na(inst$locus_rank) & inst$locus_rank > n
+  inst$selected[drop] <- FALSE
+  inst$drop_reason[drop] <- "max_loci"
+  inst$locus_rank[drop] <- NA_integer_
+  inst
+}
+
+# Evaluates code with the settings that run_qtl2mr_analysis() and
+# run_qtl2mr_batch() fix (qtl2mr_fixed_fit_settings()) replaced by
+# qtl2mr_test_settings(...), so that tests of the entries' orchestration (subset
+# refits, workers, random number streams, batch/single agreement) can still use
+# the simulated Q p-value, the bootstrap and the other settings the entries
+# no longer take.
+qtl2mr_with_settings <- function(code, ...) {
+  settings <- qtl2mr_test_settings(...)
+  with_mocked_bindings(code, qtl2mr_fixed_fit_settings = function() settings)
+}
+
+# A run_qtl2mr_analysis() result fitted with explicit settings: the steps of
+# run_qtl2mr_analysis() (the pair fit, optionally leave-one-locus-out MR, then
+# write_qtl2mr_results()) through the internal fit path, for the settings the
+# entry no longer takes. The instrument-set sensitivity is not run.
+qtl2mr_test_analysis <- function(input, settings = qtl2mr_test_settings(), exposure = NULL, outcome = NULL,
+                                 output_dir = tempfile("qtl2mr-test-analysis-"), make_html = FALSE,
+                                 make_figures = FALSE, run_loo_mr = FALSE, loci = NULL) {
+  exposure <- exposure %||% input$exposure
+  outcome <- outcome %||% input$outcome
+  pilot <- qtl2mr:::qtl2mr_fit_prepared(input, exposure, outcome, settings, loci = loci, verbose = FALSE)
+  loo <- if (isTRUE(run_loo_mr)) loo_multilocus_founder_mr(pilot$fit) else NULL
+  result <- structure(list(input = "qtl2mr_prepared_input", exposure = exposure, outcome = outcome,
+    output_dir = output_dir, created_at = Sys.time(), pilot = pilot, loo_mr = loo),
+    class = c("qtl2mr_analysis_result", "list"))
+  qtl2mr:::write_qtl2mr_results(result, output_dir = output_dir, make_html = make_html, make_figures = make_figures)
+}
+
 compare_founder_lmm_to_scan1coef <- qtl2mr:::compare_founder_lmm_to_scan1coef
 write_qtl2mr_results <- qtl2mr:::write_qtl2mr_results
 make_overlap_matrix <- qtl2mr:::make_overlap_matrix

@@ -35,7 +35,7 @@ test_that("peak rules handle edges, missing values, ties and the threshold", {
     # LOD exactly at the threshold counts as above it.
     expect_identical(peaks(c(1, 4, 1), rule = rule), 2L, info = rule)
   }
-  # The legacy rule splits a plateau at every dip below the threshold.
+  # The island rule (the candidates of "spacing") splits a plateau at every dip below the threshold.
   expect_identical(peaks(c(1, 4.02, 3.97, 4.04, 1), rule = "lod_island"), c(4L, 2L))
   for (bad in list(0, -1, NA_real_, "1.5", TRUE, c(1, 2))) {
     expect_error(peaks(c(1, 5), peakdrop = bad), "peakdrop must be")
@@ -51,7 +51,6 @@ test_that("scan candidates follow the chosen rule within each chromosome", {
     dimnames = list(map$marker[ord], "x"))
   cand <- function(rule, ...) qtl2mr:::qtl2mr_scan_candidates(scan, map, "x", 4, "X", peak_rule = rule, ...)
   expect_identical(cand("peakdrop")$marker, c("m7", "n2", "m3"))
-  expect_identical(cand("legacy")$marker, c("m7", "n2", "m3", "m1", "m5"))
   # m1 is within 1 Mb of m3; m5 is 1.1 Mb away.
   expect_identical(cand("spacing")$marker, c("m7", "n2", "m3", "m5"))
   expect_identical(cand("spacing", min_spacing = 2)$marker, c("m7", "n2", "m3"))
@@ -78,19 +77,15 @@ test_that("the instrument table records the peak rule", {
   expect_true(all(is.na(primary$min_spacing)))
   expect_identical(unique(primary$rule_version), "tophit_v1")
 
-  legacy <- select(peak_rule = "legacy")
-  expect_identical(legacy$marker, c("m1", "m4"))
-  expect_identical(unique(legacy$selected_by), "contiguous_lod_island_max")
-  expect_true(all(is.na(legacy$peakdrop) & is.na(legacy$min_spacing)))
-  expect_identical(unique(legacy$rule_version), "legacy")
-
   spaced <- select(peak_rule = "spacing", min_spacing = 2)
   expect_identical(spaced$marker, c("m1", "m4"))
   expect_identical(unique(spaced$selected_by), "lod_island_max_min_spacing")
   expect_identical(unique(spaced$min_spacing), 2)
   expect_identical(select(peak_rule = "spacing", min_spacing = 3)$marker, "m1")
 
-  expect_identical(names(primary), names(legacy))
+  expect_identical(names(primary), names(spaced))
+  # The legacy rule of 0.6.1 and earlier was removed in 0.6.1.9006.
+  expect_error(select(peak_rule = "legacy"), "should be one of")
   expect_identical(names(select(lod_thresh = 50)), names(primary))
   expect_error(select(peakdrop = 0), "peakdrop must be")
   expect_error(select(min_spacing = -1), "min_spacing must be")

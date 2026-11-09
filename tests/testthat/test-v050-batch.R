@@ -49,8 +49,8 @@ test_that("one batch entry point remains and retired arguments are rejected", {
     expect_false(old %in% ns)
   }
   expect_true(all(c("qtl2mr_select_instruments", "qtl2mr_pair_input") %in% ns))
-  # sample_policy returned in 0.6.1.9002 with "own_complete" and "pair_common_complete" only.
-  expect_error(run_qtl2mr_batch(f$resources, f$pairs, f$instruments, sample_policy = "batch_common_complete"), "should be one of")
+  # sample_policy was removed in 0.6.1.9006 (each trait uses its own complete samples).
+  expect_error(run_qtl2mr_batch(f$resources, f$pairs, f$instruments, sample_policy = "pair_common_complete"), "unused argument")
   expect_error(run_qtl2mr_batch(f$resources, f$pairs, f$instruments, fit_options = list()), "unused argument")
   expect_error(run_qtl2mr_batch(f$resources, f$pairs, f$instruments, force = TRUE), "unused argument")
   expect_error(run_qtl2mr_batch(f$resources, f$pairs), "instruments is required")
@@ -66,7 +66,9 @@ test_that("one batch entry point remains and retired arguments are rejected", {
   expect_true(all(batch$main_results$status == "ok"))
   expect_true(all(batch$main_results$Q_p_method == "chisq"))
   expect_true(all(batch$main_results$confidence_set_bounded))
-  expect_identical(utils::tail(names(batch$main_results), 2L), c("locus_fit_status", "runtime_sec"))
+  # The founder QC is on by default since 0.6.1.9006, so its column follows runtime_sec.
+  expect_identical(utils::tail(names(batch$main_results), 3L), c("locus_fit_status", "runtime_sec",
+    "n_loci_dropped_founder_qc"))
 })
 
 test_that("worker count does not change results", {
@@ -140,13 +142,15 @@ test_that("changed inputs, options or files are refused without modifying the ch
   path <- tempfile("v050-refuse-")
   v050_run(f, path)
   before <- v050_hashes(path)
+  # Changed options are options that still exist since 0.6.1.9006 (the fit
+  # settings are fixed): the founder QC threshold and min_samples.
   changed <- f
-  changed$options$standardize_phenotypes <- FALSE
+  changed$options$min_founder_copies <- 3
   expect_error(v050_run(changed, path, resume = TRUE), "fingerprint changed")
   changed <- f
   changed$resources$pheno$x[1L] <- changed$resources$pheno$x[1L] + 0.01
   expect_error(v050_run(changed, path, resume = TRUE), "fingerprint changed")
-  expect_error(v050_run(f, path, resume = TRUE, heterogeneity_method = "none"), "fingerprint changed")
+  expect_error(v050_run(f, path, resume = TRUE, min_samples = 21L), "fingerprint changed")
   changed <- f
   changed$instruments <- data.frame(exposure = c("x", "x", "w"), marker = c("m1", "m2", "m2"))
   expect_error(v050_run(changed, path, resume = TRUE), "fingerprint changed")
@@ -186,7 +190,7 @@ test_that("overwrite replaces only package-owned batch outputs", {
   writeLines("keep me", file.path(path, "notes.txt"))
   dir.create(file.path(path, "by_exposure"))
   changed <- f
-  changed$options$standardize_phenotypes <- FALSE
+  changed$options$min_founder_copies <- 3
   rerun <- v050_run(changed, path, overwrite = TRUE)
   expect_true(all(rerun$main_results$status == "ok"))
   expect_identical(readLines(file.path(path, "notes.txt")), "keep me")
@@ -197,7 +201,9 @@ test_that("overwrite replaces only package-owned batch outputs", {
 test_that("invalid pairs become error rows", {
   f <- v050_batch_fixture()
   f$pairs <- rbind(f$pairs, data.frame(exposure = c("absent", "x", "y"), outcome = c("y", "x", "x")))
-  b <- run_qtl2mr_batch(f$resources, f$pairs, f$instruments, min_samples = 20L, progress = FALSE)
+  # The schema without the founder QC columns, as in 0.6.1.9005 (QC off).
+  b <- run_qtl2mr_batch(f$resources, f$pairs, f$instruments, min_samples = 20L, min_founder_copies = NULL,
+    progress = FALSE)
   expect_identical(b$main_results$status, c(rep("ok", 4L), "error", "error", "error"))
   expect_match(b$main_results$error_message[[5L]], "no_instruments")
   expect_match(b$main_results$error_message[[6L]], "must be different traits")
@@ -249,7 +255,9 @@ test_that("the resume fingerprint ignores probabilities at markers the run does 
 test_that("the batch locus table matches the locus fits and error rows carry NA bounds", {
   f <- v050_batch_fixture()
   f$pairs <- rbind(f$pairs, data.frame(exposure = "absent", outcome = "y"))
-  b <- run_qtl2mr_batch(f$resources, f$pairs, f$instruments, min_samples = 20L, progress = FALSE)
+  # The schema without the founder QC columns, as in 0.6.1.9005 (QC off).
+  b <- run_qtl2mr_batch(f$resources, f$pairs, f$instruments, min_samples = 20L, min_founder_copies = NULL,
+    progress = FALSE)
   loci <- b$locus_results
   expect_identical(names(loci), names(qtl2mr:::qtl2mr_empty_batch_table("locus_results")))
   expect_true(all(is.finite(loci$F_X_block) & loci$F_X_block > 0))
@@ -258,7 +266,8 @@ test_that("the batch locus table matches the locus fits and error rows carry NA 
   expect_true(all(is.na(loci$hsq_x)))
   expect_true(is.na(b$main_results$confidence_set_bounded[b$main_results$status == "error"]))
 
-  single <- qtl2mr:::run_prepared_qtl2mr(qtl2mr_pair_input(f$resources, f$instruments, "x", "y"), "x", "y",
+  single <- qtl2mr:::run_prepared_qtl2mr(qtl2mr_pair_input(f$resources, f$instruments, "x", "y",
+    min_founder_copies = NULL), "x", "y",
     verbose = FALSE, heterogeneity_method = "none", diagnostic_bootstrap_B = 0L)
   expect_identical(loci$F_X_block[loci$pair_id == "x__to__y"], mr_block_first_stage_f(single$locus_blocks[[1L]]))
   expect_identical(loci$F_X_block[loci$pair_id == "x__to__y"], f$instruments$F_X_block[f$instruments$exposure == "x"])

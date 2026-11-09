@@ -1,6 +1,8 @@
-# 0.6.1.9003: opt-in founder-design QC, min_founder_copies. E = min over founders
+# 0.6.1.9003: founder-design QC, min_founder_copies. E = min over founders
 # of sum_i 2 p_ik on the samples a trait is fitted on, from the probabilities the
-# package fits; a locus is dropped when E < min_founder_copies.
+# package fits; a locus is dropped when E < min_founder_copies. Opt-in until
+# 0.6.1.9005; on by default (min_founder_copies = 5) since 0.6.1.9006, and NULL
+# turns it off.
 
 fqc_fixture <- function(round_digits = NULL) {
   set.seed(63011)
@@ -78,17 +80,19 @@ test_that("E_min is the rarest founder's expected allele count on the fitted sam
   }
 })
 
-test_that("off by default: no columns, fields or config entries are added", {
+test_that("off with NULL: no columns, fields or config entries are added", {
   f <- fqc_fixture()
-  inst <- suppressWarnings(qtl2mr_select_instruments(f$resources, f$scan, progress = FALSE))
+  # NULL, the default until 0.6.1.9005, turns the QC off; the default is now 5.
+  inst <- suppressWarnings(qtl2mr_select_instruments(f$resources, f$scan, progress = FALSE,
+    min_founder_copies = NULL))
   expect_false(any(c("E_min_x", "min_founder_copies") %in% names(inst)))
-  expect_identical(suppressWarnings(qtl2mr_select_instruments(f$resources, f$scan, progress = FALSE,
-    min_founder_copies = NULL)), inst)
-  input <- qtl2mr_pair_input(f$resources, inst, "x", "w")
-  expect_identical(qtl2mr_pair_input(f$resources, inst, "x", "w", min_founder_copies = NULL), input)
+  expect_true(all(c("E_min_x", "min_founder_copies") %in%
+    names(suppressWarnings(qtl2mr_select_instruments(f$resources, f$scan, progress = FALSE)))))
+  input <- qtl2mr_pair_input(f$resources, inst, "x", "w", min_founder_copies = NULL)
   expect_null(input$metadata$founder_qc_outcome)
+  expect_identical(qtl2mr_pair_input(f$resources, inst, "x", "w")$metadata$founder_qc_outcome$min_founder_copies, 5)
   b <- suppressWarnings(run_qtl2mr_batch(f$resources, data.frame(exposure = "x", outcome = "w"), inst,
-    min_samples = 20L, progress = FALSE))
+    min_samples = 20L, progress = FALSE, min_founder_copies = NULL))
   expect_false("n_loci_dropped_founder_qc" %in% names(b$main_results))
   expect_false("E_min_y" %in% names(b$locus_results))
   expect_null(b$config$min_founder_copies)
@@ -100,11 +104,11 @@ test_that("off by default: no columns, fields or config entries are added", {
   }
 })
 
-test_that("exposure QC sits after non_autosomal and before fitting, F and max_loci", {
+test_that("exposure QC sits after non_autosomal and before fitting and ranking", {
   f <- fqc_fixture()
   E_b2 <- fqc_hand_E(f, "x", "2", "b2")
   off <- suppressWarnings(qtl2mr_select_instruments(f$resources, f$scan, exposures = "x", exclude_chr = NULL,
-    progress = FALSE))
+    progress = FALSE, min_founder_copies = NULL))
   on <- suppressWarnings(qtl2mr_select_instruments(f$resources, f$scan, exposures = "x", exclude_chr = NULL,
     progress = FALSE, min_founder_copies = E_b2 + 0.01))
   expect_identical(on$marker, off$marker)
@@ -118,32 +122,29 @@ test_that("exposure QC sits after non_autosomal and before fitting, F and max_lo
   expect_identical(match("E_min_x", names(on)), match("hsq_x", names(on)) + 1L)
   # Threshold 0 drops nothing: the table is the QC-off table plus the QC columns.
   zero <- suppressWarnings(qtl2mr_select_instruments(f$resources, f$scan, progress = FALSE, min_founder_copies = 0))
-  plain <- suppressWarnings(qtl2mr_select_instruments(f$resources, f$scan, progress = FALSE))
+  plain <- suppressWarnings(qtl2mr_select_instruments(f$resources, f$scan, progress = FALSE,
+    min_founder_copies = NULL))
   expect_identical(zero[names(plain)], plain)
-  # max_loci counts loci that pass the QC: for y, b2 has the highest LOD but no founder H on
-  # y's own sample, so a1 (the next) is kept with rank 1 and a3 is the one over max_loci.
+  # Ranks count loci that pass the QC: for y, b2 has the highest LOD but no founder H on
+  # y's own sample, so a1 (the next) gets rank 1. (max_loci and F_X_min, which
+  # acted after the QC, were removed in 0.6.1.9006.)
   scan <- f$scan
   scan["b2", "y"] <- 9
-  top <- suppressWarnings(qtl2mr_select_instruments(f$resources, scan, exposures = "y", max_loci = 1L,
+  top <- suppressWarnings(qtl2mr_select_instruments(f$resources, scan, exposures = "y",
     progress = FALSE, min_founder_copies = 5))
   expect_identical(top$marker, c("b2", "a1", "a3"))
-  expect_identical(top$drop_reason, c("founder_qc", "", "max_loci"))
-  expect_identical(top$locus_rank, c(NA, 1L, NA))
+  expect_identical(top$drop_reason, c("founder_qc", "", ""))
+  expect_identical(top$locus_rank, c(NA, 1L, 2L))
   expect_equal(top$E_min_x[[1L]], 0)
-  # F is applied after the QC, to the fitted loci only.
-  fmin <- suppressWarnings(qtl2mr_select_instruments(f$resources, f$scan, exposures = "x", progress = FALSE,
-    F_X_min = 1e6, min_founder_copies = E_b2 + 0.01))
-  expect_identical(fmin$drop_reason, ifelse(fmin$marker == "b2", "founder_qc", "F"))
   expect_identical(suppressWarnings(qtl2mr_select_instruments(f$resources, f$scan, progress = FALSE, n_workers = 2L,
     min_founder_copies = E_b2 + 0.01)), suppressWarnings(qtl2mr_select_instruments(f$resources, f$scan,
     progress = FALSE, min_founder_copies = E_b2 + 0.01)))
 })
 
+# The chi-square Q and B = 0 this used are the fixed settings since 0.6.1.9006.
 fqc_single <- function(f, inst, exposure, outcome, ...) {
   suppressWarnings(run_qtl2mr_analysis(qtl2mr_pair_input(f$resources, inst, exposure, outcome, ...),
-    output_dir = tempfile("v063-single-"), make_html = FALSE, make_figures = FALSE, verbose = FALSE,
-    heterogeneity_method = "chisq", diagnostic_bootstrap_B = 0L, run_loo_mr = FALSE,
-    run_instrument_sensitivity = FALSE))
+    output_dir = tempfile("v063-single-"), make_html = FALSE, make_figures = FALSE, progress = FALSE))
 }
 
 fqc_row_equal <- function(batch_row, single_summary) {
@@ -160,9 +161,11 @@ test_that("the outcome QC drops a locus for that pair only, and the batch row eq
   f <- fqc_fixture()
   inst <- data.frame(exposure = c("x", "x", "w", "w"), marker = c("a1", "b2", "a3", "c1"))
   pairs <- data.frame(exposure = c("x", "x", "w"), outcome = c("y", "w", "y"))
-  for (policy in c("own_complete", "pair_common_complete")) {
+  # Each trait on its own complete samples (sample_policy = "pair_common_complete"
+  # was removed in 0.6.1.9006).
+  {
     batch <- suppressWarnings(run_qtl2mr_batch(f$resources, pairs, inst, min_samples = 20L, progress = FALSE,
-      sample_policy = policy, min_founder_copies = 5))
+      min_founder_copies = 5))
     main <- batch$main_results
     loci <- batch$locus_results
     expect_identical(main$status, rep("ok", 3L))
@@ -180,8 +183,7 @@ test_that("the outcome QC drops a locus for that pair only, and the batch row eq
     expect_true(all(xw$E_min_y >= 5))
     expect_identical(batch$config$min_founder_copies, 5)
     for (i in seq_len(nrow(pairs))) {
-      single <- fqc_single(f, inst, pairs$exposure[[i]], pairs$outcome[[i]], sample_policy = policy,
-        min_founder_copies = 5)
+      single <- fqc_single(f, inst, pairs$exposure[[i]], pairs$outcome[[i]], min_founder_copies = 5)
       expect_true(fqc_row_equal(main[i, ], single$pilot$summary))
       qc <- single$pilot$prepared_metadata$founder_qc_outcome
       expect_identical(qc$min_founder_copies, 5)
@@ -207,16 +209,21 @@ test_that("the outcome QC runs before fitting, so a locus it drops cannot fail a
   inst <- data.frame(exposure = "x", marker = c("a1", "b2"))
   pair <- data.frame(exposure = "x", outcome = "y")
   run <- function(...) suppressWarnings(run_qtl2mr_batch(f$resources, pair, inst, min_samples = 20L, progress = FALSE, ...))
+  # on_nonestimable_locus is fixed to "fail" at the batch entry since 0.6.1.9006;
+  # its "drop" path is still in the batch code and runs here with the internal
+  # fixed settings replaced.
+  run_drop <- function(...) with_mocked_bindings(run(...),
+    qtl2mr_fixed_fit_settings = function() qtl2mr_test_settings(on_nonestimable_locus = "drop"))
   # Off: founder H is absent from y's own sample at b2, so y's founder effects there are not estimable.
-  fail <- run()
+  fail <- run(min_founder_copies = NULL)
   expect_identical(fail$main_results$status, "error")
   expect_match(fail$main_results$error_message, "not estimable at marker b2")
-  dropped <- run(on_nonestimable_locus = "drop")
+  dropped <- run_drop(min_founder_copies = NULL)
   expect_identical(dropped$locus_results$drop_reason, c("", "nonestimable_outcome"))
   # On: the QC drops b2 for this pair before any fit, under either on_nonestimable_locus.
   for (policy in c("fail", "drop")) {
     qtl2mr:::qtl2mr_cache_reset()
-    on <- run(on_nonestimable_locus = policy, min_founder_copies = 5)
+    on <- if (identical(policy, "drop")) run_drop(min_founder_copies = 5) else run(min_founder_copies = 5)
     expect_identical(on$main_results$status, "ok")
     expect_identical(on$main_results$n_loci_dropped_nonestimable, 0L)
     expect_identical(on$locus_results$drop_reason, c("", "founder_qc_outcome"))
@@ -233,7 +240,7 @@ test_that("the outcome QC runs before fitting, so a locus it drops cannot fail a
   expect_identical(passed_fail$main_results$status, "error")
   expect_identical(passed_fail$main_results$error_message, fail$main_results$error_message)
   expect_identical(passed_fail$main_results$n_loci_dropped_founder_qc, 0L)
-  passed_drop <- run(on_nonestimable_locus = "drop", min_founder_copies = 0)
+  passed_drop <- run_drop(min_founder_copies = 0)
   expect_identical(passed_drop$locus_results$drop_reason, c("", "nonestimable_outcome"))
   expect_identical(passed_drop$locus_results$E_min_y, c(passed_drop$locus_results$E_min_y[[1L]], 0))
   expect_identical(passed_drop$main_results$theta, dropped$main_results$theta)
@@ -253,8 +260,9 @@ test_that("the QC threshold is part of the batch fingerprint", {
   expect_identical(again$locus_results, first$locus_results)
   expect_error(run_qtl2mr_batch(f$resources, pairs, inst, min_samples = 20L, progress = FALSE, output_dir = dir,
     resume = TRUE, min_founder_copies = 4), "fingerprint changed")
+  # Turning the QC off (NULL) changes the fingerprint too.
   expect_error(run_qtl2mr_batch(f$resources, pairs, inst, min_samples = 20L, progress = FALSE, output_dir = dir,
-    resume = TRUE), "fingerprint changed")
+    resume = TRUE, min_founder_copies = NULL), "fingerprint changed")
   written <- utils::read.csv(file.path(dir, "batch_locus_results.csv"), stringsAsFactors = FALSE)
   expect_true("E_min_y" %in% names(written))
 })
@@ -282,7 +290,7 @@ test_that("with the QC on, its columns are present even when no locus is dropped
   expect_true("n_loci_dropped_founder_qc" %in% names(utils::read.csv(file.path(dir, "batch_main_results.csv"))))
   # Off: neither column, in either case.
   off <- suppressWarnings(run_qtl2mr_batch(f$resources, data.frame(exposure = "y", outcome = "x"), inst,
-    min_samples = 20L, progress = FALSE))
+    min_samples = 20L, progress = FALSE, min_founder_copies = NULL))
   expect_false("n_loci_dropped_founder_qc" %in% names(off$main_results))
   expect_false("E_min_y" %in% names(off$locus_results))
 })

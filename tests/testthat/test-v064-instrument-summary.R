@@ -67,13 +67,15 @@ test_that("hand-computed summaries, counts and settings", {
   expect_error(qtl2mr_instrument_summary(transform(inst, selected = NA)), "selected")
 })
 
-test_that("on a selection: counts add up, founder QC appears when used, and n_F_ge matches an F_X_min selection", {
+test_that("on a selection: counts add up, founder QC appears when used, and n_F_ge counts the fitted F", {
   data("qtl2mr_example", package = "qtl2mr", envir = environment())
   ex <- qtl2mr_example
   scan <- matrix(ex$marker_map$exposure_lod, ncol = 1L, dimnames = list(ex$marker_map$marker, ex$exposure))
   resources <- suppressWarnings(qtl2mr_prepare_resources(ex$allele_probs, ex$kinship, ex$pheno, ex$covar,
     marker_map = ex$marker_map))
-  all_loci <- suppressWarnings(qtl2mr_select_instruments(resources, scan, lod_thresh = 3, progress = FALSE))
+  # The founder QC is on by default since 0.6.1.9006; NULL turns it off.
+  all_loci <- suppressWarnings(qtl2mr_select_instruments(resources, scan, lod_thresh = 3, progress = FALSE,
+    min_founder_copies = NULL))
   s <- qtl2mr_instrument_summary(all_loci)
   expect_identical(nrow(s), 1L)
   expect_identical(s$n_candidates, nrow(all_loci))
@@ -84,11 +86,13 @@ test_that("on a selection: counts add up, founder QC appears when used, and n_F_
   f <- all_loci$F_X_block[all_loci$selected]
   expect_identical(s$F_median, stats::median(f))
   expect_identical(s$F_mean, mean(f))
+  # Selection no longer filters on F (F_X_min was removed in 0.6.1.9006): no
+  # locus is dropped for F, and n_F_ge_t counts the selected loci an F >= t
+  # subset would keep.
+  expect_identical(s$n_dropped_F, 0L)
+  expect_true(all(is.na(all_loci$F_X_min) & is.na(all_loci$max_loci)))
   for (threshold in c(1.5, 2, 5, 10)) {
-    filtered <- suppressWarnings(qtl2mr_select_instruments(resources, scan, lod_thresh = 3, progress = FALSE,
-      F_X_min = threshold))
-    expect_identical(s[[paste0("n_F_ge_", threshold)]], sum(filtered$selected))
-    expect_identical(qtl2mr_instrument_summary(filtered)$n_dropped_F, sum(filtered$drop_reason == "F"))
+    expect_identical(s[[paste0("n_F_ge_", threshold)]], sum(all_loci$selected & all_loci$F_X_block >= threshold))
   }
   qc <- suppressWarnings(qtl2mr_select_instruments(resources, scan, lod_thresh = 3, progress = FALSE,
     min_founder_copies = 0))

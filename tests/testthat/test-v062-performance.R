@@ -400,13 +400,16 @@ test_that("analysis results are identical with one and two workers", {
   f <- perf_fixture()
   inst <- suppressWarnings(qtl2mr_select_instruments(f$resources, f$scan, progress = FALSE))
   out <- tempfile("v062-workers-")
+  # The 0.6.1.9005 single-pair defaults ("auto" Q, which simulates for several
+  # loci) with 40 draws and bootstrap replicates, which the entry no longer takes
+  # (0.6.1.9006), so that the workers run random refits.
   run <- function(exposure, outcome, workers) {
     qtl2mr:::qtl2mr_cache_reset()
     set.seed(11)
     before <- .Random.seed
-    r <- perf_capture(run_qtl2mr_analysis(qtl2mr_pair_input(f$resources, inst, exposure, outcome),
-      output_dir = out, overwrite = TRUE, make_html = FALSE, make_figures = FALSE, verbose = FALSE,
-      heterogeneity_nsim = 40L, diagnostic_bootstrap_B = 40L, n_workers = workers))
+    r <- perf_capture(qtl2mr_with_settings(run_qtl2mr_analysis(qtl2mr_pair_input(f$resources, inst, exposure, outcome),
+      output_dir = out, overwrite = TRUE, make_html = FALSE, make_figures = FALSE, progress = FALSE,
+      n_workers = workers), heterogeneity_method = "auto", heterogeneity_nsim = 40L, diagnostic_bootstrap_B = 40L))
     r$seed_kept <- identical(.Random.seed, before)
     r
   }
@@ -426,9 +429,12 @@ test_that("analysis results are identical with one and two workers", {
 
 test_that("single analyses do not depend on what the session has cached", {
   f <- perf_fixture()
-  run <- function(inst) perf_capture(run_qtl2mr_analysis(qtl2mr_pair_input(f$resources, inst, "x", "q"),
-    output_dir = tempfile("v062-warm-"), make_html = FALSE, make_figures = FALSE, verbose = FALSE,
-    heterogeneity_nsim = 20L, diagnostic_bootstrap_B = 20L, run_instrument_sensitivity = FALSE))
+  # The 0.6.1.9005 single-pair defaults with 20 draws and replicates (no longer
+  # entry options since 0.6.1.9006); the instrument-set sensitivity now always runs.
+  run <- function(inst) perf_capture(qtl2mr_with_settings(run_qtl2mr_analysis(
+    qtl2mr_pair_input(f$resources, inst, "x", "q"),
+    output_dir = tempfile("v062-warm-"), make_html = FALSE, make_figures = FALSE, progress = FALSE),
+    heterogeneity_method = "auto", heterogeneity_nsim = 20L, diagnostic_bootstrap_B = 20L))
   qtl2mr:::qtl2mr_cache_reset()
   inst <- suppressWarnings(qtl2mr_select_instruments(f$resources, f$scan, progress = FALSE))
   qtl2mr:::qtl2mr_cache_reset()
@@ -453,7 +459,8 @@ perf_batch <- function(f, inst, ...) {
 test_that("batch results do not depend on the session cache, worker count or wave size", {
   skip_on_os("windows")
   f <- perf_fixture(round_digits = 5)
-  inst <- suppressWarnings(qtl2mr_select_instruments(f$resources, f$scan, max_loci = 2L, progress = FALSE))
+  # The table max_loci = 2L gave (max_loci was removed in 0.6.1.9006).
+  inst <- qtl2mr_test_top_loci(suppressWarnings(qtl2mr_select_instruments(f$resources, f$scan, progress = FALSE)), 2L)
   qtl2mr:::qtl2mr_cache_reset()
   cold <- perf_batch(f, inst)
   warm <- perf_batch(f, inst)
@@ -464,7 +471,9 @@ test_that("batch results do not depend on the session cache, worker count or wav
     "lmm_fit_cache_hits", "lmm_fit_cache_misses")])
   expect_true(any(grepl("Dropping linearly dependent covariate", cold$warnings)))
   qtl2mr:::qtl2mr_cache_reset()
-  invisible(suppressWarnings(qtl2mr_select_instruments(f$resources, f$scan, max_loci = 2L, progress = FALSE)))
+  # max_loci (removed in 0.6.1.9006) acted after fitting every candidate, so this
+  # selection leaves the session cache as before.
+  invisible(suppressWarnings(qtl2mr_select_instruments(f$resources, f$scan, progress = FALSE)))
   after_selection <- perf_batch(f, inst)
   expect_true(perf_same(after_selection$value, cold$value))
   expect_identical(after_selection$warnings, cold$warnings)
@@ -507,7 +516,8 @@ test_that("a batch in a fresh R process gives the same results", {
   skip_on_cran()
   skip_on_os("windows")
   f <- perf_fixture()
-  inst <- suppressWarnings(qtl2mr_select_instruments(f$resources, f$scan, max_loci = 2L, progress = FALSE))
+  # The table max_loci = 2L gave (max_loci was removed in 0.6.1.9006).
+  inst <- qtl2mr_test_top_loci(suppressWarnings(qtl2mr_select_instruments(f$resources, f$scan, progress = FALSE)), 2L)
   here <- perf_batch(f, inst)$value
   here_again <- perf_batch(f, inst)$value
   input <- tempfile(fileext = ".rds")
@@ -528,19 +538,21 @@ test_that("a batch in a fresh R process gives the same results", {
   expect_true(perf_same(here_again, fresh))
 })
 
-test_that("batch rows equal single analyses under both sample policies", {
+test_that("batch rows equal single analyses on each trait's own complete samples", {
   f <- perf_fixture()
-  inst <- suppressWarnings(qtl2mr_select_instruments(f$resources, f$scan, max_loci = 2L, progress = FALSE))
+  # The table max_loci = 2L gave (max_loci was removed in 0.6.1.9006).
+  inst <- qtl2mr_test_top_loci(suppressWarnings(qtl2mr_select_instruments(f$resources, f$scan, progress = FALSE)), 2L)
   cols <- qtl2mr:::qtl2mr_batch_summary_columns
   results <- list()
-  for (policy in c("own_complete", "pair_common_complete", "own_complete")) {
-    batch <- perf_batch(f, inst, sample_policy = policy)$value
+  # sample_policy = "pair_common_complete" was removed in 0.6.1.9006; the run is
+  # repeated to check that it is reproducible.
+  for (repeat_run in 1:2) {
+    batch <- perf_batch(f, inst)$value
     expect_identical(batch$main_results$status, rep("ok", nrow(f$pairs)))
     for (i in seq_len(nrow(f$pairs))) {
       single <- suppressWarnings(run_qtl2mr_analysis(qtl2mr_pair_input(f$resources, inst, f$pairs$exposure[[i]],
-        f$pairs$outcome[[i]], sample_policy = policy), output_dir = tempfile("v062-policy-"), make_html = FALSE,
-        make_figures = FALSE, verbose = FALSE, heterogeneity_method = "chisq", diagnostic_bootstrap_B = 0L,
-        run_loo_mr = FALSE, run_instrument_sensitivity = FALSE))
+        f$pairs$outcome[[i]]), output_dir = tempfile("v062-policy-"), make_html = FALSE,
+        make_figures = FALSE, progress = FALSE))
       # rbind() of batch rows can promote an integer median to double (as in 0.6.1.9001); compare those by value.
       row <- as.list(batch$main_results[i, cols])
       ref <- as.list(single$pilot$summary[1L, cols])
@@ -551,27 +563,11 @@ test_that("batch rows equal single analyses under both sample policies", {
     }
     results[[length(results) + 1L]] <- batch
   }
-  own <- results[[1L]]$main_results
-  common <- results[[2L]]$main_results
-  expect_true(perf_same(results[[3L]], results[[1L]]))
-  q_pairs <- f$pairs$exposure == "q" | f$pairs$outcome == "q"
-  expect_identical(common$n_x_median, common$n_y_median)
-  expect_true(all(common$n_x_median <= pmin(own$n_x_median, own$n_y_median)))
-  expect_true(any(own$n_x_median[q_pairs] != common$n_x_median[q_pairs]))
-  expect_false(identical(own$theta, common$theta))
-  expect_identical(results[[2L]]$config$sample_policy, "pair_common_complete")
+  expect_true(perf_same(results[[2L]], results[[1L]]))
   expect_null(results[[1L]]$config$sample_policy)
-  input <- qtl2mr_pair_input(f$resources, inst, "x", "q", sample_policy = "pair_common_complete")
-  expect_identical(input$exposure_samples, qtl2mr:::qtl2mr_complete_samples(f$resources, c("x", "q"), c("1", "2")))
-  expect_identical(input$outcome_samples, input$exposure_samples)
   expect_null(qtl2mr_pair_input(f$resources, inst, "x", "q")$exposure_samples)
-  expect_error(qtl2mr_pair_input(f$resources, inst, "x", "q", sample_policy = "batch_common_complete"), "should be one of")
-  # q has 45 complete samples of its own, fewer together with any partner.
-  too_few <- perf_capture(run_qtl2mr_batch(f$resources, f$pairs, inst, min_samples = 45L, progress = FALSE,
-    sample_policy = "pair_common_complete"))$value
-  expect_true(all(grepl("too_few_samples: .* samples complete for both traits",
-    too_few$main_results$error_message[q_pairs])))
-  expect_identical(too_few$main_results$status[!q_pairs], rep("ok", sum(!q_pairs)))
+  expect_error(qtl2mr_pair_input(f$resources, inst, "x", "q", sample_policy = "pair_common_complete"), "unused argument")
+  # q has 45 complete samples of its own.
   enough <- perf_capture(run_qtl2mr_batch(f$resources, f$pairs, inst, min_samples = 45L, progress = FALSE))$value
   expect_identical(enough$main_results$status, rep("ok", nrow(f$pairs)))
 })
@@ -625,7 +621,8 @@ perf_row_from_blocks <- function(blocks, method, nsim, seed, boot, boot_seed, po
 
 test_that("per-locus blocks are written on request and refit to the batch estimates", {
   f <- perf_fixture()
-  inst <- suppressWarnings(qtl2mr_select_instruments(f$resources, f$scan, max_loci = 2L, progress = FALSE))
+  # The table max_loci = 2L gave (max_loci was removed in 0.6.1.9006).
+  inst <- qtl2mr_test_top_loci(suppressWarnings(qtl2mr_select_instruments(f$resources, f$scan, progress = FALSE)), 2L)
   plain_dir <- tempfile("v062-plain-")
   plain <- perf_batch(f, inst, output_dir = plain_dir)$value
   expect_false(dir.exists(file.path(plain_dir, "batch_locus_blocks")))
@@ -635,22 +632,27 @@ test_that("per-locus blocks are written on request and refit to the batch estima
   expect_error(run_qtl2mr_batch(f$resources, f$pairs, inst, write_locus_blocks = NA), "TRUE or FALSE")
 
   dir <- tempfile("v062-blocks-")
+  # The fit settings of each run. They are fixed at the batch entry since
+  # 0.6.1.9006 (the first run uses the fixed settings); the others replace them
+  # internally. sample_policy = "pair_common_complete" was removed, so the
+  # blocks are always of the own-complete samples.
   runs <- list(
-    list(sample_policy = "own_complete"),
-    list(sample_policy = "pair_common_complete"),
-    list(sample_policy = "own_complete", heterogeneity_method = "simulation", heterogeneity_nsim = 25L,
+    list(),
+    list(heterogeneity_method = "simulation", heterogeneity_nsim = 25L,
       heterogeneity_seed = 3L, diagnostic_bootstrap_B = 20L, diagnostic_bootstrap_seed = 5L,
       reported_estimator_policy = "auto_fallback", cross_cov_model = "raw", standardize_phenotypes = FALSE),
-    list(sample_policy = "pair_common_complete", heterogeneity_method = "none", cross_cov_model = "zero",
-      reported_estimator_policy = "strict_so"))
+    list(heterogeneity_method = "none", cross_cov_model = "zero", reported_estimator_policy = "strict_so"))
   # Columns of main_results that the blocks cannot give: they need fields not stored (LMM backend, loci
-  # dropped before fitting, trait SDs). Listed in IMPLEMENTATION_NOTES, O1.
+  # dropped before fitting, trait SDs). Listed in IMPLEMENTATION_NOTES, O1. With the founder QC on by
+  # default since 0.6.1.9006, n_loci_dropped_founder_qc (loci dropped before fitting) is one of them.
   not_from_blocks <- c("lmm_backend", "n_loci_selected", "n_loci_dropped_nonestimable", "exposure_sd", "outcome_sd",
     "raw_conversion_available", "theta_raw_units", "se_raw_units", "status", "error_message", "locus_fit_status",
-    "runtime_sec")
+    "runtime_sec", "n_loci_dropped_founder_qc")
   for (run in runs) {
-    policy <- run$sample_policy
-    batch <- do.call(perf_batch, c(list(f, inst, output_dir = dir, write_locus_blocks = TRUE, overwrite = TRUE), run))$value
+    policy <- "own_complete"
+    run_settings <- do.call(qtl2mr_test_settings, run)
+    batch <- with_mocked_bindings(perf_batch(f, inst, output_dir = dir, write_locus_blocks = TRUE, overwrite = TRUE),
+      qtl2mr_fixed_fit_settings = function() run_settings)$value
     settings <- batch$config
     if (identical(run, runs[[1L]])) {
       expect_true(perf_same(batch[setdiff(names(batch), c("config", "locus_blocks_manifest"))],
@@ -720,7 +722,8 @@ perf_capture_all <- function(expr) {
 test_that("several exposure groups with two workers run in workers, in every wave", {
   skip_on_os("windows")
   f <- perf_fixture()
-  inst <- suppressWarnings(qtl2mr_select_instruments(f$resources, f$scan, max_loci = 2L, progress = FALSE))
+  # The table max_loci = 2L gave (max_loci was removed in 0.6.1.9006).
+  inst <- qtl2mr_test_top_loci(suppressWarnings(qtl2mr_select_instruments(f$resources, f$scan, progress = FALSE)), 2L)
   run <- function(workers, budget = NULL) {
     qtl2mr:::qtl2mr_cache_reset()
     assign("budget", budget, envir = qtl2mr:::qtl2mr_state)
@@ -732,8 +735,10 @@ test_that("several exposure groups with two workers run in workers, in every wav
   forked <- run(2L)
   small <- run(2L, budget = 2e5)
   # The planner makes several waves of at least two groups for the small budget.
+  # The plan of the batch: since 0.6.1.9006 without a sample policy, and with the
+  # founder QC the batch applies by default.
   plan <- qtl2mr:::qtl2mr_batch_plan(f$resources, small$value$pairs,
-    qtl2mr:::qtl2mr_normalize_instruments(inst, f$resources), "own_complete")
+    qtl2mr:::qtl2mr_normalize_instruments(inst, f$resources), min_founder_copies = 5)
   groups <- unname(split(seq_len(nrow(f$pairs)), factor(f$pairs$exposure, levels = unique(f$pairs$exposure))))
   assign("budget", 2e5, envir = qtl2mr:::qtl2mr_state)
   waves <- qtl2mr:::qtl2mr_batch_waves(plan, groups, 0.5 * qtl2mr:::qtl2mr_cache_budget(),
@@ -757,7 +762,8 @@ test_that("several exposure groups with two workers run in workers, in every wav
 
 test_that("a planned wave fits the cache budget, so no fit is computed twice", {
   f <- perf_fixture()
-  inst <- suppressWarnings(qtl2mr_select_instruments(f$resources, f$scan, max_loci = 2L, progress = FALSE))
+  # The table max_loci = 2L gave (max_loci was removed in 0.6.1.9006).
+  inst <- qtl2mr_test_top_loci(suppressWarnings(qtl2mr_select_instruments(f$resources, f$scan, progress = FALSE)), 2L)
   sizes <- qtl2mr:::qtl2mr_batch_entry_sizes(f$resources)
   run <- function(budget) {
     qtl2mr:::qtl2mr_cache_reset()
@@ -766,8 +772,9 @@ test_that("a planned wave fits the cache budget, so no fit is computed twice", {
     batch <- suppressWarnings(run_qtl2mr_batch(f$resources, f$pairs, inst, min_samples = 20L, progress = FALSE))
     reg <- qtl2mr:::qtl2mr_registry()
     fits <- Filter(function(id) startsWith(id, "fit:"), ls(reg$entries))
+    # The batch's plan (no sample policy since 0.6.1.9006; the default founder QC).
     plan <- qtl2mr:::qtl2mr_batch_plan(f$resources, batch$pairs,
-      qtl2mr:::qtl2mr_normalize_instruments(inst, f$resources), "own_complete")
+      qtl2mr:::qtl2mr_normalize_instruments(inst, f$resources), min_founder_copies = 5)
     list(batch = batch, computed = qtl2mr:::qtl2mr_state$computed[["fit"]], distinct = length(fits),
       fit_bytes = max(vapply(fits, function(id) reg$entries[[id]]$bytes, numeric(1))),
       waves = length(qtl2mr:::qtl2mr_batch_waves(plan, as.list(seq_len(nrow(batch$pairs))),

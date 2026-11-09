@@ -193,28 +193,24 @@ test_that("high-level and exact workflows fail closed on non-estimable loci", {
       overwrite = TRUE,
       make_html = FALSE,
       make_figures = FALSE,
-      verbose = FALSE,
-      heterogeneity_method = "none",
-      diagnostic_bootstrap_B = 0L,
-      run_loo_mr = FALSE,
-      run_instrument_sensitivity = FALSE
+      progress = FALSE
     ),
     "Founder contrast coefficients are not estimable"
   )
 
+  # Founder H is absent at m_bad, so the founder QC (on by default since
+  # 0.6.1.9006) would drop it before the fit; this test is about the fit.
   exact <- run_qtl2mr_batch(fixture$resources, fixture$pairs, fixture$instruments, min_samples = 20L,
-    progress = FALSE)
+    min_founder_copies = NULL, progress = FALSE)
   expect_equal(exact$main_results$status, "error")
   expect_match(exact$main_results$error_message, "Founder contrast coefficients are not estimable")
   expect_equal(exact$run_manifest$nonestimable_locus_policy, "fail_closed")
 
-  dropped <- run_qtl2mr_analysis(
-    fixture$input,
-    output_dir = tempfile("qtl2mr-confirmatory-drop-"),
-    make_html = FALSE, make_figures = FALSE, verbose = FALSE, progress = FALSE,
-    on_nonestimable_locus = "drop", heterogeneity_method = "none", diagnostic_bootstrap_B = 0L,
-    run_loo_mr = FALSE, run_instrument_sensitivity = FALSE
-  )
+  # Dropping nonestimable loci is no longer an entry option (0.6.1.9006); the
+  # same analysis through the internal fit path.
+  dropped <- qtl2mr_test_analysis(fixture$input,
+    qtl2mr_test_settings(on_nonestimable_locus = "drop", heterogeneity_method = "none"),
+    output_dir = tempfile("qtl2mr-confirmatory-drop-"))
   primary <- qtl2mr_primary_result(dropped)
   expect_identical(c(primary$n_loci_selected, primary$n_loci, primary$n_loci_dropped_nonestimable), c(2L, 1L, 1L))
   expect_true("dropped_nonestimable_loci" %in% qtl2mr_warnings(dropped)$warning_id)
@@ -222,8 +218,12 @@ test_that("high-level and exact workflows fail closed on non-estimable loci", {
 
 test_that("on_nonestimable_locus = 'drop' drops non-estimable loci with a complete audit", {
   fixture <- make_nonestimable_batch_fixture(seed = 911L)
+  # The batch fixes on_nonestimable_locus = "fail" since 0.6.1.9006; its audited
+  # drop path is still in the batch code and is exercised with the internal
+  # fixed settings replaced. The founder QC is off so that m_bad reaches the fit.
+  local_mocked_bindings(qtl2mr_fixed_fit_settings = function() qtl2mr_test_settings(on_nonestimable_locus = "drop"))
   fast <- run_qtl2mr_batch(fixture$resources, fixture$pairs, fixture$instruments,
-    on_nonestimable_locus = "drop", min_samples = 20L, progress = FALSE)
+    min_samples = 20L, min_founder_copies = NULL, progress = FALSE)
 
   expect_equal(fast$main_results$status, "ok")
   expect_equal(fast$main_results$locus_fit_status, "ok_with_dropped_nonestimable_loci")
@@ -287,8 +287,9 @@ test_that("scan locus selector reproduces contiguous LOD island maxima", {
                  dimnames = list(markers, "lod"))
   marker_map <- data.frame(marker = markers, chr = c(rep("1", 8), "X", "2"),
                            pos = seq_along(markers), stringsAsFactors = FALSE)
+  # LOD islands are the candidates of the spacing rule (the legacy rule was removed in 0.6.1.9006).
   selected <- qtl2mr:::qtl2mr_scan_candidates(list(x = scan), marker_map, "x", lod_thresh = 4, exclude_chr = "X",
-    peak_rule = "legacy")
+    peak_rule = "spacing")
   # The chr2 marker must not be swallowed by the adjacent chrX island.
   expect_equal(selected$marker, c("m3", "m10", "m7"))
   expect_equal(selected$lod, c(5, 4.8, 4.3))
@@ -326,7 +327,7 @@ test_that("LOD selection validates the requested trait before peak picking", {
 
   candidates <- do.call(rbind, lapply(c("traitA", "traitB"), function(trait) {
     qtl2mr:::qtl2mr_scan_candidates(scan, marker_map, trait, lod_thresh = 4, exclude_chr = character(),
-      peak_rule = "legacy")
+      peak_rule = "spacing")
   }))
   expect_equal(candidates$marker, c("m1", "m4"))
   expect_equal(candidates$exposure, c("traitA", "traitB"))
@@ -517,14 +518,16 @@ test_that("fail_fast publishes completed pairs and the failing pair before stopp
     marker = c("m_good", "m_good", "m_bad", "m_good"))
   pairs <- data.frame(pair_id = c("good", "bad", "later"), exposure = c("x", "x_bad", "x_later"), outcome = "y")
   out_dir <- tempfile("qtl2mr-fail-fast-")
-  expect_error(run_qtl2mr_batch(resources, pairs, instruments, min_samples = 20L,
+  # Founder H is absent at m_bad, so the founder QC (on by default since
+  # 0.6.1.9006) would drop it and pair bad would not fail; QC off here.
+  expect_error(run_qtl2mr_batch(resources, pairs, instruments, min_samples = 20L, min_founder_copies = NULL,
     fail_fast = TRUE, output_dir = out_dir, progress = FALSE), "Pair bad failed \\(fail_fast = TRUE\\)")
   partial <- utils::read.csv(file.path(out_dir, "batch_main_results.csv"), stringsAsFactors = FALSE)
   expect_identical(partial$pair_id, c("good", "bad"))
   expect_identical(partial$status, c("ok", "error"))
   errors <- utils::read.csv(file.path(out_dir, "batch_errors.csv"), stringsAsFactors = FALSE)
   expect_identical(errors$pair_id, "bad")
-  resumed <- run_qtl2mr_batch(resources, pairs, instruments, min_samples = 20L,
+  resumed <- run_qtl2mr_batch(resources, pairs, instruments, min_samples = 20L, min_founder_copies = NULL,
     resume = TRUE, output_dir = out_dir, progress = FALSE)
   expect_identical(resumed$main_results$status, c("ok", "error", "ok"))
   expect_identical(resumed$run_manifest$n_pairs_resumed, 1L)

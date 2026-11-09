@@ -169,17 +169,17 @@ test_that("prepared overlap engine handles no shared samples as independent samp
 
 test_that("prepared input runs a tiny high-level smoke", {
   input <- make_prepared_smoke_input()
+  # The first two selected loci, as the former loci = 2 chose them; the
+  # leave-one-locus-out and instrument-set analyses always run since 0.6.1.9006.
+  input$selected_loci <- input$selected_loci[1:2]
   outdir <- tempfile("qtl2mr-prepared-result-")
   res <- run_qtl2mr_analysis(
     input,
-    loci = 2,
     output_dir = outdir,
     overwrite = TRUE,
     make_figures = FALSE,
     make_html = TRUE,
-    verbose = FALSE,
-    run_loo_mr = TRUE,
-    run_instrument_sensitivity = TRUE
+    progress = FALSE
   )
   expect_s3_class(res, "qtl2mr_analysis_result")
   expect_identical(res$pilot$summary$lmm_backend, "ordinary_least_squares")
@@ -196,25 +196,12 @@ test_that("prepared input runs a tiny high-level smoke", {
   expect_true(file.exists(file.path(outdir, "data", "hsq.csv")))
 })
 
-test_that("public prepared analysis suppresses unreliable SO unless fallback is explicit", {
+test_that("public prepared analysis suppresses unreliable SO; only the internal fallback reports IVW", {
   input <- make_prepared_unreliable_so_input()
-  common_args <- list(
-    input = input,
-    overwrite = TRUE,
-    make_figures = FALSE,
-    verbose = FALSE,
-    diagnostic_bootstrap_B = 0L,
-    heterogeneity_method = "none",
-    run_loo_mr = FALSE,
-    run_instrument_sensitivity = FALSE,
-    progress = FALSE
-  )
 
   diagnostic_dir <- tempfile("qtl2mr-unreliable-so-diagnostic-only-")
-  diagnostic <- do.call(
-    run_qtl2mr_analysis,
-    c(common_args, list(output_dir = diagnostic_dir, make_html = TRUE))
-  )
+  diagnostic <- run_qtl2mr_analysis(input, output_dir = diagnostic_dir, overwrite = TRUE,
+    make_figures = FALSE, make_html = TRUE, progress = FALSE)
   reported <- qtl2mr_primary_result(diagnostic)
   expect_false(reported$primary_reliable[[1L]])
   expect_equal(reported$reported_estimator_policy[[1L]], "diagnostic_only")
@@ -228,17 +215,11 @@ test_that("public prepared analysis suppresses unreliable SO unless fallback is 
   expect_true("primary_so_unbounded" %in% diagnostic$warnings$warning_id)
   expect_true(file.exists(file.path(diagnostic_dir, "report.html")))
 
-  fallback <- do.call(
-    run_qtl2mr_analysis,
-    c(
-      common_args,
-      list(
-        output_dir = tempfile("qtl2mr-unreliable-so-auto-fallback-"),
-        make_html = FALSE,
-        reported_estimator_policy = "auto_fallback"
-      )
-    )
-  )
+  # The reported-estimator policy is fixed to diagnostic_only at the entry
+  # (0.6.1.9006); the auto_fallback policy through the internal fit path.
+  fallback <- qtl2mr_test_analysis(input, qtl2mr_test_settings(
+    reported_estimator_policy = "auto_fallback", heterogeneity_method = "none"),
+    output_dir = tempfile("qtl2mr-unreliable-so-auto-fallback-"), make_html = FALSE)
   fallback_reported <- qtl2mr_primary_result(fallback)
   expect_false(fallback_reported$primary_reliable[[1L]])
   expect_equal(fallback_reported$reported_estimator_policy[[1L]], "auto_fallback")
@@ -250,27 +231,27 @@ test_that("public prepared analysis suppresses unreliable SO unless fallback is 
   )
 })
 
-test_that("run progress supports console, silent, and log-only modes", {
+test_that("run progress supports console and silent modes, both logged", {
   input <- make_prepared_smoke_input()
+  # The first two selected loci, as the former loci = 2 chose them.
+  input$selected_loci <- input$selected_loci[1:2]
 
   out_console <- tempfile("qtl2mr-progress-console-")
+  # progress = TRUE also prints the result summary (to standard output).
   progress_lines <- utils::capture.output(
-    run_qtl2mr_analysis(
+    printed <- utils::capture.output(run_qtl2mr_analysis(
       input,
       exposure = "x",
       outcome = "y",
-      loci = 2,
       output_dir = out_console,
       overwrite = TRUE,
       make_figures = FALSE,
       make_html = FALSE,
-      verbose = FALSE,
-      progress = TRUE,
-      run_loo_mr = FALSE,
-      run_instrument_sensitivity = FALSE
-    ),
+      progress = TRUE
+    )),
     type = "message"
   )
+  expect_true(length(printed) > 0L)
   expect_true(any(grepl("\\[1/5\\]", progress_lines)))
   expect_true(any(grepl("\\[2/5\\]", progress_lines)))
   expect_true(any(grepl("\\[3/5\\].*leave-one-locus-out", progress_lines)))
@@ -278,49 +259,29 @@ test_that("run progress supports console, silent, and log-only modes", {
   expect_true(any(grepl("\\[5/5\\]", progress_lines)))
   expect_true(file.exists(file.path(out_console, "logs", "progress.log")))
 
+  # Since 0.6.1.9006 progress = FALSE is the former log-only mode: nothing is
+  # printed and logs/progress.log is still written. "log" is no longer a value.
   out_silent <- tempfile("qtl2mr-progress-silent-")
   silent_lines <- utils::capture.output(
-    run_qtl2mr_analysis(
+    silent_printed <- utils::capture.output(run_qtl2mr_analysis(
       input,
       exposure = "x",
       outcome = "y",
-      loci = 2,
       output_dir = out_silent,
       overwrite = TRUE,
       make_figures = FALSE,
       make_html = FALSE,
-      verbose = FALSE,
-      progress = FALSE,
-      run_loo_mr = FALSE,
-      run_instrument_sensitivity = FALSE
-    ),
+      progress = FALSE
+    )),
     type = "message"
   )
+  expect_identical(silent_printed, character())
   expect_false(any(grepl("\\[[1-5]/5\\]", silent_lines)))
-  expect_false(file.exists(file.path(out_silent, "logs", "progress.log")))
-
-  out_log <- tempfile("qtl2mr-progress-log-")
-  log_only_lines <- utils::capture.output(
-    run_qtl2mr_analysis(
-      input,
-      exposure = "x",
-      outcome = "y",
-      loci = 2,
-      output_dir = out_log,
-      overwrite = TRUE,
-      make_figures = FALSE,
-      make_html = FALSE,
-      verbose = FALSE,
-      progress = "log",
-      run_loo_mr = FALSE,
-      run_instrument_sensitivity = FALSE
-    ),
-    type = "message"
-  )
-  progress_log <- file.path(out_log, "logs", "progress.log")
-  expect_false(any(grepl("\\[[1-5]/5\\]", log_only_lines)))
+  progress_log <- file.path(out_silent, "logs", "progress.log")
   expect_true(file.exists(progress_log))
   logged <- readLines(progress_log, warn = FALSE)
   expect_true(any(grepl("\\[1/5\\]", logged)))
   expect_true(any(grepl("\\[5/5\\]", logged)))
+  expect_error(run_qtl2mr_analysis(input, output_dir = tempfile("qtl2mr-progress-log-"), make_figures = FALSE,
+    make_html = FALSE, progress = "log"), "progress must be TRUE or FALSE")
 })

@@ -1,6 +1,6 @@
 test_that("analysis input must be prepared and retired arguments are rejected", {
   expect_error(run_qtl2mr_analysis(list(genoprobs = list()), exposure = "x", outcome = "y"),
-    "created by as_qtl2mr_prepared_input\\(\\) or qtl2mr_pair_input")
+    "created by qtl2mr_pair_input\\(\\)")
   data("qtl2mr_example", package = "qtl2mr", envir = environment())
   ex <- qtl2mr_example
   input <- as_qtl2mr_prepared_input(ex$allele_probs, ex$pheno, ex$covar, ex$kinship,
@@ -12,10 +12,8 @@ test_that("analysis input must be prepared and retired arguments are rejected", 
       "unused argument")
   }
   out <- tempfile("qtl2mr-positional-")
-  result <- run_qtl2mr_analysis(input, "x", "y", out, loci = 1,
-    make_figures = FALSE, make_html = FALSE, verbose = FALSE, progress = FALSE,
-    diagnostic_bootstrap_B = 0L, heterogeneity_method = "none",
-    run_loo_mr = FALSE, run_instrument_sensitivity = FALSE)
+  result <- run_qtl2mr_analysis(input, "x", "y", out,
+    make_figures = FALSE, make_html = FALSE, progress = FALSE)
   expect_identical(normalizePath(result$output_dir), normalizePath(out))
   overview <- summary(result)
   expect_identical(nrow(overview), 1L)

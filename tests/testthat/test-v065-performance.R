@@ -317,7 +317,8 @@ test_that("the run manifest counts computations and releases, in workers too, wi
     ns$qtl2mr_cache_reset()
   }, add = TRUE)
   f <- v065_fixture(round_digits = 5)
-  inst <- suppressWarnings(qtl2mr_select_instruments(f$resources, f$scan, max_loci = 2L, progress = FALSE))
+  # The table max_loci = 2L gave (max_loci was removed in 0.6.1.9006).
+  inst <- qtl2mr_test_top_loci(suppressWarnings(qtl2mr_select_instruments(f$resources, f$scan, progress = FALSE)), 2L)
   batch <- function(...) suppressWarnings(run_qtl2mr_batch(f$resources, f$pairs, inst, min_samples = 20L, progress = FALSE, ...))
   cols <- c("context_computed", "lmm_fit_computed", "cache_released_entries", "cache_released_bytes", "cache_budget_bytes")
   ns$qtl2mr_cache_reset()

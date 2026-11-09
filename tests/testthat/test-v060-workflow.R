@@ -30,13 +30,14 @@ v060_fixture <- function(nonestimable_b2 = FALSE) {
     pairs = data.frame(exposure = c("x", "w", "x"), outcome = c("y", "y", "w")))
 }
 
+# The chi-square Q and B = 0 this used are the fixed settings since 0.6.1.9006;
+# the leave-one-locus-out and instrument-set analyses now always run.
 v060_single <- function(resources, instruments, exposure, outcome, ...) {
   input <- qtl2mr_pair_input(resources, instruments, exposure, outcome)
-  args <- utils::modifyList(list(make_html = FALSE, make_figures = FALSE, verbose = FALSE, progress = FALSE,
-    heterogeneity_method = "chisq", diagnostic_bootstrap_B = 0L, run_loo_mr = FALSE,
-    run_instrument_sensitivity = FALSE), list(...))
+  args <- utils::modifyList(list(make_html = FALSE, make_figures = FALSE, progress = FALSE), list(...))
   do.call(run_qtl2mr_analysis, c(list(input, output_dir = tempfile("v060-single-")), args))
 }
+
 
 test_that("instrument selection records every LOD candidate and applies its rules in order", {
   f <- v060_fixture()
@@ -52,16 +53,9 @@ test_that("instrument selection records every LOD candidate and applies its rule
   expect_identical(unique(inst$exclude_chr), "X")
   expect_true(all(is.na(inst$F_X_min) & is.na(inst$max_loci)))
 
-  threshold <- sort(inst$F_X_block)[[2L]]
-  strict <- qtl2mr_select_instruments(f$resources, f$scan, F_X_min = threshold, progress = FALSE)
-  expect_identical(strict$F_X_block, inst$F_X_block)
-  expect_identical(strict$selected, inst$F_X_block >= threshold)
-  expect_identical(strict$drop_reason, ifelse(inst$F_X_block >= threshold, "", "F"))
-  expect_identical(unique(strict$F_X_min), threshold)
-
-  top <- qtl2mr_select_instruments(f$resources, f$scan, max_loci = 1L, progress = FALSE)
-  expect_identical(top$drop_reason, c("", "max_loci", "", "max_loci"))
-  expect_identical(top$locus_rank, c(1L, NA, 1L, NA))
+  # F_X_min and max_loci were removed in 0.6.1.9006 (F filters go through subsets).
+  expect_error(qtl2mr_select_instruments(f$resources, f$scan, F_X_min = 1, progress = FALSE), "unused argument")
+  expect_error(qtl2mr_select_instruments(f$resources, f$scan, max_loci = 1L, progress = FALSE), "unused argument")
 
   with_x <- qtl2mr_select_instruments(f$resources, f$scan, exposures = "x", exclude_chr = NULL, progress = FALSE)
   expect_identical(with_x$marker, c("a1", "b2", "xm1"))
@@ -70,7 +64,6 @@ test_that("instrument selection records every LOD candidate and applies its rule
 
   expect_identical(qtl2mr_select_instruments(f$resources, f$scan, n_workers = 2L, progress = FALSE), inst)
   expect_error(qtl2mr_select_instruments(f$resources, f$scan, exposures = "absent"), "missing exposure")
-  expect_error(qtl2mr_select_instruments(f$resources, f$scan, F_X_min = -1), "non-negative")
   expect_error(qtl2mr_select_instruments(list(), f$scan), "qtl2mr_prepare_resources")
   empty <- qtl2mr_select_instruments(f$resources, f$scan, lod_thresh = 50, progress = FALSE)
   expect_identical(nrow(empty), 0L)
@@ -79,7 +72,10 @@ test_that("instrument selection records every LOD candidate and applies its rule
 
 test_that("a locus whose exposure effects cannot be estimated is never selected", {
   f <- v060_fixture(nonestimable_b2 = TRUE)
-  inst <- qtl2mr_select_instruments(f$resources, f$scan, exposures = "x", progress = FALSE)
+  # Founder H is absent at b2, so the founder QC (on by default since
+  # 0.6.1.9006) would drop it first; this test is about estimability.
+  inst <- qtl2mr_select_instruments(f$resources, f$scan, exposures = "x", progress = FALSE,
+    min_founder_copies = NULL)
   expect_identical(inst$marker, c("a1", "b2"))
   expect_identical(inst$selected, c(TRUE, FALSE))
   expect_identical(inst$drop_reason, c("", "nonestimable_x"))
@@ -102,29 +98,29 @@ test_that("each batch row equals the single analysis of the same pair", {
   f <- v060_fixture()
   inst <- qtl2mr_select_instruments(f$resources, f$scan, progress = FALSE)
   batch <- run_qtl2mr_batch(f$resources, f$pairs, inst, progress = FALSE)
-  bookkeeping <- c("pair_id", "status", "error_message", "locus_fit_status", "runtime_sec")
+  # The founder QC is on by default since 0.6.1.9006: the batch row counts the
+  # loci it dropped, the single analysis records them in its input metadata.
+  bookkeeping <- c("pair_id", "status", "error_message", "locus_fit_status", "runtime_sec",
+    "n_loci_dropped_founder_qc")
   for (i in seq_len(nrow(f$pairs))) {
-    single <- qtl2mr_primary_result(v060_single(f$resources, inst, f$pairs$exposure[[i]], f$pairs$outcome[[i]]))
+    analysis <- v060_single(f$resources, inst, f$pairs$exposure[[i]], f$pairs$outcome[[i]])
+    single <- qtl2mr_primary_result(analysis)
     row <- batch$main_results[i, , drop = FALSE]
     shared <- setdiff(names(row), bookkeeping)
     expect_true(all(shared %in% names(single)))
     for (column in shared) expect_identical(row[[column]], single[[column]], info = paste(i, column))
+    expect_identical(row$n_loci_dropped_founder_qc,
+      sum(!analysis$pilot$prepared_metadata$founder_qc_outcome$loci$pass))
   }
   # x is fitted on its 78 samples in both of its pairs, y on 74, w on all 80.
   expect_equal(batch$main_results$n_x_median, c(78, 80, 78))
   expect_equal(batch$main_results$n_y_median, c(74, 74, 80))
-
-  simulated <- run_qtl2mr_batch(f$resources, f$pairs[1L, ], inst, heterogeneity_method = "simulation",
-    heterogeneity_nsim = 25L, progress = FALSE)
-  single <- qtl2mr_primary_result(v060_single(f$resources, inst, "x", "y",
-    heterogeneity_method = "simulation", heterogeneity_nsim = 25L))
-  expect_identical(simulated$main_results$Q_p_reported, single$Q_p_reported)
-  expect_identical(simulated$main_results$Q_p_method, single$Q_p_method)
 })
 
 test_that("qtl2mr_pair_input uses the selected instruments of one exposure", {
   f <- v060_fixture()
-  inst <- qtl2mr_select_instruments(f$resources, f$scan, max_loci = 1L, progress = FALSE)
+  # The table max_loci = 1L gave (max_loci was removed in 0.6.1.9006).
+  inst <- qtl2mr_test_top_loci(qtl2mr_select_instruments(f$resources, f$scan, progress = FALSE), 1L)
   input <- qtl2mr_pair_input(f$resources, inst, "x", "y")
   expect_s3_class(input, "qtl2mr_prepared_input")
   expect_identical(input$selected_loci$marker, "a1")
@@ -143,7 +139,7 @@ test_that("the single analysis reports a Steiger check and batch records the fla
   pheno$y_pleio <- 0.6 * pheno$x + 3 * r$allele_probs[["2"]][, 4L, "b1"] + rnorm(nrow(pheno), sd = 0.3)
   r <- qtl2mr_prepare_resources(r$allele_probs, r$kinship, pheno, r$covar, r$marker_map)
   inst <- data.frame(exposure = "x", marker = c("a1", "b1"))
-  result <- v060_single(r, inst, "x", "y_pleio", run_instrument_sensitivity = TRUE)
+  result <- v060_single(r, inst, "x", "y_pleio")
   first <- utils::read.csv(file.path(result$output_dir, "data", "block_first_stage.csv"), stringsAsFactors = FALSE)
   expect_identical(first$marker, c("a1", "b1"))
   expect_identical(first$steiger_pass, c(TRUE, FALSE))
@@ -168,8 +164,7 @@ test_that("the single analysis reports a Steiger check and batch records the fla
   expect_identical(batch$main_results$n_loci_steiger_fail, 1L)
   expect_identical(batch$locus_results$steiger_pass, c(TRUE, FALSE))
 
-  clean <- v060_single(f$resources, data.frame(exposure = "x", marker = "a1"), "x", "y",
-    run_instrument_sensitivity = TRUE)
+  clean <- v060_single(f$resources, data.frame(exposure = "x", marker = "a1"), "x", "y")
   expect_identical(clean$steiger_sensitivity$status, "no_loci_removed")
   expect_identical(clean$steiger_sensitivity$theta_steiger, qtl2mr_primary_result(clean)$theta)
   expect_identical(clean$steiger_sensitivity$shift_in_primary_ci_widths, 0)
@@ -179,7 +174,11 @@ test_that("selection follows map order and needs trait names for several exposur
   map <- qtl2mr:::qtl2mr_marker_map_table(data.frame(marker = c("a1", "a2", "a3"), chr = "1"))
   scan <- matrix(c(5, 1, 5), ncol = 1L, dimnames = list(c("a1", "a3", "a2"), "x"))
   # a1 and a2 are adjacent on the map, so they form one island despite the scan's row order.
-  expect_identical(qtl2mr:::qtl2mr_scan_candidates(scan, map, "x", 4, character(), peak_rule = "legacy")$marker, "a1")
+  # LOD islands are the candidates of the spacing rule, which needs positions
+  # (the legacy rule was removed in 0.6.1.9006).
+  positioned <- qtl2mr:::qtl2mr_marker_map_table(data.frame(marker = c("a1", "a2", "a3"), chr = "1", pos = 1:3))
+  expect_identical(qtl2mr:::qtl2mr_scan_candidates(scan, positioned, "x", 4, character(), peak_rule = "spacing",
+    min_spacing = 0.5)$marker, "a1")
   expect_identical(qtl2mr:::qtl2mr_scan_candidates(scan, map, "x", 4, character())$marker, "a1")
 
   f <- v060_fixture()
@@ -195,14 +194,18 @@ test_that("counts and seeds are validated up front and stored as integers", {
   inst <- qtl2mr_select_instruments(f$resources, f$scan, progress = FALSE)
   path <- tempfile("v060-integer-")
   first <- run_qtl2mr_batch(f$resources, f$pairs[1L, ], inst, output_dir = path, progress = FALSE)
-  again <- run_qtl2mr_batch(f$resources, f$pairs[1L, ], inst, heterogeneity_nsim = 1000, heterogeneity_seed = 1,
+  # Counts given as doubles are stored as integers, so the fingerprint matches.
+  again <- run_qtl2mr_batch(f$resources, f$pairs[1L, ], inst, min_samples = 50, min_loci = 1,
     output_dir = path, resume = TRUE, progress = FALSE)
   expect_identical(again$run_manifest$n_pairs_resumed, 1L)
   expect_identical(again$main_results$theta, first$main_results$theta)
-  expect_error(run_qtl2mr_batch(f$resources, f$pairs, inst, heterogeneity_nsim = -1), "non-negative whole number")
-  expect_error(run_qtl2mr_batch(f$resources, f$pairs, inst, diagnostic_bootstrap_B = 1.5), "non-negative whole number")
-  input <- qtl2mr_pair_input(f$resources, inst, "x", "y")
-  expect_error(run_qtl2mr_analysis(input, output_dir = tempfile(), diagnostic_bootstrap_seed = NA), "whole number")
+  expect_error(run_qtl2mr_batch(f$resources, f$pairs, inst, min_samples = 1.5), "positive integer")
+  # The Q simulation and bootstrap counts and seeds are fixed at the entries
+  # since 0.6.1.9006; the internal settings still validate and store them.
+  expect_identical(qtl2mr_test_settings(heterogeneity_nsim = 1000, heterogeneity_seed = 1), qtl2mr_test_settings())
+  expect_error(qtl2mr_test_settings(heterogeneity_nsim = -1), "non-negative whole number")
+  expect_error(qtl2mr_test_settings(diagnostic_bootstrap_B = 1.5), "non-negative whole number")
+  expect_error(qtl2mr_test_settings(diagnostic_bootstrap_seed = NA), "whole number")
   expect_error(run_qtl2mr_batch(f$resources, file.path(tempdir(), "absent-pairs.csv"), inst), "pairs file does not exist")
 })
 
@@ -210,7 +213,7 @@ test_that("a failed Steiger check is logged and reported without hiding the prim
   f <- v060_fixture()
   inst <- qtl2mr_select_instruments(f$resources, f$scan, progress = FALSE)
   local_mocked_bindings(qtl2mr_steiger_sensitivity = function(...) stop("steiger boom"))
-  result <- v060_single(f$resources, inst, "x", "y", run_instrument_sensitivity = TRUE)
+  result <- v060_single(f$resources, inst, "x", "y")
   expect_true("steiger_sensitivity_error" %in% qtl2mr_warnings(result)$warning_id)
   expect_identical(readLines(file.path(result$output_dir, "logs", "steiger_sensitivity_error.log")), "steiger boom")
   expect_false("steiger_filtered" %in% result$instrument_sensitivity$set_name)
@@ -219,7 +222,8 @@ test_that("a failed Steiger check is logged and reported without hiding the prim
 
 test_that("an instruments table cannot silently change the loci of a prepared input", {
   f <- v060_fixture()
-  inst <- qtl2mr_select_instruments(f$resources, f$scan, max_loci = 1L, progress = FALSE)
+  # The table max_loci = 1L gave (max_loci was removed in 0.6.1.9006).
+  inst <- qtl2mr_test_top_loci(qtl2mr_select_instruments(f$resources, f$scan, progress = FALSE), 1L)
   r <- f$resources
   prepare <- function(selected, exposure = "x") {
     as_qtl2mr_prepared_input(r$allele_probs, r$pheno, r$covar, r$kinship, r$marker_map,
@@ -245,13 +249,15 @@ test_that("a fail_fast stop writes the run manifest in the usual layout", {
   inst <- data.frame(exposure = c("w", "x", "x"), marker = c("a3", "a1", "b2"))
   pairs <- data.frame(exposure = c("w", "x"), outcome = "y")
   path <- tempfile("v060-manifest-")
-  expect_error(run_qtl2mr_batch(f$resources, pairs, inst, fail_fast = TRUE, output_dir = path, progress = FALSE),
-    "Pair x__to__y failed")
+  # Founder H is absent at b2, so the founder QC (on by default since
+  # 0.6.1.9006) would drop b2 before the fit that should fail; QC off here.
+  expect_error(run_qtl2mr_batch(f$resources, pairs, inst, fail_fast = TRUE, output_dir = path, progress = FALSE,
+    min_founder_copies = NULL), "Pair x__to__y failed")
   partial <- utils::read.csv(file.path(path, "batch_run_manifest.csv"), stringsAsFactors = FALSE)
   expect_identical(names(partial), names(qtl2mr:::qtl2mr_empty_batch_table("run_manifest")))
   expect_identical(partial$status, "stopped_fail_fast")
   expect_identical(c(partial$n_pairs_ok, partial$n_pairs_error), c(1L, 1L))
-  complete <- run_qtl2mr_batch(f$resources, pairs[1L, ], inst, progress = FALSE)
+  complete <- run_qtl2mr_batch(f$resources, pairs[1L, ], inst, progress = FALSE, min_founder_copies = NULL)
   expect_identical(complete$run_manifest$status, "complete")
   expect_identical(names(complete$run_manifest), names(partial))
 })

@@ -6,13 +6,11 @@ v041_reporting_input <- function() {
     selected_loci = d$selected_loci, exposure = d$exposure, outcome = d$outcome)
 }
 
-v041_reporting_run <- function(input = v041_reporting_input(), make_html = TRUE,
-                              progress = FALSE, method = "chisq", nsim = 0L) {
+# The chi-square Q and B = 0 these reports used are the fixed settings of
+# run_qtl2mr_analysis() since 0.6.1.9006.
+v041_reporting_run <- function(input = v041_reporting_input(), make_html = TRUE) {
   run_qtl2mr_analysis(input, output_dir = tempfile("qtl2mr-v041-report-"),
-    make_html = make_html, make_figures = FALSE, verbose = FALSE,
-    diagnostic_bootstrap_B = 0L, heterogeneity_method = method,
-    heterogeneity_nsim = nsim, run_loo_mr = FALSE,
-    run_instrument_sensitivity = FALSE, progress = progress)
+    make_html = make_html, make_figures = FALSE, progress = FALSE)
 }
 
 test_that("reports distinguish the Q statistic, p-value and reference", {
@@ -67,14 +65,20 @@ test_that("Q progress preserves random draws and can be suppressed without losin
   expect_message(qtl2mr:::qtl2mr_capture_messages(reporter(2L, "Q", "1/3 draws")), "1/3 draws")
   expect_message(suppressMessages(reporter(2L, "Q", "2/3 draws")), NA)
   expect_true(any(grepl("2/3 draws", readLines(log), fixed = TRUE)))
-  integrated <- v041_reporting_run(progress = "log", method = "simulation", nsim = 2L)
-  expect_true(any(grepl("2/2 draws", readLines(file.path(integrated$output_dir,
-    "logs", "progress.log")), fixed = TRUE)))
-  # Defaults and the primary objective have not changed to obtain faster examples.
-  expect_identical(formals(run_qtl2mr_analysis)$heterogeneity_nsim, 1000L)
-  expect_identical(eval(formals(run_qtl2mr_analysis)$heterogeneity_method)[1L], "auto")
-  expect_equal(integrated$pilot$fit$theta, base$fit$theta, tolerance = 1e-12)
-  expect_equal(integrated$pilot$fit$profile_ci_lower, base$fit$profile_ci_lower, tolerance = 1e-12)
+  # The simulated Q p-value is no longer an option of run_qtl2mr_analysis()
+  # (0.6.1.9006); its draws reach a log-only progress reporter through the
+  # internal fit path, as they reached logs/progress.log of an analysis.
+  integrated_log <- tempfile("qtl2mr-v041-progress-", fileext = ".log")
+  integrated <- qtl2mr:::qtl2mr_fit_prepared(input, "x", "y",
+    qtl2mr_test_settings(heterogeneity_method = "simulation", heterogeneity_nsim = 2L),
+    progress_callback = qtl2mr:::qtl2mr_make_progress_reporter("log", verbose = FALSE, log_file = integrated_log))
+  expect_true(any(grepl("2/2 draws", readLines(integrated_log), fixed = TRUE)))
+  # Defaults have not changed to obtain faster examples: 1000 draws, now in
+  # qtl2mr_diagnostics() and the recorded fixed settings.
+  expect_identical(formals(qtl2mr_diagnostics)$nsim, 1000L)
+  expect_identical(qtl2mr:::qtl2mr_fixed_fit_settings()$heterogeneity_nsim, 1000L)
+  expect_equal(integrated$fit$theta, base$fit$theta, tolerance = 1e-12)
+  expect_equal(integrated$fit$profile_ci_lower, base$fit$profile_ci_lower, tolerance = 1e-12)
 })
 
 test_that("input exclusions and rounding adjustments reach the report", {

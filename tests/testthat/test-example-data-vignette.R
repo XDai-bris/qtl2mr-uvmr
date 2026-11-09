@@ -42,18 +42,14 @@ test_that("qtl2mr_example supports the public quick workflow and lite export", {
   expect_true(validate_qtl2mr_input(prepared, require_selected_loci = TRUE))
 
   output_dir <- tempfile("qtl2mr-example-data-")
+  # The example selects m1 and m2, so the former loci = 2L was both loci; the
+  # chi-square Q and B = 0 it passed are the fixed settings since 0.6.1.9006.
   result <- run_qtl2mr_analysis(
     prepared,
-    loci = 2L,
     output_dir = output_dir,
     overwrite = TRUE,
     make_figures = FALSE,
     make_html = TRUE,
-    verbose = FALSE,
-    diagnostic_bootstrap_B = 0L,
-    heterogeneity_method = "chisq",
-    run_loo_mr = FALSE,
-    run_instrument_sensitivity = FALSE,
     progress = FALSE
   )
   primary <- qtl2mr_primary_result(result)
@@ -107,9 +103,14 @@ test_that("getting-started vignette source is generic and free of local paths", 
   token_prefix <- paste0("gh", "p_")
   pat_prefix <- paste0("github", "_pat_")
   expect_false(grepl(paste(local_home_pattern, "[A-Za-z]:[/\\\\]", token_prefix, pat_prefix, sep = "|"), text))
-  expect_match(text, "diagnostic_only", fixed = TRUE)
+  # The reported-estimator policy is fixed to diagnostic_only since 0.6.1.9006
+  # and the walkthrough no longer names it.
   expect_match(text, "LOCO kinship", fixed = TRUE)
-  expect_match(text, "as_qtl2mr_prepared_input", fixed = TRUE)
+  # The quick start builds the input from resources since 0.6.1.9006, when
+  # as_qtl2mr_prepared_input() stopped being exported.
+  expect_match(text, "qtl2mr_prepare_resources(", fixed = TRUE)
+  expect_match(text, "qtl2mr_pair_input(", fixed = TRUE)
+  expect_false(grepl("as_qtl2mr_prepared_input", text, fixed = TRUE))
   expect_match(text, "run_qtl2mr_analysis", fixed = TRUE)
   expect_match(text, "primary <- qtl2mr_primary_result(result)", fixed = TRUE)
   expect_match(text, "warnings <- qtl2mr_warnings(result)", fixed = TRUE)
@@ -118,7 +119,8 @@ test_that("getting-started vignette source is generic and free of local paths", 
   expect_match(text, "browseURL(file.path(result_dir, \"report.html\"))", fixed = TRUE)
   expect_false(grepl("(^|[^[:alnum:]_])names\\(qtl2mr_example|head\\(|export_qtl2mr_lite_result|utils::unzip|data.frame\\(\\s*component", text))
   expect_match(text, "prepared_lmm", fixed = TRUE)
-  expect_match(text, "not a claim of causal validity", fixed = TRUE)
+  # Prose is matched across line breaks.
+  expect_match(gsub("[[:space:]]+", " ", text), "not a claim of causal validity", fixed = TRUE)
   expect_lte(length(readLines(vignette, warn = FALSE)), 220L)
 })
 

@@ -70,27 +70,60 @@ test_that("onboarding documents sample, units and provenance boundaries", {
   expect_match(multi, "standardized truth = raw truth", fixed = TRUE)
 })
 
-test_that("README quick start keeps the documented explicit fast-demo settings", {
+# The R code chunks of a Markdown or R Markdown file.
+onboarding_code_chunks <- function(lines) {
+  starts <- grep("^```(r|\\{r)", lines)
+  lapply(starts, function(s) {
+    e <- which(seq_along(lines) > s & lines == "```")[[1L]]
+    lines[seq.int(s + 1L, e - 1L)]
+  })
+}
+
+# Named arguments of calls to the entry functions that the function does not have.
+onboarding_unknown_arguments <- function(expr) {
+  entries <- c("run_qtl2mr_analysis", "run_qtl2mr_batch", "qtl2mr_select_instruments", "qtl2mr_pair_input",
+    "qtl2mr_prepare_resources", "qtl2mr_combine_resources", "qtl2mr_diagnostics")
+  if (!is.call(expr)) return(character())
+  fn <- expr[[1L]]
+  name <- if (is.name(fn)) as.character(fn) else if (is.call(fn) && identical(fn[[1L]], as.name("::"))) {
+    as.character(fn[[3L]])
+  } else ""
+  bad <- character()
+  if (name %in% entries) {
+    used <- names(as.list(expr)[-1L])
+    used <- used[nzchar(used)]
+    bad <- paste0(name, "(", setdiff(used, names(formals(get(name, asNamespace("qtl2mr"))))), ")")
+    bad <- bad[!endsWith(bad, "()")]
+  }
+  for (arg in as.list(expr)[-1L]) if (!missing(arg)) bad <- c(bad, onboarding_unknown_arguments(arg))
+  bad
+}
+
+test_that("README and vignette code pass only arguments the 0.6.1.9006 entries have", {
+  # Before 0.6.1.9006 this test required the README and getting-started quick
+  # starts to pass the same fast-demo settings, most of which (verbose, the Q
+  # and bootstrap settings, run_loo_mr, run_instrument_sensitivity) were removed.
   path <- test_path("..", "..", "README.md")
   if (!file.exists(path)) skip("README is unavailable in this installation")
   source <- readLines(path, warn = FALSE)
-  start <- which(source == "result <- run_qtl2mr_analysis(")[[1L]]
-  end <- which(seq_along(source) > start & source == ")")[[1L]]
-  call <- parse(text = source[seq.int(start, end)])[[1L]][[3L]]
-  fast <- as.list(call)[-1L]
-  settings <- c("overwrite", "make_figures", "make_html", "verbose",
-                "diagnostic_bootstrap_B", "heterogeneity_method", "run_loo_mr",
-                "run_instrument_sensitivity", "progress")
-  getting <- onboarding_vignette_source("getting-started")
-  start <- which(getting == "result <- run_qtl2mr_analysis(")[[1L]]
-  end <- which(seq_along(getting) > start & getting == ")")[[1L]]
-  call <- parse(text = getting[seq.int(start, end)])[[1L]][[3L]]
-  expect_identical(fast[settings], as.list(call)[-1L][settings])
+  docs <- list(README = source, `getting-started` = onboarding_vignette_source("getting-started"),
+    `multilocus-example` = onboarding_vignette_source("multilocus-example"),
+    `from-qtl2` = onboarding_vignette_source("from-qtl2"))
+  for (doc in names(docs)) {
+    chunks <- onboarding_code_chunks(docs[[doc]])
+    expect_gt(length(chunks), 0L)
+    for (chunk in chunks) {
+      exprs <- parse(text = chunk)
+      expect_identical(as.character(unlist(lapply(exprs, onboarding_unknown_arguments))), character(), info = doc)
+    }
+  }
+  expect_match(paste(source, collapse = "\n"), "result <- run_qtl2mr_analysis(", fixed = TRUE)
   text <- paste(source, collapse = "\n")
   expect_match(text, "**Current release:** [v0.6.1]", fixed = TRUE)
   expect_match(text, "releases/tag/v0.6.1", fixed = TRUE)
   expect_match(text, "exposure and the outcome on their own complete", fixed = TRUE)
-  current <- sub("## Upgrading from 0.5.x.*", "", text)
+  # Retired names may appear only in the change and upgrade sections.
+  current <- sub("## (Changes since|Upgrading from) .*", "", text)
   for (retired in c("run_qtl2mr_batch_fast", "sample_policy", "instrument_rule", "qtl_scan =", "select_loci")) {
     expect_false(grepl(retired, current, fixed = TRUE), info = retired)
   }

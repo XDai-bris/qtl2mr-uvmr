@@ -56,12 +56,12 @@ test_that("multi-locus example runs the public raw-unit workflow", {
     marker_map = d$marker_map, selected_loci = d$selected_loci,
     exposure = d$exposure, outcome = d$outcome)
   expect_true(validate_qtl2mr_input(input, require_selected_loci = TRUE))
-  result <- run_qtl2mr_analysis(input, output_dir = tempfile("qtl2mr-multilocus-test-"),
-    standardize_phenotypes = FALSE, make_figures = FALSE, make_html = TRUE,
-    diagnostic_bootstrap_B = 500L, diagnostic_bootstrap_seed = 1L,
-    heterogeneity_method = "chisq",
-    run_loo_mr = FALSE, run_instrument_sensitivity = FALSE,
-    verbose = FALSE, progress = FALSE)
+  # Raw units and bootstrap SEs are no longer entry options (0.6.1.9006); the
+  # same analysis through the internal fit path.
+  result <- qtl2mr_test_analysis(input, qtl2mr_test_settings(
+      standardize_phenotypes = FALSE, diagnostic_bootstrap_B = 500L, diagnostic_bootstrap_seed = 1L,
+      heterogeneity_method = "chisq"),
+    output_dir = tempfile("qtl2mr-multilocus-test-"), make_figures = FALSE, make_html = TRUE)
   p <- qtl2mr_primary_result(result)
   expect_equal(p$n_loci, 40L)
   expect_equal(p$n_x_median, 400)
@@ -106,10 +106,13 @@ test_that("multi-locus walkthrough is available after vignette building", {
   if (!file.exists(src)) src <- system.file("doc", "multilocus-example.Rmd", package = "qtl2mr")
   if (!nzchar(src) || !file.exists(src)) skip("vignette source not available")
   text <- paste(readLines(src, warn = FALSE), collapse = "\n")
-  expect_match(text, "standardize_phenotypes = FALSE", fixed = TRUE)
-  expect_match(text, "run_loo_mr = TRUE", fixed = TRUE)
-  expect_match(text, "diagnostic_bootstrap_B = 500L", fixed = TRUE)
-  expect_match(text, "diagnostic_bootstrap_seed = 1L", fixed = TRUE)
+  # Since 0.6.1.9006 the walkthrough reads the raw-unit columns of the
+  # standardised fit and takes the bootstrap from qtl2mr_diagnostics(); it passes
+  # none of the removed settings (leave-one-locus-out MR always runs).
+  expect_match(text, "theta_raw_units", fixed = TRUE)
+  expect_match(text, "qtl2mr_diagnostics(", fixed = TRUE)
+  expect_false(grepl("standardize_phenotypes =|run_loo_mr|diagnostic_bootstrap_B|diagnostic_bootstrap_seed|heterogeneity_method",
+    text))
   expect_match(text, "deliberately targeted", fixed = TRUE)
   expect_match(text, "not method", fixed = TRUE)
   expect_lte(length(readLines(src, warn = FALSE)), 180L)

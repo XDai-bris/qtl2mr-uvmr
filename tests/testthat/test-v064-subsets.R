@@ -80,9 +80,8 @@ test_that("off by default: no table, file, column or config entry; invalid speci
   expect_false(file.exists(file.path(dir_off, "batch_subset_results.csv")))
   expect_false(grepl("subsets", paste(readLines(file.path(dir_off, "batch_config.json")), collapse = "")))
   single <- suppressWarnings(run_qtl2mr_analysis(qtl2mr_pair_input(f$resources, f$instruments, "x", "y"),
-    output_dir = tempfile("v064-single-off-"), make_html = FALSE, make_figures = FALSE, verbose = FALSE,
-    heterogeneity_method = "chisq", diagnostic_bootstrap_B = 0L, run_loo_mr = FALSE,
-    run_instrument_sensitivity = FALSE, subsets = NULL))
+    output_dir = tempfile("v064-single-off-"), make_html = FALSE, make_figures = FALSE, progress = FALSE,
+    subsets = NULL))
   expect_false("subset_results" %in% names(single))
   expect_false(file.exists(file.path(single$output_dir, "data", "subset_results.csv")))
 
@@ -105,7 +104,7 @@ test_that("off by default: no table, file, column or config entry; invalid speci
     expect_false(dir.exists(dir))
     dir <- tempfile("v064-bad-single-")
     expect_error(run_qtl2mr_analysis(qtl2mr_pair_input(f$resources, f$instruments, "x", "y"), output_dir = dir,
-      verbose = FALSE, subsets = spec), "subset")
+      progress = FALSE, subsets = spec), "subset")
     expect_false(dir.exists(dir))
   }
   # Accepted forms are normalised: rules in the order F_X_min, steiger; whole numbers as double.
@@ -294,10 +293,13 @@ test_that("resume restores subset rows and refuses a changed specification; work
   v064_batch(f, output_dir = dir, overwrite = TRUE)
   expect_false(file.exists(file.path(dir, "batch_subset_results.csv")))
 
-  serial <- v064_batch(f, subsets = v064_subsets, heterogeneity_method = "simulation", heterogeneity_nsim = 20L,
-    diagnostic_bootstrap_B = 10L)
-  forked <- v064_batch(f, subsets = v064_subsets, heterogeneity_method = "simulation", heterogeneity_nsim = 20L,
-    diagnostic_bootstrap_B = 10L, n_workers = 2L)
+  # With the simulated Q p-value and the bootstrap (no longer batch options since
+  # 0.6.1.9006), so that the refits draw random numbers.
+  serial <- qtl2mr_with_settings(v064_batch(f, subsets = v064_subsets), heterogeneity_method = "simulation",
+    heterogeneity_nsim = 20L, diagnostic_bootstrap_B = 10L)
+  forked <- qtl2mr_with_settings(v064_batch(f, subsets = v064_subsets, n_workers = 2L),
+    heterogeneity_method = "simulation", heterogeneity_nsim = 20L, diagnostic_bootstrap_B = 10L)
+  expect_true(all(serial$main_results$Q_p_method == "simulation" & serial$main_results$diagnostic_bootstrap_B == 10L))
   expect_identical(forked$subset_results, serial$subset_results)
   expect_identical(forked$locus_results, serial$locus_results)
   expect_identical(forked$errors, serial$errors)
@@ -307,19 +309,23 @@ test_that("resume restores subset rows and refuses a changed specification; work
 
 test_that("subset refits leave the caller's random number stream as without subsets", {
   f <- v064_fixture()
+  # The refits draw random numbers only with the simulated Q p-value and the
+  # bootstrap, which the entries no longer take (0.6.1.9006): the batch with the
+  # 0.6.1.9005 simulation settings below, the single analysis with its 0.6.1.9005
+  # defaults ("auto", which simulates for several loci) and the counts below.
   draw_after <- function(...) {
     set.seed(99L)
-    invisible(v064_batch(f, heterogeneity_method = "simulation", heterogeneity_nsim = 10L,
-      diagnostic_bootstrap_B = 5L, ...))
+    invisible(qtl2mr_with_settings(v064_batch(f, ...), heterogeneity_method = "simulation",
+      heterogeneity_nsim = 10L, diagnostic_bootstrap_B = 5L))
     stats::runif(3L)
   }
   expect_identical(draw_after(subsets = v064_subsets), draw_after())
   single_after <- function(...) {
     set.seed(7L)
-    invisible(suppressWarnings(run_qtl2mr_analysis(qtl2mr_pair_input(f$resources, f$instruments, "x", "y"),
-      output_dir = tempfile("v064-rng-"), make_html = FALSE, make_figures = FALSE, verbose = FALSE,
-      heterogeneity_nsim = 10L, diagnostic_bootstrap_B = 5L, run_loo_mr = FALSE, run_instrument_sensitivity = FALSE,
-      ...)))
+    invisible(qtl2mr_with_settings(suppressWarnings(run_qtl2mr_analysis(
+      qtl2mr_pair_input(f$resources, f$instruments, "x", "y"),
+      output_dir = tempfile("v064-rng-"), make_html = FALSE, make_figures = FALSE, progress = FALSE, ...)),
+      heterogeneity_method = "auto", heterogeneity_nsim = 10L, diagnostic_bootstrap_B = 5L))
     stats::runif(3L)
   }
   expect_identical(single_after(subsets = v064_subsets[c("F2", "SF")]), single_after())
@@ -369,8 +375,7 @@ test_that("a failure anywhere in the subset step gives error rows and leaves the
     rep("error", 6L))
   # Single analysis: error rows with the message, main outputs as without subsets.
   run_single <- function(...) suppressWarnings(run_qtl2mr_analysis(qtl2mr_pair_input(f$resources, f$instruments, "x", "y"),
-    output_dir = tempfile("v064-stepfail-single-"), make_html = FALSE, make_figures = FALSE, verbose = FALSE,
-    heterogeneity_method = "chisq", diagnostic_bootstrap_B = 0L, ...))
+    output_dir = tempfile("v064-stepfail-single-"), make_html = FALSE, make_figures = FALSE, progress = FALSE, ...))
   single_off <- run_single()
   single_ok <- run_single(subsets = subsets)
   single_bad <- with_mocked_bindings(run_single(subsets = subsets),
@@ -433,25 +438,34 @@ test_that("batch: a subset row equals a separate batch run on that subset's loci
   f <- v064_fixture()
   subsets <- v064_subsets[c("F5", "F2", "F2_SF", "zero")]
   expect_identical(v064_batch_equivalence(f, subsets), 12L)
-  expect_identical(v064_batch_equivalence(f, subsets, heterogeneity_method = "simulation", heterogeneity_nsim = 25L,
-    heterogeneity_seed = 7L, diagnostic_bootstrap_B = 15L, diagnostic_bootstrap_seed = 3L,
-    reported_estimator_policy = "auto_fallback", cross_cov_model = "raw", standardize_phenotypes = FALSE,
-    sample_policy = "pair_common_complete"), 12L)
+  # With every other fit setting, which the batch no longer takes (0.6.1.9006);
+  # sample_policy = "pair_common_complete" was removed.
+  expect_identical(qtl2mr_with_settings(v064_batch_equivalence(f, subsets), heterogeneity_method = "simulation",
+    heterogeneity_nsim = 25L, heterogeneity_seed = 7L, diagnostic_bootstrap_B = 15L, diagnostic_bootstrap_seed = 3L,
+    reported_estimator_policy = "auto_fallback", cross_cov_model = "raw", standardize_phenotypes = FALSE), 12L)
+  raw <- qtl2mr_with_settings(v064_batch(f, pairs = f$pairs[1L, ])$main_results, cross_cov_model = "raw",
+    standardize_phenotypes = FALSE, reported_estimator_policy = "auto_fallback")
+  expect_identical(c(raw$cross_cov_model, raw$reported_estimator_policy), c("raw", "auto_fallback"))
+  expect_false(raw$standardize_phenotypes)
 })
 
-v064_single <- function(f, inst, exposure, outcome, ..., sample_policy = "own_complete") {
-  suppressWarnings(run_qtl2mr_analysis(qtl2mr_pair_input(f$resources, inst, exposure, outcome,
-    sample_policy = sample_policy), output_dir = tempfile("v064-single-"), make_html = FALSE, make_figures = FALSE,
-    verbose = FALSE, ...))
+v064_single <- function(f, inst, exposure, outcome, ...) {
+  suppressWarnings(run_qtl2mr_analysis(qtl2mr_pair_input(f$resources, inst, exposure, outcome),
+    output_dir = tempfile("v064-single-"), make_html = FALSE, make_figures = FALSE, progress = FALSE, ...))
 }
 
 test_that("single: subset rows equal separate runs, main outputs are unchanged, and batch rows agree", {
   f <- v064_fixture()
   subsets <- v064_subsets[c("F5", "F2", "F2_SF", "zero", "huge")]
-  settings <- list(heterogeneity_method = "auto", heterogeneity_nsim = 30L, heterogeneity_seed = 5L,
-    diagnostic_bootstrap_B = 20L, diagnostic_bootstrap_seed = 2L)
-  on <- do.call(v064_single, c(list(f, f$instruments, "x", "y", subsets = subsets), settings))
-  off <- do.call(v064_single, c(list(f, f$instruments, "x", "y"), settings))
+  # The Q simulation and bootstrap settings are no longer entry options
+  # (0.6.1.9006); every run below uses them in place of the fixed settings.
+  with_settings <- function(code) qtl2mr_with_settings(code, heterogeneity_method = "auto", heterogeneity_nsim = 30L,
+    heterogeneity_seed = 5L, diagnostic_bootstrap_B = 20L, diagnostic_bootstrap_seed = 2L)
+  on <- with_settings(v064_single(f, f$instruments, "x", "y", subsets = subsets))
+  off <- with_settings(v064_single(f, f$instruments, "x", "y"))
+  expect_identical(on$pilot$summary$Q_p_method, "simulation")
+  expect_equal(on$pilot$summary$Q_sim_n_requested, 30)
+  expect_identical(on$pilot$summary$diagnostic_bootstrap_B, 20L)
   sub <- on$subset_results
   expect_identical(sub$subset, names(subsets))
   expect_identical(sub$status, c("ok", "ok", "ok", "ok", "too_few_loci"))
@@ -479,23 +493,15 @@ test_that("single: subset rows equal separate runs, main outputs are unchanged, 
   for (i in which(sub$status == "ok")) {
     keep <- qtl2mr:::qtl2mr_subset_members(first, subsets[[sub$subset[[i]]]])
     inst <- f$instruments[f$instruments$exposure == "x" & f$instruments$marker %in% first$marker[keep], ]
-    separate <- do.call(v064_single, c(list(f, inst, "x", "y", run_loo_mr = FALSE,
-      run_instrument_sensitivity = FALSE), settings))
+    separate <- with_settings(v064_single(f, inst, "x", "y"))
     expect_identical(separate$pilot$summary$n_loci, sub$n_loci[[i]])
     expect_true(v064_same_values(sub[i, ], cbind(separate$pilot$summary, status = "ok", error_message = ""), cols),
       label = sub$subset[[i]])
   }
   # The batch gives the same subset rows for the same pair and settings.
-  batch <- v064_batch(f, pairs = f$pairs[1L, ], subsets = subsets, heterogeneity_method = "auto",
-    heterogeneity_nsim = 30L, heterogeneity_seed = 5L, diagnostic_bootstrap_B = 20L, diagnostic_bootstrap_seed = 2L)
+  batch <- with_settings(v064_batch(f, pairs = f$pairs[1L, ], subsets = subsets))
   bcols <- setdiff(names(batch$subset_results), "pair_id")
   for (i in seq_len(nrow(sub))) {
     expect_true(v064_same_values(batch$subset_results[i, ], sub[i, ], bcols), label = sub$subset[[i]])
   }
-  # Under the pair-common sample policy as well.
-  common <- v064_single(f, f$instruments, "w", "y", subsets = subsets[c("F2", "zero")], heterogeneity_method = "chisq",
-    diagnostic_bootstrap_B = 0L, run_loo_mr = FALSE, run_instrument_sensitivity = FALSE,
-    sample_policy = "pair_common_complete")
-  bc <- v064_batch(f, pairs = f$pairs[3L, ], subsets = subsets[c("F2", "zero")], sample_policy = "pair_common_complete")
-  for (i in 1:2) expect_true(v064_same_values(bc$subset_results[i, ], common$subset_results[i, ], bcols))
 })

@@ -14,7 +14,9 @@ v040_fixture <- function() {
   list(input = input, resources = resources,
        instruments = data.frame(exposure = "x", marker = c("m1", "m3")),
        pairs = data.frame(exposure = "x", outcome = "y"),
-       options = list(min_samples = 20L, diagnostic_bootstrap_B = 0L, heterogeneity_method = "none"))
+       # The former B = 0 and heterogeneity "none" are not batch options since
+       # 0.6.1.9006 (B = 0 is fixed; Q is referred to chi-square).
+       options = list(min_samples = 20L))
 }
 
 v040_batch <- function(f, ..., resources = f$resources, pairs = f$pairs, instruments = f$instruments) {
@@ -65,8 +67,9 @@ test_that("LOD islands stop at chromosome boundaries and native maps work", {
     dimnames = list(c(paste0("a", 1:4), paste0("b", 1:4)), "x"))
   map <- list(`1` = setNames(1:4, paste0("a", 1:4)), `2` = setNames(1:4, paste0("b", 1:4)))
   table <- qtl2mr:::qtl2mr_marker_map_table
+  # LOD islands are the candidates of the spacing rule (the legacy rule was removed in 0.6.1.9006).
   selected <- qtl2mr:::qtl2mr_scan_candidates(lod, table(map), "x", lod_thresh = 4, exclude_chr = "X",
-    peak_rule = "legacy")
+    peak_rule = "spacing")
   expect_setequal(selected$marker, c("a4", "b1"))
   expect_error(qtl2mr:::qtl2mr_scan_candidates(lod, table(list(`1` = map[[1]])), "x", 4, "X"), "missing qtl_scan markers")
 })
@@ -102,7 +105,11 @@ test_that("resume requires exact provenance and leaves one current row per pair"
   changed <- f$resources
   changed$pheno$x[1] <- changed$pheno$x[1] + 0.01
   expect_error(v040_batch(f, resources = changed, output_dir = path, resume = TRUE), "fingerprint changed")
-  expect_error(v040_batch(f, cross_cov_model = "zero", output_dir = path, resume = TRUE), "fingerprint changed")
+  # cross_cov_model is no longer a batch option (0.6.1.9006); another recorded
+  # option, turning the founder QC off, changes the fingerprint.
+  expect_error(v040_batch(f, cross_cov_model = "zero", output_dir = path, resume = TRUE), "unused argument")
+  expect_error(run_qtl2mr_batch(f$resources, f$pairs, f$instruments, min_samples = 20L, min_founder_copies = NULL,
+    output_dir = path, resume = TRUE, progress = FALSE), "fingerprint changed")
   expect_false(formals(run_qtl2mr_batch)$resume)
   legacy <- tempfile("v040-legacy-")
   dir.create(legacy)

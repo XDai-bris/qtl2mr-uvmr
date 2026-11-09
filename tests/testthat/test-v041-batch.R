@@ -67,8 +67,12 @@ test_that("rounded resource probabilities use audited local copies in cached bat
   f <- v041_batch_fixture()
   r <- f$resources
   rounded <- lapply(r$allele_probs, round, digits = 4L)
+  # The strict policy is no longer an option of qtl2mr_prepare_resources()
+  # (0.6.1.9006); the internal prepared-input builder still refuses rounding.
   expect_error(qtl2mr_prepare_resources(rounded, NULL, r$pheno, r$covar,
-    r$marker_map, probability_policy = "strict"), "sum to 1")
+    r$marker_map, probability_policy = "strict"), "unused argument")
+  expect_error(as_qtl2mr_prepared_input(rounded, r$pheno, r$covar, marker_map = r$marker_map,
+    selected_loci = "m1", exposure = "x", outcome = "y", probability_policy = "strict"), "sum to 1")
   expect_warning(resources <- qtl2mr_prepare_resources(rounded, NULL, r$pheno, r$covar,
     r$marker_map, metadata = list(custom = "preserved")), "rounding")
   original <- resources$allele_probs
@@ -92,8 +96,10 @@ test_that("rounded resource probabilities use audited local copies in cached bat
     G[adjust, ] <- G[adjust, , drop = FALSE] / rowSums(G[adjust, , drop = FALSE])
     normalized[[chr]][, , marker] <- G
   }
-  explicit <- qtl2mr_prepare_resources(normalized, NULL, r$pheno, r$covar,
-    r$marker_map, probability_policy = "strict")
+  # Exactly normalised probabilities need no adjustment: no warning, nothing recorded.
+  expect_no_warning(explicit <- qtl2mr_prepare_resources(normalized, NULL, r$pheno, r$covar,
+    r$marker_map))
+  expect_identical(nrow(explicit$metadata$probability_normalization$adjustments), 0L)
   comparison <- run_qtl2mr_batch(explicit, f$pairs, f$instruments, min_samples = 20L, progress = FALSE)
   expect_equal(batch$main_results$theta, comparison$main_results$theta, tolerance = 1e-10)
   expect_equal(batch$main_results$se, comparison$main_results$se, tolerance = 1e-10)

@@ -25,7 +25,7 @@ test_that("exposure and outcome must be two different named traits", {
   raw$exposure <- c("x", "y")
   expect_error(do.call(as_qtl2mr_prepared_input, raw), "exposure must be one non-empty trait name")
   input <- do.call(as_qtl2mr_prepared_input, v050_input())
-  expect_error(run_qtl2mr_analysis(input, exposure = "y", outcome = "y", output_dir = tempfile(), verbose = FALSE, progress = FALSE),
+  expect_error(run_qtl2mr_analysis(input, exposure = "y", outcome = "y", output_dir = tempfile(), progress = FALSE),
     "must be different traits")
 })
 
@@ -71,8 +71,7 @@ test_that("boundary hsq estimates are flagged and written with the analysis", {
   input <- do.call(as_qtl2mr_prepared_input, raw)
   out <- tempfile("qtl2mr-hsq-")
   result <- run_qtl2mr_analysis(input, output_dir = out, make_figures = FALSE, make_html = TRUE,
-    verbose = FALSE, progress = FALSE, heterogeneity_method = "chisq", diagnostic_bootstrap_B = 0L,
-    run_loo_mr = FALSE, run_instrument_sensitivity = FALSE)
+    progress = FALSE)
   written <- utils::read.csv(file.path(out, "data", "hsq.csv"), stringsAsFactors = FALSE)
   expect_identical(written$role, c("exposure", "outcome"))
   expect_identical(written$hsq_source[[1L]], "user_supplied")
@@ -128,8 +127,7 @@ test_that("confidence_set_bounded reflects every confidence-set type", {
 test_that("summary() gives a compact overview, also for results saved before 0.5.0", {
   input <- do.call(as_qtl2mr_prepared_input, v050_input())
   result <- run_qtl2mr_analysis(input, output_dir = tempfile("qtl2mr-summary-"), make_figures = FALSE,
-    make_html = FALSE, verbose = FALSE, progress = FALSE, heterogeneity_method = "chisq",
-    diagnostic_bootstrap_B = 0L, run_loo_mr = FALSE, run_instrument_sensitivity = FALSE)
+    make_html = FALSE, progress = FALSE)
   overview <- summary(result)
   primary <- qtl2mr_primary_result(result)
   expect_identical(overview$estimate, primary$theta_reported)

@@ -26,11 +26,11 @@ qtl2mr_prepared_example_run <- function(output_dir, overwrite = FALSE, progress 
     outcome = qtl2mr_example$outcome,
     metadata = qtl2mr_example$metadata
   )
+  # The example selects two loci, so the former loci = 2 was both; chi-square Q
+  # and B = 0 are the fixed settings since 0.6.1.9006.
   run_qtl2mr_analysis(
-    prepared, loci = 2, output_dir = output_dir,
-    overwrite = overwrite, make_figures = FALSE, make_html = TRUE, verbose = FALSE,
-    diagnostic_bootstrap_B = 0L, heterogeneity_method = "chisq",
-    run_loo_mr = FALSE, run_instrument_sensitivity = FALSE, progress = progress
+    prepared, output_dir = output_dir,
+    overwrite = overwrite, make_figures = FALSE, make_html = TRUE, progress = progress
   )
 }
 
@@ -518,7 +518,8 @@ test_that("empty destinations, repeated overwrite, symlinks, and high-level repl
   expect_identical(normalizePath(rerun$output_dir), normalizePath(high_level_dir))
 
   logged_dir <- tempfile("qtl2mr-high-level-progress-")
-  logged <- qtl2mr_prepared_example_run(logged_dir, progress = "log")
+  # progress = FALSE is the former log-only mode since 0.6.1.9006.
+  logged <- qtl2mr_prepared_example_run(logged_dir, progress = FALSE)
   progress_log <- file.path(logged$output_dir, "logs", "progress.log")
   expect_true(file.exists(progress_log))
   progress_text <- paste(readLines(progress_log, warn = FALSE), collapse = "\n")
