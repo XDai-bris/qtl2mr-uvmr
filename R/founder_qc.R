@@ -78,8 +78,8 @@ qtl2mr_outcome_founder_qc <- function(input, outcome, rows, threshold) {
 # The same QC for a pair built from resources, as qtl2mr_pair_input() and
 # run_qtl2mr_batch() apply it: the pair input for all instruments, normalised as
 # the fit would normalise it, without signalling anything.
-qtl2mr_pair_founder_qc <- function(resources, rows, exposure, outcome, sample_policy, threshold) {
+qtl2mr_pair_founder_qc <- function(resources, rows, exposure, outcome, threshold) {
   input <- qtl2mr_quietly(qtl2mr_prepared_probability_copy(
-    qtl2mr_pair_prepared(resources, rows, exposure, outcome, sample_policy = sample_policy), rows$marker))
+    qtl2mr_pair_prepared(resources, rows, exposure, outcome), rows$marker))
   qtl2mr_outcome_founder_qc(input, outcome, rows, threshold)
 }

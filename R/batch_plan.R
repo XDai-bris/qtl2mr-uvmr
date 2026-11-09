@@ -11,21 +11,21 @@
 # the first to be released when the budget is reached; within the budget they
 # stay available to later calls in the session.
 
-# Per-pair demand: the two traits, their common sample set under
-# sample_policy = "pair_common_complete" (NULL otherwise), and the instruments.
+# Per-pair demand: the two traits and the instruments. Each trait is fitted on
+# its own complete samples, so a planned unit is keyed by the trait alone
+# (samples = NULL and sig = ""; before 0.6.1.9006 a pair-common sample set could
+# be planned here).
 # With the outcome founder QC (min_founder_copies), the pair's QC result is kept
 # (founder_qc) and the outcome needs only the loci that pass it.
-qtl2mr_batch_plan <- function(resources, todo, instruments, sample_policy, min_founder_copies = NULL) {
+qtl2mr_batch_plan <- function(resources, todo, instruments, min_founder_copies = NULL) {
   lapply(seq_len(nrow(todo)), function(i) {
     pair <- todo[i, , drop = FALSE]
     rows <- instruments[instruments$exposure == pair$exposure, , drop = FALSE]
     tryCatch({
-      samples <- qtl2mr_pair_samples(resources, pair$exposure, pair$outcome, rows, sample_policy)
-      out <- list(traits = c(pair$exposure, pair$outcome), samples = samples,
-        sig = if (is.null(samples)) "" else qtl2mr_fingerprint_object(samples),
+      out <- list(traits = c(pair$exposure, pair$outcome), samples = NULL, sig = "",
         marker = as.character(rows$marker), chr = as.character(rows$chr))
       if (!is.null(min_founder_copies)) {
-        out$founder_qc <- qtl2mr_pair_founder_qc(resources, rows, pair$exposure, pair$outcome, sample_policy,
+        out$founder_qc <- qtl2mr_pair_founder_qc(resources, rows, pair$exposure, pair$outcome,
           min_founder_copies)
       }
       out

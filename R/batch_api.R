@@ -12,9 +12,10 @@ qtl2mr_prepare_resources <- function(allele_probs,
                                      pheno,
                                      covar,
                                      marker_map = NULL,
-                                     metadata = list(),
-                                     probability_policy = c("normalize_rounding", "strict")) {
-  probability_policy <- match.arg(probability_policy)
+                                     metadata = list()) {
+  # Rounding errors in the founder probabilities are normalised, with a warning
+  # and a record (0.6.1.9006: the former probability_policy argument is fixed).
+  probability_policy <- "normalize_rounding"
   if (!is.list(allele_probs) || !length(allele_probs)) {
     stop("allele_probs must be a non-empty qtl2-style list", call. = FALSE)
   }
@@ -170,24 +171,24 @@ qtl2mr_lod_vector_from_scan <- function(qtl_scan, trait) {
   lod
 }
 
-qtl2mr_peak_rules <- c("peakdrop", "spacing", "legacy")
+qtl2mr_peak_rules <- c("peakdrop", "spacing")
 
 # How each peak rule is recorded in the instrument table.
 qtl2mr_peak_rule_record <- function(peak_rule, peakdrop, min_spacing) {
   list(
     selected_by = switch(peak_rule, peakdrop = "lod_peakdrop_max",
-      spacing = "lod_island_max_min_spacing", legacy = "contiguous_lod_island_max"),
+      spacing = "lod_island_max_min_spacing"),
     peakdrop = if (identical(peak_rule, "peakdrop")) peakdrop else NA_real_,
     min_spacing = if (identical(peak_rule, "spacing")) min_spacing else NA_real_,
-    rule_version = if (identical(peak_rule, "legacy")) "legacy" else "tophit_v1"
+    rule_version = "tophit_v1"
   )
 }
 
 # LOD peaks of one trait, found in map order (positions, then map rows; map rows
 # alone when positions are missing) within a chromosome, never across a
-# chromosome boundary. "peakdrop" is the qtl2 peak rule, "spacing" keeps the
-# legacy candidates at least min_spacing apart, and "legacy" is the contiguous
-# LOD-island rule of qtl2mr 0.6.1 and earlier.
+# chromosome boundary. "peakdrop" is the qtl2 peak rule; "spacing" takes the
+# maximum of each contiguous LOD island (the rule of qtl2mr 0.6.1 and earlier)
+# and keeps those candidates at least min_spacing apart.
 qtl2mr_scan_candidates <- function(qtl_scan, marker_map, trait, lod_thresh, exclude_chr,
                                    peak_rule = "peakdrop", peakdrop = 1.5, min_spacing = 1) {
   peak_rule <- match.arg(peak_rule, qtl2mr_peak_rules)
@@ -234,20 +235,6 @@ qtl2mr_resources_input <- function(resources, selected_loci, exposure = NULL, ou
     exposure = exposure, outcome = outcome, exposure_samples = samples, outcome_samples = samples,
     metadata = metadata %||% list(), probability_policy = resources$probability_policy %||% "strict"
   )
-}
-
-qtl2mr_sample_policies <- c("own_complete", "pair_common_complete")
-
-# Samples both traits of a pair are fitted on: NULL for each trait's own
-# complete samples, or the samples complete for both traits, the covariates
-# and every instrument chromosome (as the 0.5.0 batch did).
-qtl2mr_pair_samples <- function(resources, exposure, outcome, rows, sample_policy) {
-  if (identical(sample_policy, "own_complete")) return(NULL)
-  # Unknown or non-numeric traits are reported by input validation.
-  pheno <- resources$pheno
-  if (!all(c(exposure, outcome) %in% names(pheno)) ||
-      !all(vapply(c(exposure, outcome), function(t) is.numeric(pheno[[t]]), logical(1)))) return(NULL)
-  qtl2mr_complete_samples(resources, c(exposure, outcome), rows$chr)
 }
 
 # Exposure founder LMM at each candidate locus, fitted exactly as in the MR stage
@@ -341,15 +328,13 @@ qtl2mr_select_instruments <- function(resources,
                                       qtl_scan,
                                       exposures = NULL,
                                       lod_thresh = 4,
-                                      peak_rule = c("peakdrop", "spacing", "legacy"),
+                                      peak_rule = c("peakdrop", "spacing"),
                                       peakdrop = 1.5,
                                       min_spacing = 1,
                                       exclude_chr = "X",
-                                      max_loci = NULL,
-                                      F_X_min = NULL,
+                                      min_founder_copies = 5,
                                       n_workers = 1L,
-                                      progress = TRUE,
-                                      min_founder_copies = NULL) {
+                                      progress = TRUE) {
   if (!inherits(resources, "qtl2mr_resources")) stop("resources must come from qtl2mr_prepare_resources()", call. = FALSE)
   lod_thresh <- qtl2mr_validate_lod_thresh(lod_thresh)
   min_founder_copies <- qtl2mr_check_min_founder_copies(min_founder_copies)
@@ -362,10 +347,11 @@ qtl2mr_select_instruments <- function(resources,
     warning("marker_map positions exceed 10,000, which looks like base pairs; min_spacing is in ",
       "the units of marker_map positions (Mb for a qtl2 physical map)", call. = FALSE)
   }
-  max_loci <- qtl2mr_check_count(max_loci, "max_loci", allow_null = TRUE)
-  if (!is.null(F_X_min) && (!is.numeric(F_X_min) || length(F_X_min) != 1L || !is.finite(F_X_min) || F_X_min < 0)) {
-    stop("F_X_min must be NULL or one non-negative number", call. = FALSE)
-  }
+  # Selection keeps every estimable peak (0.6.1.9006): F filters are applied
+  # afterwards with subsets, so the former F_X_min and max_loci are fixed off.
+  # The instrument table keeps their columns (NA) so that its format is unchanged.
+  max_loci <- NULL
+  F_X_min <- NULL
   n_workers <- qtl2mr_check_count(n_workers, "n_workers")
   progress <- qtl2mr_check_flag(progress, "progress")
   exclude_chr <- as.character(exclude_chr %||% character())
@@ -512,32 +498,30 @@ qtl2mr_exposure_instruments <- function(instruments, exposure) {
   rows
 }
 
-qtl2mr_pair_prepared <- function(resources, rows, exposure, outcome, metadata = resources$metadata,
-                                 sample_policy = "own_complete") {
+# Each trait of a pair is fitted on its own complete samples (0.6.1.9006: the
+# former sample_policy is fixed to "own_complete"; use qtl2mr_combine_resources()
+# with common_only = TRUE when both traits must share one sample set).
+qtl2mr_pair_prepared <- function(resources, rows, exposure, outcome, metadata = resources$metadata) {
   qtl2mr_resources_input(resources, data.frame(marker = rows$marker, chr = rows$chr, stringsAsFactors = FALSE),
-    exposure = exposure, outcome = outcome, metadata = metadata,
-    samples = qtl2mr_pair_samples(resources, exposure, outcome, rows, sample_policy))
+    exposure = exposure, outcome = outcome, metadata = metadata)
 }
 
-qtl2mr_pair_input <- function(resources, instruments, exposure, outcome,
-                              sample_policy = c("own_complete", "pair_common_complete"),
-                              min_founder_copies = NULL) {
+qtl2mr_pair_input <- function(resources, instruments, exposure, outcome, min_founder_copies = 5) {
   if (!inherits(resources, "qtl2mr_resources")) stop("resources must come from qtl2mr_prepare_resources()", call. = FALSE)
-  sample_policy <- match.arg(sample_policy)
   min_founder_copies <- qtl2mr_check_min_founder_copies(min_founder_copies)
   for (name in c("exposure", "outcome")) {
     if (!qtl2mr_nonempty_string(get(name))) stop(name, " must be one non-empty trait name", call. = FALSE)
   }
   rows <- qtl2mr_exposure_instruments(qtl2mr_normalize_instruments(instruments, resources), exposure)
-  if (is.null(min_founder_copies)) return(qtl2mr_pair_prepared(resources, rows, exposure, outcome, sample_policy = sample_policy))
+  if (is.null(min_founder_copies)) return(qtl2mr_pair_prepared(resources, rows, exposure, outcome))
   # Outcome founder QC, exactly as run_qtl2mr_batch() applies it to this pair.
-  qc <- qtl2mr_pair_founder_qc(resources, rows, exposure, outcome, sample_policy, min_founder_copies)
+  qc <- qtl2mr_pair_founder_qc(resources, rows, exposure, outcome, min_founder_copies)
   if (!any(qc$pass)) {
     stop("too_few_loci: 0 loci remain after the outcome founder QC (min_founder_copies = ", min_founder_copies, ")",
       call. = FALSE)
   }
   qtl2mr_pair_prepared(resources, rows[qc$pass, , drop = FALSE], exposure, outcome,
-    metadata = c(resources$metadata, qtl2mr_founder_qc_metadata(qc, min_founder_copies)), sample_policy = sample_policy)
+    metadata = c(resources$metadata, qtl2mr_founder_qc_metadata(qc, min_founder_copies)))
 }
 
 qtl2mr_founder_qc_metadata <- function(qc, threshold) {
@@ -685,8 +669,7 @@ qtl2mr_batch_probability_table <- function(pair, pilot) {
   cbind(pair_id = pair$pair_id, adjustments, stringsAsFactors = FALSE)
 }
 
-qtl2mr_batch_preflight <- function(resources, pairs, instruments, min_loci, min_samples, fail_fast,
-                                   sample_policy = "own_complete") {
+qtl2mr_batch_preflight <- function(resources, pairs, instruments, min_loci, min_samples, fail_fast) {
   errors <- lapply(seq_len(nrow(pairs)), function(i) {
     pair <- pairs[i, , drop = FALSE]
     tryCatch({
@@ -698,20 +681,12 @@ qtl2mr_batch_preflight <- function(resources, pairs, instruments, min_loci, min_
       probe <- resources
       probe$selected_loci <- rows$marker
       validate_qtl2mr_input(probe, exposure = pair$exposure, outcome = pair$outcome, require_selected_loci = TRUE)
-      if (identical(sample_policy, "pair_common_complete")) {
-        n <- length(qtl2mr_complete_samples(resources, c(pair$exposure, pair$outcome), rows$chr))
-        if (n < min_samples) {
-          stop(sprintf("too_few_samples: %d samples complete for both traits, below min_samples = %d",
-            n, min_samples), call. = FALSE)
-        }
-      } else {
-        n <- vapply(c(pair$exposure, pair$outcome), function(trait) {
-          length(qtl2mr_complete_samples(resources, trait, rows$chr))
-        }, integer(1))
-        if (any(n < min_samples)) {
-          stop(sprintf("too_few_samples: %d complete samples for the exposure and %d for the outcome, below min_samples = %d",
-            n[[1L]], n[[2L]], min_samples), call. = FALSE)
-        }
+      n <- vapply(c(pair$exposure, pair$outcome), function(trait) {
+        length(qtl2mr_complete_samples(resources, trait, rows$chr))
+      }, integer(1))
+      if (any(n < min_samples)) {
+        stop(sprintf("too_few_samples: %d complete samples for the exposure and %d for the outcome, below min_samples = %d",
+          n[[1L]], n[[2L]], min_samples), call. = FALSE)
       }
       rows$marker
     }, error = function(e) {
@@ -1126,7 +1101,7 @@ qtl2mr_batch_append_pair <- function(batch, result) {
 # qtl2mr_pair_input(resources, instruments, exposure, outcome). Errors are
 # returned as error rows; the caller applies fail_fast.
 qtl2mr_batch_fit_pair <- function(resources, pair, instruments, settings, context_cache, fit_cache,
-                                  sample_policy = "own_complete", write_locus_blocks = FALSE,
+                                  write_locus_blocks = FALSE,
                                   min_founder_copies = NULL, founder_qc = NULL, subsets = NULL) {
   t0 <- proc.time()[["elapsed"]]
   qc <- NULL
@@ -1136,7 +1111,7 @@ qtl2mr_batch_fit_pair <- function(resources, pair, instruments, settings, contex
     if (!is.null(min_founder_copies)) {
       # Outcome founder QC first: a dropped locus is not fitted for this pair.
       # The plan's QC result for this pair, or the same computation.
-      qc <- founder_qc %||% qtl2mr_pair_founder_qc(resources, rows, pair$exposure, pair$outcome, sample_policy,
+      qc <- founder_qc %||% qtl2mr_pair_founder_qc(resources, rows, pair$exposure, pair$outcome,
         min_founder_copies)
       rows <- rows[qc$pass, , drop = FALSE]
       if (nrow(rows) < settings$min_loci) {
@@ -1145,8 +1120,7 @@ qtl2mr_batch_fit_pair <- function(resources, pair, instruments, settings, contex
       }
       metadata <- c(metadata, qtl2mr_founder_qc_metadata(qc, min_founder_copies))
     }
-    prepared <- qtl2mr_pair_prepared(resources, rows, pair$exposure, pair$outcome,
-      metadata = metadata, sample_policy = sample_policy)
+    prepared <- qtl2mr_pair_prepared(resources, rows, pair$exposure, pair$outcome, metadata = metadata)
     pilot <- qtl2mr_fit_prepared(prepared, pair$exposure, pair$outcome, settings, verbose = FALSE,
       context_cache = context_cache, fit_cache = fit_cache)
     if (pilot$summary$n_loci[[1L]] < settings$min_loci) {
@@ -1166,7 +1140,7 @@ qtl2mr_batch_fit_pair <- function(resources, pair, instruments, settings, contex
       warnings = warn,
       probability = qtl2mr_batch_probability_table(pair, pilot), error = NULL
     )
-    if (isTRUE(write_locus_blocks)) result$blocks <- qtl2mr_strip_locus_blocks(pair, pilot, sample_policy)
+    if (isTRUE(write_locus_blocks)) result$blocks <- qtl2mr_strip_locus_blocks(pair, pilot)
     if (!is.null(qc)) {
       result$main$n_loci_dropped_founder_qc <- sum(!qc$pass)
       result$loci <- qtl2mr_founder_qc_locus_rows(pair, qc, result$loci)
@@ -1193,7 +1167,7 @@ qtl2mr_batch_fit_pair <- function(resources, pair, instruments, settings, contex
 # fit_multilocus_founder_mr() needs to refit the pair, the first-stage and
 # Steiger statistics of the locus table, fit sizes and hsq. fit_x and fit_y
 # keep df, n and hsq only, as read by qtl2mr_locus_first_stage().
-qtl2mr_strip_locus_blocks <- function(pair, pilot, sample_policy) {
+qtl2mr_strip_locus_blocks <- function(pair, pilot) {
   blocks <- pilot$locus_blocks
   first <- pilot$locus_first_stage %||% qtl2mr_locus_first_stage(blocks)
   selected <- pilot$selected_loci %||% data.frame(marker = character())
@@ -1218,7 +1192,9 @@ qtl2mr_strip_locus_blocks <- function(pair, pilot, sample_policy) {
   })
   names(out) <- names(blocks)
   attr(out, "qtl2mr_locus_blocks") <- list(schema = "qtl2mr-locus-blocks-v1", pair_id = pair$pair_id,
-    exposure = pair$exposure, outcome = pair$outcome, sample_policy = sample_policy,
+    # sample_policy is always "own_complete" since 0.6.1.9006; it stays in the
+    # schema so that block files written by earlier versions read the same.
+    exposure = pair$exposure, outcome = pair$outcome, sample_policy = "own_complete",
     cross_cov_model = pilot$summary$cross_cov_model[[1L]],
     standardize_phenotypes = pilot$summary$standardize_phenotypes[[1L]], ridge = 1e-10)
   out
@@ -1316,27 +1292,17 @@ qtl2mr_batch_finalize <- function(batch, pairs) {
 run_qtl2mr_batch <- function(resources,
                              pairs,
                              instruments,
-                             on_nonestimable_locus = c("fail", "drop"),
-                             reported_estimator_policy = c("diagnostic_only", "strict_so", "auto_fallback"),
-                             heterogeneity_method = c("chisq", "simulation", "auto", "none"),
-                             heterogeneity_nsim = 1000L,
-                             heterogeneity_seed = 1L,
-                             diagnostic_bootstrap_B = 0L,
-                             diagnostic_bootstrap_seed = 1L,
-                             standardize_phenotypes = TRUE,
-                             cross_cov_model = c("star", "raw", "zero"),
                              min_samples = 50L,
                              min_loci = 1L,
+                             min_founder_copies = 5,
+                             subsets = NULL,
                              n_workers = 1L,
                              fail_fast = FALSE,
                              resume = FALSE,
                              overwrite = FALSE,
                              output_dir = NULL,
                              progress = TRUE,
-                             write_locus_blocks = FALSE,
-                             sample_policy = c("own_complete", "pair_common_complete"),
-                             min_founder_copies = NULL,
-                             subsets = NULL) {
+                             write_locus_blocks = FALSE) {
   if (!inherits(resources, "qtl2mr_resources")) stop("resources must come from qtl2mr_prepare_resources()", call. = FALSE)
   if (missing(instruments)) {
     stop("instruments is required; select them with qtl2mr_select_instruments() or supply a table with exposure and marker columns", call. = FALSE)
@@ -1347,25 +1313,18 @@ run_qtl2mr_batch <- function(resources,
   progress <- qtl2mr_check_flag(progress, "progress")
   n_workers <- qtl2mr_check_count(n_workers, "n_workers")
   write_locus_blocks <- qtl2mr_check_flag(write_locus_blocks, "write_locus_blocks")
-  sample_policy <- match.arg(sample_policy)
   min_founder_copies <- qtl2mr_check_min_founder_copies(min_founder_copies)
   subsets <- qtl2mr_check_subsets(subsets)
   if (write_locus_blocks && is.null(output_dir)) stop("write_locus_blocks = TRUE requires output_dir", call. = FALSE)
-  settings <- qtl2mr_fit_settings(
-    on_nonestimable_locus = match.arg(on_nonestimable_locus),
-    reported_estimator_policy = match.arg(reported_estimator_policy),
-    heterogeneity_method = match.arg(heterogeneity_method),
-    heterogeneity_nsim = heterogeneity_nsim, heterogeneity_seed = heterogeneity_seed,
-    diagnostic_bootstrap_B = diagnostic_bootstrap_B, diagnostic_bootstrap_seed = diagnostic_bootstrap_seed,
-    standardize_phenotypes = standardize_phenotypes, cross_cov_model = match.arg(cross_cov_model)
-  )
+  # The fit settings are fixed (0.6.1.9006); they are still recorded in
+  # batch_config.json and the result tables, so the output format is unchanged.
+  settings <- qtl2mr_fixed_fit_settings()
   settings$min_samples <- qtl2mr_check_count(min_samples, "min_samples")
   settings$min_loci <- qtl2mr_check_count(min_loci, "min_loci")
   pairs <- qtl2mr_normalize_pairs(pairs)
   instruments <- qtl2mr_normalize_instruments(instruments, resources)
   config <- settings
   # Options that change outputs are recorded, and fingerprinted, only when used.
-  if (!identical(sample_policy, "own_complete")) config$sample_policy <- sample_policy
   if (write_locus_blocks) config$write_locus_blocks <- TRUE
   if (!is.null(min_founder_copies)) config$min_founder_copies <- min_founder_copies
   if (!is.null(subsets)) config$subsets <- subsets
@@ -1374,7 +1333,7 @@ run_qtl2mr_batch <- function(resources,
   # anything in output_dir is written or removed.
   qtl2mr_check_batch_destination(output_dir, resume, overwrite)
   preflight <- qtl2mr_batch_preflight(resources, pairs, instruments, settings$min_loci,
-    settings$min_samples, fail_fast, sample_policy = sample_policy)
+    settings$min_samples, fail_fast)
   valid <- preflight$valid
   batch <- qtl2mr_empty_batch(resources, valid, instruments, c(config, list(
     batch_traits = unique(c(valid$exposure, valid$outcome)), created_at = as.character(Sys.time()))))
@@ -1397,7 +1356,7 @@ run_qtl2mr_batch <- function(resources,
   fit_one <- function(i, context_cache, fit_cache) {
     pair <- todo[i, , drop = FALSE]
     result <- qtl2mr_batch_fit_pair(resources, pair, instruments, settings, context_cache, fit_cache,
-      sample_policy = sample_policy, write_locus_blocks = write_locus_blocks, min_founder_copies = min_founder_copies,
+      write_locus_blocks = write_locus_blocks, min_founder_copies = min_founder_copies,
       founder_qc = plan[[i]]$founder_qc, subsets = subsets)
     if (!is.null(output_dir) && is.null(result$error)) {
       qtl2mr_write_pair_record(output_dir, pair_index[[i]], pair$pair_id, fingerprint, result)
@@ -1414,7 +1373,7 @@ run_qtl2mr_batch <- function(resources,
   # groups per wave, so that every wave forks its groups as before), consecutive
   # pairs otherwise. Each wave's trait fits are computed first (in parallel by
   # trait when n_workers > 1), then its pairs are fitted as before.
-  plan <- qtl2mr_batch_plan(resources, todo, instruments, sample_policy, min_founder_copies)
+  plan <- qtl2mr_batch_plan(resources, todo, instruments, min_founder_copies)
   waves <- qtl2mr_batch_waves(plan, if (use_fork) unname(groups) else as.list(seq_len(nrow(todo))),
     0.5 * qtl2mr_cache_budget(), qtl2mr_batch_entry_sizes(resources),
     min_units = if (use_fork) max(2L, n_workers) else 1L)

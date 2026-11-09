@@ -1,9 +1,9 @@
 # Main workflows and inputs
 export(run_qtl2mr_analysis)
 export(run_qtl2mr_batch)
-export(as_qtl2mr_prepared_input)
 export(validate_qtl2mr_input)
 export(qtl2mr_prepare_resources)
+export(qtl2mr_combine_resources)
 export(qtl2mr_select_instruments)
 export(qtl2mr_instrument_summary)
 export(qtl2mr_pair_input)
@@ -15,6 +15,7 @@ export(qtl2mr_method_comparison)
 export(export_qtl2mr_lite_result)
 export(report_qtl2mr_locus)
 # Follow-up analyses on a result
+export(qtl2mr_diagnostics)
 export(refit_qtl2mr_subset)
 export(fit_instrument_set_sensitivity)
 export(validate_qtl2_scan1coef)

@@ -1772,49 +1772,39 @@ run_qtl2mr_analysis <- function(input,
                                 exposure = NULL,
                                 outcome = NULL,
                                 output_dir = NULL,
-                                loci = NULL,
                                 overwrite = FALSE,
                                 make_html = TRUE,
                                 make_figures = TRUE,
-                                verbose = TRUE,
-                                on_nonestimable_locus = c("fail", "drop"),
-                                reported_estimator_policy = c("diagnostic_only", "strict_so", "auto_fallback"),
-                                heterogeneity_method = c("auto", "simulation", "chisq", "none"),
-                                heterogeneity_nsim = 1000L,
-                                heterogeneity_seed = 1L,
-                                diagnostic_bootstrap_B = 500L,
-                                diagnostic_bootstrap_seed = 1L,
-                                standardize_phenotypes = TRUE,
-                                cross_cov_model = c("star", "raw", "zero"),
-                                run_loo_mr = TRUE,
-                                run_instrument_sensitivity = TRUE,
-                                progress = NULL,
+                                progress = TRUE,
                                 n_workers = 1L,
                                 subsets = NULL) {
   if (!inherits(input, "qtl2mr_prepared_input")) {
-    stop("input must be created by as_qtl2mr_prepared_input() or qtl2mr_pair_input()", call. = FALSE)
+    stop("input must be created by qtl2mr_pair_input()", call. = FALSE)
   }
+  progress <- qtl2mr_check_flag(progress, "progress")
+  # progress = TRUE prints the stages and the final summary; logs/progress.log
+  # is written either way.
+  verbose <- progress
+  progress <- if (progress) TRUE else "log"
+  # Statistical settings are fixed (0.6.1.9006), as in run_qtl2mr_batch(); the
+  # leave-one-locus-out and instrument-set sensitivity analyses always run here.
+  # qtl2mr_diagnostics() adds the simulated Q p-value and bootstrap SEs.
+  loci <- NULL
+  run_loo_mr <- TRUE
+  run_instrument_sensitivity <- TRUE
   n_workers <- qtl2mr_check_count(n_workers, "n_workers")
   subsets <- qtl2mr_check_subsets(subsets)
   # Refits of the Q simulation, bootstrap, LOO and instrument-set sensitivity
   # may run in forked workers; random numbers are drawn in this process.
   old_workers <- qtl2mr_set_workers(n_workers)
   on.exit(qtl2mr_set_workers(old_workers), add = TRUE)
-  settings <- qtl2mr_fit_settings(
-    on_nonestimable_locus = match.arg(on_nonestimable_locus),
-    reported_estimator_policy = match.arg(reported_estimator_policy),
-    heterogeneity_method = match.arg(heterogeneity_method),
-    heterogeneity_nsim = heterogeneity_nsim, heterogeneity_seed = heterogeneity_seed,
-    diagnostic_bootstrap_B = diagnostic_bootstrap_B, diagnostic_bootstrap_seed = diagnostic_bootstrap_seed,
-    standardize_phenotypes = standardize_phenotypes, cross_cov_model = match.arg(cross_cov_model)
-  )
+  settings <- qtl2mr_fixed_fit_settings()
   exposure <- exposure %||% input$exposure
   outcome <- outcome %||% input$outcome
   if (is.null(exposure) || is.null(outcome)) {
     stop(
-      "run_qtl2mr_analysis() requires exposure and outcome trait names. ",
-      "Prepared inputs can store these names via as_qtl2mr_prepared_input(); ",
-      "otherwise pass exposure and outcome explicitly.",
+      "run_qtl2mr_analysis() requires exposure and outcome trait names; ",
+      "inputs from qtl2mr_pair_input() store them, otherwise pass them explicitly.",
       call. = FALSE
     )
   }

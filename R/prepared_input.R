@@ -1162,6 +1162,22 @@ qtl2mr_fit_settings <- function(on_nonestimable_locus,
   )
 }
 
+# The settings every pair is fitted with since 0.6.1.9006, in run_qtl2mr_analysis()
+# and run_qtl2mr_batch() alike: nonestimable loci fail the pair, the Global SO
+# estimate is reported, Q is referred to chi-square, the weighted median and mode
+# are point estimates (qtl2mr_diagnostics() gives the simulated Q p-value and
+# their bootstrap SEs), the cross-covariance is the star model and phenotypes are
+# standardised. They equal the 0.6.1.9005 batch defaults, so batch results are
+# unchanged; they are recorded in batch_config.json and the result tables.
+qtl2mr_fixed_fit_settings <- function() {
+  qtl2mr_fit_settings(
+    on_nonestimable_locus = "fail", reported_estimator_policy = "diagnostic_only",
+    heterogeneity_method = "chisq", heterogeneity_nsim = 1000L, heterogeneity_seed = 1L,
+    diagnostic_bootstrap_B = 0L, diagnostic_bootstrap_seed = 1L,
+    standardize_phenotypes = TRUE, cross_cov_model = "star"
+  )
+}
+
 qtl2mr_fit_prepared <- function(input, exposure, outcome, settings, loci = NULL, verbose = FALSE,
                                 output_dir = NULL, write_outputs = FALSE, progress_callback = NULL,
                                 context_cache = NULL, fit_cache = NULL) {
