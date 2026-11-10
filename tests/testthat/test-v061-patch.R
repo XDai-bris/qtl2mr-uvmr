@@ -108,13 +108,15 @@ test_that("raw-unit results do not depend on a constant offset of the traits", {
   base <- fit(0, 0)
   # 0.6.1 stopped with "hsq profile likelihood is not finite" from an offset of about 1e8 SD.
   # Such an offset uses about half of the double-precision digits, so the results
-  # agree to about four significant digits rather than to the optimiser's precision.
+  # agree to about three significant digits rather than to the optimiser's
+  # precision, and the last digits depend on the hardware (relative differences
+  # from 2e-4 locally to 1.3e-3 on a CI runner were seen); hence 1e-2.
   for (s in list(c(1e8, 0), c(0, 1e8), c(5e7, 5e7, 1e-6), c(1e8, 1e8, 1e4))) {
     r <- fit(s[[1L]], s[[2L]], if (length(s) > 2L) s[[3L]] else 1)
     info <- paste(s, collapse = "/")
-    expect_equal(r$hsq$hsq, base$hsq$hsq, tolerance = 1e-3, info = info)
-    expect_equal(r$summary$theta, base$summary$theta, tolerance = 1e-3, info = info)
-    expect_equal(r$locus_first_stage$F_X_block, base$locus_first_stage$F_X_block, tolerance = 1e-3, info = info)
+    expect_equal(r$hsq$hsq, base$hsq$hsq, tolerance = 1e-2, info = info)
+    expect_equal(r$summary$theta, base$summary$theta, tolerance = 1e-2, info = info)
+    expect_equal(r$locus_first_stage$F_X_block, base$locus_first_stage$F_X_block, tolerance = 1e-2, info = info)
   }
 
   K <- f$kinship[["1"]]
@@ -122,7 +124,7 @@ test_that("raw-unit results do not depend on a constant offset of the traits", {
   h <- as.numeric(qtl2mr_estimate_lmm_hsq(y, K, reml = TRUE))
   for (shift in c(1e7, 5e7, 1e8)) {
     expect_equal(as.numeric(qtl2mr_estimate_lmm_hsq(y + shift * stats::sd(y), K, reml = TRUE)), h,
-      tolerance = 1e-3, info = format(shift))
+      tolerance = 1e-2, info = format(shift))
   }
   # A trait that is constant to rounding error is still refused (optimize() warns
   # about the infinite objective on the way).

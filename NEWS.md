@@ -1,3 +1,10 @@
+# qtl2mr 0.7.0.9000 (development)
+
+- Test only: the QB-1 offset regression test (a constant offset of 10^8
+  standard deviations) compares with a relative tolerance of 1e-2 instead of
+  1e-3. At such an offset the last digits depend on the hardware; one CI
+  runner differed by 1.3e-3. Package code and results are unchanged from 0.7.0.
+
 # qtl2mr 0.7.0
 
 Changes since 0.6.1. Instrument selection follows the qtl2 peak rule, a
