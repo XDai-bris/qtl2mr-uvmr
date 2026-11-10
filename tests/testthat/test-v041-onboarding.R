@@ -121,17 +121,17 @@ test_that("README and vignette code pass only arguments the 0.6.1.9006 entries h
   text <- paste(source, collapse = "\n")
   expect_match(text, "**Current release:** [v0.7.0]", fixed = TRUE)
   expect_match(text, "releases/tag/v0.7.0", fixed = TRUE)
-  expect_match(text, "exposure and the outcome on their own complete", fixed = TRUE)
-  # Retired names may appear only in the change and upgrade sections.
-  current <- sub("## (Changes since|Upgrading from) .*", "", text)
+  expect_match(text, "each trait uses its own complete samples", fixed = TRUE)
+  # Retired names stay out of the README (the migration tables are in NEWS.md).
+  current <- text
   for (retired in c("run_qtl2mr_batch_fast", "sample_policy", "instrument_rule", "qtl_scan =", "select_loci")) {
     expect_false(grepl(retired, current, fixed = TRUE), info = retired)
   }
 })
 
 test_that("the historical extractor fails clearly without its undistributed input", {
-  path <- test_path("..", "..", "data-raw", "make_qtl2mr_multilocus_example.R")
-  if (!file.exists(path)) skip("data-raw is intentionally excluded from the package")
+  path <- test_path("..", "..", "data-generator", "make_qtl2mr_multilocus_example.R")
+  if (!file.exists(path)) skip("data-generator is intentionally excluded from the package")
   env <- new.env(parent = globalenv())
   sys.source(path, envir = env)
   output <- tempfile(fileext = ".rda")

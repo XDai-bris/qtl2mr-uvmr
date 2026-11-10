@@ -4,14 +4,16 @@
   standard deviations) compares with a relative tolerance of 1e-2 instead of
   1e-3. At such an offset the last digits depend on the hardware; one CI
   runner differed by 1.3e-3. Package code and results are unchanged from 0.7.0.
+- Documentation: a shorter README (the migration tables moved to this file);
+  `data-raw/` is renamed `data-generator/`.
 
 # qtl2mr 0.7.0
 
 Changes since 0.6.1. Instrument selection follows the qtl2 peak rule, a
 founder-design QC is on by default, instrument subsets can be refitted in one
 run, the main functions keep one setting for each statistical choice, and two
-helpers are added. Batches are faster. See "Changes since 0.6.1" in the README
-for a migration table.
+helpers are added. Batches are faster. The table under "Migration from 0.6.1"
+below lists what replaces each removed option.
 
 ## Default changes when upgrading from 0.6.1
 
@@ -25,6 +27,22 @@ for a migration table.
   and mode are point estimates without a bootstrap. This changes neither the
   reported estimate nor its interval; `qtl2mr_diagnostics()` gives the
   simulated Q p-value and the bootstrap standard errors.
+
+## Migration from 0.6.1
+
+| 0.6.1 | 0.7.0 |
+|---|---|
+| `as_qtl2mr_prepared_input(allele_probs, pheno, covar, kinship, marker_map, selected_loci, exposure, outcome)` | `qtl2mr_prepare_resources(allele_probs, kinship, pheno, covar, marker_map)`, then `qtl2mr_pair_input(resources, data.frame(exposure = exposure, marker = selected_loci), exposure, outcome)`. The function is no longer exported |
+| `hsq =` in `as_qtl2mr_prepared_input()` | removed; hsq is always estimated by the package's REML |
+| `sample_policy = "pair_common_complete"` | `qtl2mr_combine_resources(..., common_only = TRUE)`, or subset the inputs; otherwise each trait uses its own complete samples (the former default) |
+| `F_X_min`, `max_loci` in `qtl2mr_select_instruments()` | `subsets = list(F2 = list(F_X_min = 2))` in `run_qtl2mr_analysis()` or `run_qtl2mr_batch()`, or edit the instrument table. The table keeps the two columns, always `NA` |
+| `peak_rule = "legacy"` | `peak_rule = "spacing"`, which starts from the same island maxima; qtl2mr 0.6.1 reproduces the old selection exactly |
+| `loci =` in `run_qtl2mr_analysis()` | edit the instrument table, or use `subsets` |
+| `heterogeneity_method = "simulation"`, `heterogeneity_nsim`, `heterogeneity_seed`, `diagnostic_bootstrap_B`, `diagnostic_bootstrap_seed` | `qtl2mr_diagnostics(result, nsim, seed)` after the run |
+| `verbose` (with `progress`) | `progress` alone |
+| `on_nonestimable_locus`, `reported_estimator_policy`, `cross_cov_model`, `standardize_phenotypes`, `run_loo_mr`, `run_instrument_sensitivity` | fixed: a non-estimable locus fails the pair; the second-order estimate is reported only when bounded; star-space covariance; standardised phenotypes, with the `_raw_units` columns for original units; leave-one-out and sensitivity always run in a single analysis and never in a batch |
+| `probability_policy` in `qtl2mr_prepare_resources()` | fixed: rounding errors are normalised with a warning and a record |
+| no founder QC | `min_founder_copies = 5` by default; `NULL` turns the QC off |
 
 ## Instrument selection
 
@@ -221,6 +239,20 @@ pairs whose exposure and outcome have different missing samples (see below).
   exposure; use `qtl2mr_pair_input()` for such tables.
 
 ## Breaking changes and migration
+
+| 0.5.x | 0.6.0 |
+|---|---|
+| `qtl2mr_prepare_resources(probs, K, pheno, covar, qtl_scan = scan, marker_map = map)` | `qtl2mr_prepare_resources(probs, K, pheno, covar, marker_map = map)`; the scan goes to `qtl2mr_select_instruments()` |
+| `qtl2mr_select_loci_from_scan(scan, map, "x", lod_thresh = 4)` | `qtl2mr_select_instruments(resources, scan, exposures = "x", lod_thresh = 4)` |
+| `run_qtl2mr_batch(r, p, instrument_rule = list(lod_thresh = 4))` | `run_qtl2mr_batch(r, p, qtl2mr_select_instruments(r, scan, exposures = unique(p$exposure), lod_thresh = 4))`; without `exposures` every trait in the scan is used |
+| pair columns `instrument_trait`, `lod_thresh`, `exclude_chr`, `max_loci`, `selected_loci_file` | one instrument set per exposure in the `instruments` table; these columns are now an error |
+| `sample_policy`, `min_sample_retention` | removed: every pair uses role-specific samples, as in `run_qtl2mr_analysis()` |
+| `run_qtl2mr_batch(..., fit_options = list(...), force = TRUE)` | top-level arguments and `overwrite = TRUE`; `fit_options$q_sim_n`/`q_sim_seed` became `heterogeneity_nsim`/`heterogeneity_seed` (removed in 0.7.0); `engine`, `cache_contexts`, `cache_lmm_fits` and `verbose` are internal (low-level `fit_multilocus_founder_mr()` keeps `q_sim_n`) |
+| `run_qtl2mr_analysis(..., standardize_phenotypes = , cross_cov_model = )` through `...` | named arguments in 0.6.0 (both removed in 0.7.0, with `verbose`); `...` is gone, and `ridge`, `engine` and the caches are internal. Pass arguments by name |
+| `batch$selected_loci`, `batch$first_stage_summary`, `batch$sample_qc` (and their CSV files) | `batch$locus_results` (`batch_locus_results.csv`); per-trait `batch$sample_exclusions` |
+| batch `main_results` columns `instrument_trait`, `lod_thresh`, `exclude_chr` | removed; the instruments table records the selection |
+| `theta_so`, `se_so`, `ci_lower_so`, `ci_upper_so`, `sample_policy` columns | `theta`, `se`, `profile_ci_lower`, `profile_ci_upper`; no sample-policy column |
+| `fit_instrument_set_sensitivity()` default `weak_f_threshold = 10`, set `exclude_F_lt_10` | default 2, set `exclude_F_lt_2`; pass `weak_f_threshold = 10` for the old set |
 
 - Removed without deprecation: `qtl2mr_select_loci_from_scan()`,
   `qtl2mr_select_loci_for_traits()`, the `qtl_scan` argument of

@@ -169,7 +169,7 @@ For the data fields and construction notes, see
 ## About the example data
 
 The installed fixture is sufficient to rerun this analysis, not to regenerate
-the upstream simulation. The public `data-raw/make_qtl2mr_multilocus_example.R`
+the upstream simulation. The public `data-generator/make_qtl2mr_multilocus_example.R`
 is an extractor: it needs a separately frozen synthetic input, identified by
 hash, that is not distributed here. Its recorded master seed alone is not a
 generator. Omitted traits and background loci contributed to the stored

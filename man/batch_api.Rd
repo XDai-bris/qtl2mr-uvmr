@@ -156,8 +156,8 @@ correlated founder haplotypes.
 For every LOD candidate that passes the founder QC, it fits the exposure
 founder LMM with the same samples, covariates, LOCO kinship and null-model hsq
 as the MR analysis and records the block F, \code{F_X_block}: the joint Wald
-statistic of the seven founder contrasts divided by 7 (see the README for its
-scale). It equals the block F of every pair using that exposure. A scan without
+statistic of the seven founder contrasts divided by 7 (see
+\code{vignette("from-qtl2", package = "qtl2mr")} for its scale). It equals the block F of every pair using that exposure. A scan without
 trait names (a plain LOD vector or an unnamed column) can only be used for one
 exposure. A candidate is not selected, in this order, when it is not autosomal
 (\code{drop_reason = "non_autosomal"}), when it fails the founder QC

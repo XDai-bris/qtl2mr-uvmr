@@ -1,6 +1,6 @@
 # Extract the frozen, wholly synthetic Case A X1-to-Y teaching input.
 # No phenotype generation, resampling, locus search or parameter tuning occurs.
-# Usage: Rscript data-raw/make_qtl2mr_multilocus_example.R INPUT.rds OUTPUT.rda
+# Usage: Rscript data-generator/make_qtl2mr_multilocus_example.R INPUT.rds OUTPUT.rda
 #
 # Source: CTC tutorial construction, 2026-10-15, v0.4 background-QTL Case A.
 # Upstream generation used master-seed provenance 2026101501: synthetic probabilities

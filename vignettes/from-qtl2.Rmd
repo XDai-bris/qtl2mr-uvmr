@@ -169,11 +169,20 @@ the exposure (`F_X_block`, fitted with the same samples, covariates and kinship
 as the MR analysis) and whether it was selected. Every estimable peak is
 selected; there is no F filter. To see the fit on the stronger loci only, add
 `subsets = list(F2 = list(F_X_min = 2))` to `run_qtl2mr_analysis()` or
-`run_qtl2mr_batch()`. When the scan used the same samples and kinship, LOD 4
-corresponds to F of about 2.6, so such a subset rarely removes a locus near the
-threshold (see the README section on instrument strength). Already have a
-list of instruments? Pass `data.frame(exposure = "x", marker = my_markers)` to
-`qtl2mr_pair_input()` and omit `scan1()`.
+`run_qtl2mr_batch()`. Already have a list of instruments? Pass
+`data.frame(exposure = "x", marker = my_markers)` to `qtl2mr_pair_input()` and
+omit `scan1()`.
+
+**Instrument strength.** `F_X_block` is the joint Wald statistic of a locus's
+seven founder contrasts on the exposure divided by 7. Without an effect, 7·F is
+about chi-square with 7 degrees of freedom, so F = 2 is roughly nominal
+p = 0.05: a minimal signal, not a strong instrument. With the same samples,
+covariates and kinship as the scan, F ≈ 0.66·LOD, so LOD 4 corresponds to F of
+about 2.6 and an F ≥ 2 subset rarely removes a locus. The F > 10 rule of
+single-instrument linear IV was not derived for a seven-degree-of-freedom
+block and is not calibrated here. Weak blocks can make profile intervals too
+narrow; F and the LOD threshold reduce that risk but do not guarantee
+coverage.
 
 The founder QC is on by default (`min_founder_copies = 5`). For each locus it
 computes the expected number of copies of the rarest founder allele in the
